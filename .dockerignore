@@ -1,0 +1,55 @@
+# Ignore Python cache & bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore virtual environments
+.venv/
+venv/
+env/
+
+# Ignore build artifacts
+build/
+dist/
+*.egg-info/
+
+# Ignore test artifacts
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Ignore logs & temp files
+*.log
+logs/
+*.tmp
+*.swp
+
+# Ignore version control
+.git/
+.gitignore
+.gitattributes
+
+# Ignore OS-specific files
+.DS_Store
+Thumbs.db
+
+# Ignore IDE/editor files
+.vscode/
+.idea/
+*.iml
+
+# Ignore Docker stuff that shouldn't go into the image
+docker-compose*.yml
+.dockerignore
+
+# Ignore data that shouldn't go into image
+data/
+notebooks/
+*.csv
+*.json
+*.npz
+*.npy
+
+# Ignore docs (unless you want them in image)
+docs/

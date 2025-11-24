@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # --------------------------------------------------------------------------
+  # LINT (Ruff)
+  # --------------------------------------------------------------------------
+  lint:
+    name: Lint (Ruff)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@v1
+        with:
+          version: latest
+
+      - name: Sync dependencies
+        run: make init
+
+      - name: Run Ruff
+        run: make lint
+
+  # --------------------------------------------------------------------------
+  # TYPE CHECK (Mypy)
+  # --------------------------------------------------------------------------
+  typecheck:
+    name: Type Check (Mypy)
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@v1
+        with:
+          version: latest
+
+      - name: Sync dependencies
+        run: make init
+
+      - name: Run Mypy
+        run: make typecheck
+
+  # --------------------------------------------------------------------------
+  # TESTS (Pytest + Coverage)
+  # --------------------------------------------------------------------------
+  test:
+    name: Test & Coverage (Pytest)
+    runs-on: ubuntu-latest
+    needs: typecheck
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@v1
+        with:
+          version: latest
+
+      - name: Set Python version
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Sync dependencies
+        run: make init
+
+      - name: Run Pytest
+        run: make test
+
+      - name: Upload coverage XML artifact
+        if: ${{ matrix.python-version == '3.12' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+
+  # --------------------------------------------------------------------------
+  # COVERALLS (upload coverage)
+  # --------------------------------------------------------------------------
+  coveralls:
+    name: Coverage Upload (Coveralls)
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download coverage artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-xml
+          path: .
+
+      - name: Upload to Coveralls
+        uses: coverallsapp/github-action@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path-to-lcov: ./coverage.xml

@@ -1,0 +1,119 @@
+name: Docker Build & Publish
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.rst"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }} # may include uppercase (we'll normalize)
+  # Flip this to "true" if you want multi-arch on all branches
+  MULTIARCH_ON_BRANCHES: "false"
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    env:
+      IS_MAIN: ${{ github.ref == 'refs/heads/main' }}
+      IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Only set up QEMU when we actually need arm64 (main or tag builds)
+      - name: Set up QEMU (for arm64)
+        if: env.IS_MAIN == 'true' || env.IS_TAG == 'true' || env.MULTIARCH_ON_BRANCHES == 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Normalize image name to lowercase
+        id: repo
+        run: |
+          echo "image_name_lc=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Derive tags
+        id: meta
+        run: |
+          REF="${GITHUB_REF#refs/}"
+          SHA_TAG=${GITHUB_SHA::12}
+          echo "sha_tag=${SHA_TAG}" >> "$GITHUB_OUTPUT"
+          if [[ "$REF" == tags/v* ]]; then
+            V="${REF#tags/v}"
+            echo "version_tag=${V}" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ "$REF" == heads/main ]]; then
+            echo "latest_tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Fast path for branches: single-arch build, cache, don't push
+      - name: Build (branch) — fast single-arch, no push
+        if: env.IS_MAIN != 'true' && env.IS_TAG != 'true' && env.MULTIARCH_ON_BRANCHES != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true                 # so we can run the smoke test
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.repo.outputs.image_name_lc }}:${{ steps.meta.outputs.sha_tag }}
+
+      # Publish path for main/tags: multi-arch build + push (with cache)
+      - name: Build & push (multi-arch)
+        if: env.IS_MAIN == 'true' || env.IS_TAG == 'true' || env.MULTIARCH_ON_BRANCHES == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.repo.outputs.image_name_lc }}:${{ steps.meta.outputs.sha_tag }}
+            ${{ steps.meta.outputs.version_tag && format('{0}/{1}:{2}', env.REGISTRY, steps.repo.outputs.image_name_lc, steps.meta.outputs.version_tag) || '' }}
+            ${{ steps.meta.outputs.latest_tag && format('{0}/{1}:{2}', env.REGISTRY, steps.repo.outputs.image_name_lc, steps.meta.outputs.latest_tag) || '' }}
+
+      # Smoke test: use the local image for branch builds, or pull the pushed one for main/tags
+      - name: Smoke test (branch image)
+        if: env.IS_MAIN != 'true' && env.IS_TAG != 'true' && env.MULTIARCH_ON_BRANCHES != 'true'
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ steps.repo.outputs.image_name_lc }}:${{ steps.meta.outputs.sha_tag }}"
+          echo "Smoke testing local image ${IMAGE}"
+          docker run --rm "$IMAGE" python -c "import change_me, sys; print('✅ import ok:', getattr(change_me,'__version__','?'), 'on', sys.version)"
+
+      - name: Smoke test (pushed image)
+        if: env.IS_MAIN == 'true' || env.IS_TAG == 'true' || env.MULTIARCH_ON_BRANCHES == 'true'
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ steps.repo.outputs.image_name_lc }}:${{ steps.meta.outputs.sha_tag }}"
+          echo "Smoke testing pushed image ${IMAGE}"
+          docker pull "$IMAGE"
+          docker run --rm "$IMAGE" python -c "import change_me, sys; print('✅ import ok:', getattr(change_me,'__version__','?'), 'on', sys.version)"
