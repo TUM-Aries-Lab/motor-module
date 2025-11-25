@@ -39,8 +39,8 @@ deep-update:
 	uv update --all-groups
 
 docker:
-	docker build --no-cache -f Dockerfile -t change_me-smoke .
-	docker run --rm change_me-smoke
+	docker build --no-cache -f Dockerfile -t motor_python-smoke .
+	docker run --rm motor_python-smoke
 
 app:
-	uv run python -m change_me
+	uv run python -m motor_python

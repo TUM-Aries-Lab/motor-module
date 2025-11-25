@@ -4,8 +4,8 @@ import argparse
 
 from loguru import logger
 
-from change_me.config.definitions import DEFAULT_LOG_LEVEL, LogLevel
-from change_me.utils import setup_logger
+from motor_python.config.definitions import DEFAULT_LOG_LEVEL, LogLevel
+from motor_python.utils import setup_logger
 
 
 def main(
