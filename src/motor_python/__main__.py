@@ -19,7 +19,7 @@ def main(
     """
     setup_logger(log_level=log_level, stderr_level=stderr_level)
     logger.info("Hello, world!")
-    
+    logger.debug("This is a debug message.")
 
 
 if __name__ == "__main__":  # pragma: no cover
