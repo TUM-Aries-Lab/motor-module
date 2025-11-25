@@ -21,6 +21,7 @@ def main(
     logger.info("Hello, world!")
     logger.debug("This is Hannes")
 
+
 if __name__ == "__main__":  # pragma: no cover
     parser = argparse.ArgumentParser("Run the pipeline.")
     parser.add_argument(
