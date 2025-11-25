@@ -10,13 +10,13 @@ Do ***NOT*** clone this repository. Please use it as a template instead. This re
 To install the library run:
 
 ```bash
-uv install <your-package-name>
+uv install <mtor_python>
 ```
 
 OR
 
 ```bash
-uv install git+https://github.com/TUM-Aries-Lab/<your-package-name>.git@<specific-tag>
+uv install git+https://github.com/TUM-Aries-Lab/<motor_python>.git@<specific-tag>
 ```
 
 ## Development
