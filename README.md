@@ -37,7 +37,7 @@ It's super easy to publish your own packages on PyPI. To build and publish this 
 uv build
 uv publish  # make sure your version in pyproject.toml is updated
 ```
-The package can then be found at: https://pypi.org/project/change-me
+The package can then be found at: https://pypi.org/project/motor_python
 
 ## Module Usage
 ```python
@@ -45,7 +45,7 @@ The package can then be found at: https://pypi.org/project/change-me
 
 from loguru import logger
 
-from change_me.config import definitions
+from motor_python.config import definitions
 
 def main() -> None:
     """Run a simple demonstration."""
@@ -57,5 +57,5 @@ if __name__ == "__main__":
 
 ## Program Usage
 ```bash
-uv run python -m change_me
+uv run python -m motor_python
 ```
