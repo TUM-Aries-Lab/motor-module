@@ -20,6 +20,9 @@ dev = [
     "coveralls>=4.0.1",
 ]
 
+[project.scripts]
+motor-python = "motor_python.__main__:main"
+
 [project.urls]
 homepage = "https://github.com/TUM-Aries-Lab/template-python"
 

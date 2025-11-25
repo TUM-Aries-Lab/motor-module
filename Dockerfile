@@ -7,26 +7,20 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Select package + version at build-time
-ARG PKG=motor_python
-ARG VER=latest
-ENV PKG=${PKG} VER=${VER}
+# Copy source code and install package
+COPY . /tmp/motor_python
 
-# Install package from PyPI with a cache mount (huge speedup on rebuilds)
+# Install package from local source with a cache mount
 # NOTE: --root-user-action needs a value; use =ignore to silence root warnings.
 RUN --mount=type=cache,target=/root/.cache/pip \
     python -m pip install --upgrade pip && \
-    if [ "$VER" = "latest" ]; then \
-        pip install --root-user-action=ignore "$PKG"; \
-    else \
-        pip install --root-user-action=ignore "$PKG==$VER"; \
-    fi
+    pip install --root-user-action=ignore /tmp/motor_python
 
 # Simple smoke test script
 WORKDIR /app
 RUN printf '%s\n' \
   "import importlib, os, sys" \
-  "m = importlib.import_module(os.environ.get('PKG', '${PKG}'))" \
+  "m = importlib.import_module('motor_python')" \
   "print('✅ import ok:', getattr(m, '__version__', 'unknown'), 'on', sys.version)" \
   > smoke.py
 
