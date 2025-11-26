@@ -1,6 +1,6 @@
 # Motor Control Software for Soft Exoskeleton
-[![Coverage Status](https://coveralls.io/repos/github/TUM-Aries-Lab/template-python/badge.svg?branch=main)](https://coveralls.io/github/TUM-Aries-Lab/template-python?branch=main)
-![Docker Image CI](https://github.com/TUM-Aries-Lab/template-python/actions/workflows/ci.yml/badge.svg)
+[![Coverage Status](https://coveralls.io/repos/github/TUM-Aries-Lab/motor_python/badge.svg?branch=main)](https://coveralls.io/github/TUM-Aries-Lab/motor_python?branch=main)
+![Docker Image CI](https://github.com/TUM-Aries-Lab/motor_python/actions/workflows/ci.yml/badge.svg)
 
 
 
@@ -17,16 +17,12 @@ OR
 uv install git+https://github.com/TUM-Aries-Lab/motor_python.git@<specific-tag>  
 ```
 
-## Development
-0. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
-1. Install [pyenv](https://github.com/pyenv/pyenv?tab=readme-ov-file#installation)
-2. ```pyenv install <3.12>  # install the required python version```
-3. ```pyenv global <3.12>  # set the required python version```
-4. ```git clone git@github.com:TUM-Aries-Lab/motor-module.git```
-5. `make init` to create the virtual environment and install dependencies
-6. `make format` to format the code and check for errors
-7. `make test` to run the test suite
-8. `make clean` to delete the temporary files and directories
+
+1. ```git clone git@github.com:TUM-Aries-Lab/motor-module.git```
+2. `make init` to create the virtual environment and install dependencies
+3. `make format` to format the code and check for errors
+4. `make test` to run the test suite
+5. `make clean` to delete the temporary files and directories
 
 ## Publishing
 It's super easy to publish your own packages on PyPI. To build and publish this package run:
