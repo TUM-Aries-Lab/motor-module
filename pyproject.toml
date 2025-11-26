@@ -1,9 +1,9 @@
 [project]
-name = "change-me"
-version = "0.1.1"
-description = "A simple Python template"
+name = "motor_python"
+version = "0.0.1"
+description = "Motor module for exosuit"
 readme = "README.md"
-authors = [{ name = "Tsmorz", email = "tony.smoragiewicz@tum.de" }]
+authors = [{ name = "Tsmorz", email = "tony.smoragiewicz@tum.de"},{ name = "Hannes", email = "hannes.nguyen@tum.de" }]
 requires-python = ">=3.11,<3.14"
 
 dependencies = [
@@ -66,7 +66,7 @@ lint.ignore = [
 fix = true
 
 [tool.ruff.lint.isort]
-known-first-party = ["change-me"]
+known-first-party = ["motor_python"]
 combine-as-imports = true
 
 [tool.lint.pydocstyle]

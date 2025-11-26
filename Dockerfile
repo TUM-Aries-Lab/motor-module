@@ -8,7 +8,7 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONUNBUFFERED=1
 
 # Select package + version at build-time
-ARG PKG=change_me
+ARG PKG=motor_python
 ARG VER=latest
 ENV PKG=${PKG} VER=${VER}
 
