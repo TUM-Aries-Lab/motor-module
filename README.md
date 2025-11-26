@@ -1,6 +1,6 @@
 # Motor Control Software for Soft Exoskeleton
-[![Coverage Status](https://coveralls.io/repos/github/TUM-Aries-Lab/motor_python/badge.svg?branch=main)](https://coveralls.io/github/TUM-Aries-Lab/motor_python?branch=main)
-![Docker Image CI](https://github.com/TUM-Aries-Lab/motor_python/actions/workflows/ci.yml/badge.svg)
+[![Coverage Status](https://coveralls.io/repos/github/TUM-Aries-Lab/motor-module/badge.svg?branch=main)](https://coveralls.io/github/TUM-Aries-Lab/motor-module?branch=main)
+![Docker Image CI](https://github.com/TUM-Aries-Lab/motor-module/actions/workflows/ci.yml/badge.svg)
 
 
 
