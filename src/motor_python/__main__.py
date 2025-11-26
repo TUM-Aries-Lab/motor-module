@@ -42,4 +42,4 @@ if __name__ == "__main__":  # pragma: no cover
     )
     args = parser.parse_args()
 
-    main(log_level=args.log_level, stderr_level=args.stderr_level)
+    main(log_level=args.log_level)
