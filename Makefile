@@ -43,4 +43,4 @@ docker:
 	docker run --rm motor_python-smoke
 
 app:
-	uv run python -m motor_python
+	sudo ./.venv/bin/python src/motor_python/ak60_simple.py
