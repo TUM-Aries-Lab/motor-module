@@ -74,7 +74,6 @@ def main(
 
     logger.info("Motor control loop complete!")
 
-
 if __name__ == "__main__":  # pragma: no cover
     parser = argparse.ArgumentParser("Run the pipeline.")
     parser.add_argument(
