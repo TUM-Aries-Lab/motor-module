@@ -12,7 +12,6 @@ dependencies = [
     "loguru>=0.7.3",
     "pyserial>=3.5",
 ]
-
 [dependency-groups]
 dev = [
   "ruff>=0.6.9",
