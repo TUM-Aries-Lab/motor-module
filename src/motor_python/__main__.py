@@ -2,8 +2,7 @@
 
 import argparse
 
-from loguru import logger
-
+from motor_python.cube_mars_motor import motor_v3
 from motor_python.definitions import DEFAULT_LOG_LEVEL, LogLevel
 from motor_python.utils import setup_logger
 
@@ -18,7 +17,7 @@ def main(
     :return: None
     """
     setup_logger(log_level=log_level, stderr_level=stderr_level)
-    logger.info("Hello, world!")
+    motor_v3()
 
 
 if __name__ == "__main__":  # pragma: no cover
