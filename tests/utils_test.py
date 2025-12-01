@@ -3,7 +3,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from motor_python.config.definitions import LogLevel
+from motor_python.definitions import LogLevel
 from motor_python.utils import setup_logger
 
 

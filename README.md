@@ -17,20 +17,12 @@ OR
 uv install git+https://github.com/TUM-Aries-Lab/motor_python.git@<specific-tag>  
 ```
 
-
-1. ```git clone git@github.com:TUM-Aries-Lab/motor-module.git```
-2. `make init` to create the virtual environment and install dependencies
-3. `make format` to format the code and check for errors
-4. `make test` to run the test suite
-5. `make clean` to delete the temporary files and directories
-
 ## Publishing
 It's super easy to publish your own packages on PyPI. To build and publish this package run:
+1. Update the version number in pyproject.toml and imu_module/__init__.py
+2. Commit your changes and add a git tag "<new.version.number>"
+3. Push the tag `git push --tag`
 
-```bash
-uv build
-uv publish  # make sure your version in pyproject.toml is updated
-```
 The package can then be found at: https://pypi.org/project/motor_python
 
 ## Module Usage
@@ -39,7 +31,7 @@ The package can then be found at: https://pypi.org/project/motor_python
 
 from loguru import logger
 
-from motor_python.config import definitions
+from motor_python import definitions
 
 def main() -> None:
     """Run a simple demonstration."""
@@ -53,3 +45,33 @@ if __name__ == "__main__":
 ```bash
 uv run python -m motor_python
 ```
+
+## Structure
+<!-- TREE-START -->
+```
+├── src
+│   └── motor_python
+│       ├── __init__.py
+│       ├── __main__.py
+│       ├── cube_mars_motor.py
+│       ├── defintions.py
+│       └── utils.py
+├── tests
+│   ├── __init__.py
+│   ├── conftest.py
+│   ├── main_test.py
+│   └── utils_test.py
+├── .dockerignore
+├── .gitignore
+├── .pre-commit-config.yaml
+├── .python-version
+├── CONTRIBUTING.md
+├── Dockerfile
+├── LICENSE
+├── Makefile
+├── README.md
+├── pyproject.toml
+├── repo_tree.py
+└── uv.lock
+```
+<!-- TREE-END -->

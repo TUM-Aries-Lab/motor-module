@@ -1,8 +1,8 @@
 """Test the main program."""
 
-from motor_python.__main__ import main
+from motor_python.cube_mars_motor import motor_v3
 
 
 def test_main():
     """Test the main function."""
-    assert main() is None
+    assert motor_v3() is None

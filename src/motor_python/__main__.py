@@ -4,7 +4,7 @@ import argparse
 
 from loguru import logger
 
-from motor_python.config.definitions import DEFAULT_LOG_LEVEL, LogLevel
+from motor_python.definitions import DEFAULT_LOG_LEVEL, LogLevel
 from motor_python.utils import setup_logger
 
 
@@ -19,7 +19,6 @@ def main(
     """
     setup_logger(log_level=log_level, stderr_level=stderr_level)
     logger.info("Hello, world!")
-   
 
 
 if __name__ == "__main__":  # pragma: no cover
