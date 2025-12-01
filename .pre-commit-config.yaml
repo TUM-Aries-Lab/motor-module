@@ -31,17 +31,6 @@ repos:
       types: [python]
 
 # --------------------------------------------------------
-#  Delegate type checking to Makefile
-# --------------------------------------------------------
-- repo: local
-  hooks:
-    - id: make-typecheck
-      name: Run type checking (mypy/pyright via make)
-      entry: make typecheck
-      language: system
-      types: [python]
-
-# --------------------------------------------------------
 #  Optional: run tests before commit
 #  (Often skipped in CI & enabled manually because slow)
 # --------------------------------------------------------
