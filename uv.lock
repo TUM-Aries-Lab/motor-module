@@ -309,6 +309,8 @@ dev = [
     { name = "pytest-cov", specifier = ">=6.0" },
     { name = "ruff", specifier = ">=0.6.9" },
 ]
+hw = []
+no-hw = []
 
 [[package]]
 name = "mypy"

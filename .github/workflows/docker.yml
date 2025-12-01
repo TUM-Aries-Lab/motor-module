@@ -108,7 +108,7 @@ jobs:
         run: |
           IMAGE="${{ env.REGISTRY }}/${{ steps.repo.outputs.image_name_lc }}:${{ steps.meta.outputs.sha_tag }}"
           echo "Smoke testing local image ${IMAGE}"
-          docker run --rm "$IMAGE" python -c "import change_me, sys; print('✅ import ok:', getattr(change_me,'__version__','?'), 'on', sys.version)"
+          docker run --rm "$IMAGE" python -c "import motor_python, sys; print('✅ import ok:', getattr(motor_python,'__version__','?'), 'on', sys.version)"
 
       - name: Smoke test (pushed image)
         if: env.IS_MAIN == 'true' || env.IS_TAG == 'true' || env.MULTIARCH_ON_BRANCHES == 'true'
@@ -116,4 +116,4 @@ jobs:
           IMAGE="${{ env.REGISTRY }}/${{ steps.repo.outputs.image_name_lc }}:${{ steps.meta.outputs.sha_tag }}"
           echo "Smoke testing pushed image ${IMAGE}"
           docker pull "$IMAGE"
-          docker run --rm "$IMAGE" python -c "import change_me, sys; print('✅ import ok:', getattr(change_me,'__version__','?'), 'on', sys.version)"
+          docker run --rm "$IMAGE" python -c "import motor_python, sys; print('✅ import ok:', getattr(motor_python,'__version__','?'), 'on', sys.version)"
