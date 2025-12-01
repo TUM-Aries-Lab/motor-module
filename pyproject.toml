@@ -22,7 +22,10 @@ dev = [
   "coveralls>=4.0.1",
   "pyright>=1.1.407",
 ]
-
+hw = [
+]
+no_hw = [
+]
 [project.urls]
 homepage = "https://github.com/TUM-Aries-Lab/motor-module"
 
