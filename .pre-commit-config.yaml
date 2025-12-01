@@ -5,6 +5,9 @@ default_language_version:
   python: python3.12
 
 repos:
+# --------------------------------------------------------
+#  Basic hygiene checks (whitespace, yaml, shebangs, etc.)
+# --------------------------------------------------------
 - repo: https://github.com/pre-commit/pre-commit-hooks
   rev: v6.0.0
   hooks:
@@ -16,20 +19,36 @@ repos:
     - id: name-tests-test
     - id: requirements-txt-fixer
 
-- repo: https://github.com/pre-commit/mirrors-mypy
-  rev: v1.18.2
+# --------------------------------------------------------
+#  Delegate formatting + linting to your Makefile
+# --------------------------------------------------------
+- repo: local
   hooks:
-    - id: mypy
-      args: ["--ignore-missing-imports"]
-      additional_dependencies: []
-      exclude: ^testing/resources/
+    - id: make-format
+      name: Run format (ruff format + ruff lint)
+      entry: make format
+      language: system
+      types: [python]
 
-- repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.14.6
+# --------------------------------------------------------
+#  Delegate type checking to Makefile
+# --------------------------------------------------------
+- repo: local
   hooks:
-    - id: ruff
-      types_or: [python, pyi]
-      args: ["--fix"]
+    - id: make-typecheck
+      name: Run type checking (mypy/pyright via make)
+      entry: make typecheck
+      language: system
+      types: [python]
 
-    - id: ruff-format
-      types_or: [python, pyi]
+# --------------------------------------------------------
+#  Optional: run tests before commit
+#  (Often skipped in CI & enabled manually because slow)
+# --------------------------------------------------------
+- repo: local
+  hooks:
+    - id: make-test
+      name: Run pytest suite
+      entry: make test
+      language: system
+      types: [python]
