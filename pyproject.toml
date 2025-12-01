@@ -1,6 +1,6 @@
 [project]
 name = "motor_python"
-version = "0.0.2"
+version = "0.0.3"
 description = "Motor module for exosuit"
 readme = "README.md"
 authors = [{ name = "Tsmorz", email = "tony.smoragiewicz@tum.de"},{ name = "Hannes", email = "hannes.nguyen@tum.de" }]
