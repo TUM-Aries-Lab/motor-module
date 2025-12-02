@@ -24,37 +24,45 @@ def main(
 
     # Use the AK60Motor class with context manager
     with AK60Motor() as motor:
+        logger.info("Testing motor feedback response...")
+
         # Query motor status at startup
         logger.info("Initial motor status query:")
         motor.get_status()
         time.sleep(0.5)
 
-        # Simulate continuous operation like with IMU input
-        logger.info("Simulating continuous motor control (like with IMU feedback)...")
+        # Test motor with two full rotations: slow then fast
+        logger.info("Starting motor test: 2 full rotations (slow then fast)...")
 
         try:
-            loop_count = 0
-            while True:
-                # Simulate IMU reading -> position calculation
-                target_position = (loop_count * 30) % 360  # 0, 30, 60, 90...
-
-                # Send position command (like you would from IMU data)
+            # First rotation: SLOW (0.5 second delays)
+            logger.info("=== ROTATION 1: SLOW ===")
+            for i in range(12):
+                target_position = (i * 30) % 360  # 0, 30, 60, 90...
+                logger.info(f"Slow: Moving to {target_position}° (position {i + 1}/12)")
                 motor.set_position(target_position)
+                time.sleep(0.5)  # Slow movement
 
-                # Query motor status periodically (every 10 commands)
-                if loop_count % 10 == 0:
-                    logger.info(f"=== Status Check at loop {loop_count} ===")
+                # Query status at key positions
+                if i % 3 == 0:
                     motor.get_status()
 
-                # Small delay between commands (10 Hz control loop)
-                time.sleep(0.1)
+            logger.info("First rotation complete!")
+            time.sleep(1.0)
 
-                loop_count += 1
+            # Second rotation: FAST (0.2 second delays)
+            logger.info("=== ROTATION 2: FAST ===")
+            for i in range(12):
+                target_position = (i * 30) % 360  # 0, 30, 60, 90...
+                logger.info(f"Fast: Moving to {target_position}° (position {i + 1}/12)")
+                motor.set_position(target_position)
+                time.sleep(0.2)  # Fast movement
 
-                # Stop after 30 iterations for testing (remove in production)
-                if loop_count >= 30:
-                    logger.info("Test complete - stopping loop")
-                    break
+                # Query status at key positions
+                if i % 6 == 0:
+                    motor.get_status()
+
+            logger.info("Second rotation complete! Test finished.")
 
         except KeyboardInterrupt:
             logger.info("Interrupted by user")

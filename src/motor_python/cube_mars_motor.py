@@ -494,7 +494,7 @@ class AK60Motor:
         if len(response) >= 6:
             # Payload starts at byte 3, ends before CRC (last 3 bytes)
             payload = response[3:-3]
-            
+
             try:
                 if cmd == 0x45:  # Full status response
                     self._parse_full_status(payload)
@@ -509,39 +509,36 @@ class AK60Motor:
 
         logger.info("=" * 50)
 
-    def set_position(self, degrees: float):
+    def set_position(self, position_degrees: float) -> None:
         """Set motor position in degrees.
 
-        Args:
-            degrees: Target position in degrees (-36000 to 36000)
-
+        :param position_degrees: Target position in degrees (-36000 to 36000)
+        :return: None
         """
-        degrees = max(min(degrees, 36000.0), -36000.0)
-        value = int(degrees * 1_000_000.0)
+        position_degrees = max(min(position_degrees, 36000.0), -36000.0)
+        value = int(position_degrees * 1_000_000.0)
         payload = struct.pack(">i", value)
         frame = self._build_message(self.CMD_SET_POSITION, payload)
         self._send_message(frame)
 
-    def set_velocity(self, erpm: int):
-        """Set motor velocity in ERPM (electrical RPM).
+    def set_velocity(self, velocity_erpm: int) -> None:
+        """Set motor velocity in electrical RPM.
 
-        Args:
-            erpm: Target velocity in ERPM (-100000 to 100000)
-
+        :param velocity_erpm: Target velocity in ERPM (-100000 to 100000)
+        :return: None
         """
-        erpm = max(min(int(erpm), 100000), -100000)
-        payload = struct.pack(">i", erpm)
+        velocity_erpm = max(min(int(velocity_erpm), 100000), -100000)
+        payload = struct.pack(">i", velocity_erpm)
         frame = self._build_message(self.CMD_SET_SPEED, payload)
         self._send_message(frame)
 
-    def set_speed(self, erpm: int):
-        """Set motor speed in ERPM (alias for set_velocity).
+    def set_speed(self, speed_erpm: int) -> None:
+        """Set motor speed in electrical RPM (alias for set_velocity).
 
-        Args:
-            erpm: Target speed in ERPM (-100000 to 100000)
-
+        :param speed_erpm: Target speed in ERPM (-100000 to 100000)
+        :return: None
         """
-        self.set_velocity(erpm)
+        self.set_velocity(speed_erpm)
 
     def move_to_position_with_speed(
         self, target_degrees: float, speed_erpm: int, step_delay: float = 0.05
@@ -565,28 +562,26 @@ class AK60Motor:
         self.set_position(target_degrees)
         logger.info(f"Reached position: {target_degrees}° at {speed_erpm} ERPM")
 
-    def set_duty_cycle(self, duty: float):
-        """Set motor duty cycle.
+    def set_duty_cycle(self, duty_cycle_percent: float) -> None:
+        """Set motor PWM duty cycle percentage.
 
-        Args:
-            duty: Duty cycle value (-1.0 to 1.0)
-
+        :param duty_cycle_percent: Duty cycle value (-1.0 to 1.0, where 1.0 = 100%)
+        :return: None
         """
-        duty = max(min(duty, 0.95), -0.95)
-        value = int(duty * 100000.0)
+        duty_cycle_percent = max(min(duty_cycle_percent, 0.95), -0.95)
+        value = int(duty_cycle_percent * 100000.0)
         payload = struct.pack(">i", value)
         frame = self._build_message(self.CMD_SET_DUTY, payload)
         self._send_message(frame)
 
-    def set_current(self, amps: float):
-        """Set motor current in Amps.
+    def set_current(self, current_amps: float) -> None:
+        """Set motor current in amperes.
 
-        Args:
-            amps: Current in Amps (-60.0 to 60.0)
-
+        :param current_amps: Current in Amps (-60.0 to 60.0)
+        :return: None
         """
-        amps = max(min(amps, 60.0), -60.0)
-        value = int(amps * 1000.0)
+        current_amps = max(min(current_amps, 60.0), -60.0)
+        value = int(current_amps * 1000.0)
         payload = struct.pack(">i", value)
         frame = self._build_message(self.CMD_SET_CURRENT, payload)
         self._send_message(frame)
@@ -598,36 +593,52 @@ class AK60Motor:
         response = self._send_message(frame)
         return response
 
-    def get_position(self):
-        """Get current motor position.
+    def get_position(self) -> bytes:
+        """Get current motor position via command 0x4C.
 
         Command 0x4C returns current position every 10ms.
         Lightweight query for position feedback only.
 
+        :return: Raw response bytes from motor containing position
         """
         # Command 0x4C with no payload
         frame = self._build_message(self.CMD_GET_POSITION, b"")
         response = self._send_message(frame)
         return response
 
-    def stop(self):
-        """Stop the motor by setting all control values to zero."""
+    def stop(self) -> None:
+        """Stop the motor by setting all control values to zero.
+
+        :return: None
+        """
         self.set_duty_cycle(0.0)
         self.set_current(0.0)
         self.set_velocity(0)
         logger.info("Motor stopped")
 
-    def close(self):
-        """Close serial connection to motor."""
+    def close(self) -> None:
+        """Close serial connection to motor.
+
+        :return: None
+        """
         if self.serial and self.serial.is_open:
             self.stop()
             self.serial.close()
             logger.info("Motor connection closed")
 
-    def __enter__(self):
-        """Context manager entry."""
+    def __enter__(self) -> "AK60Motor":
+        """Context manager entry.
+
+        :return: Self instance for use in with statement
+        """
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit.
+
+        :param exc_type: Exception type if an exception occurred
+        :param exc_val: Exception value if an exception occurred
+        :param exc_tb: Exception traceback if an exception occurred
+        :return: None
+        """
         self.close()
