@@ -6,6 +6,7 @@ import time
 from loguru import logger
 
 from motor_python.cube_mars_motor import AK60Motor
+from motor_python.cube_mars_motor import motor_v3
 from motor_python.definitions import DEFAULT_LOG_LEVEL, LogLevel
 from motor_python.utils import setup_logger
 
@@ -77,6 +78,7 @@ def main(
         time.sleep(0.5)
 
     logger.info("Motor control loop complete!")
+    motor_v3()
 
 
 if __name__ == "__main__":  # pragma: no cover

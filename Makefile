@@ -7,6 +7,7 @@ init:  # ENV SETUP
 
 test:
 	uv run pytest --cov=src --cov-report=term-missing --no-cov-on-fail --cov-report=xml --cov-fail-under=40
+	uv run pytest --cov=src --cov-report=term-missing --no-cov-on-fail --cov-report=xml --cov-fail-under=60
 	rm .coverage
 
 lint:
@@ -52,3 +53,12 @@ build:
 
 app:
 	sudo ./.venv/bin/python -m motor_python
+	uv run python -m motor_python
+
+tree:
+	uv run python repo_tree.py --update-readme
+
+build:
+	uv build
+	unzip -l dist/*.whl
+	unzip -p dist/*.whl */METADATA
