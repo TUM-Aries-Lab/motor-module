@@ -6,7 +6,7 @@ import time
 from loguru import logger
 
 from motor_python.ak60_motor import AK60Motor
-from motor_python.config.definitions import DEFAULT_LOG_LEVEL, LogLevel
+from motor_python.definitions import DEFAULT_LOG_LEVEL, LogLevel
 from motor_python.utils import setup_logger
 
 

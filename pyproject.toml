@@ -1,87 +1,68 @@
 [project]
 name = "motor_python"
-version = "0.0.1"
+version = "0.0.2"
 description = "Motor module for exosuit"
 readme = "README.md"
 authors = [{ name = "Tsmorz", email = "tony.smoragiewicz@tum.de"},{ name = "Hannes", email = "hannes.nguyen@tum.de" }]
 requires-python = ">=3.11,<3.14"
 
+# --- Core dependencies: NO hardware here ---
 dependencies = [
     "numpy>=2.2.3",
     "loguru>=0.7.3",
     "pyserial>=3.5",
 ]
+
 [dependency-groups]
 dev = [
-    "ruff>=0.6.9",
-    "mypy>=1.11",
-    "pytest>=8.3",
-    "pytest-cov>=6.0",
-    "pre-commit>=4.1.0",
-    "coveralls>=4.0.1",
+  "ruff>=0.6.9",
+  "mypy>=1.11",
+  "pytest>=8.3",
+  "pytest-cov>=6.0",
+  "pre-commit>=4.1.0",
+  "coveralls>=4.0.1",
+  "pyright>=1.1.407",
 ]
 
 [project.urls]
-homepage = "https://github.com/TUM-Aries-Lab/motor_python"
+homepage = "https://github.com/TUM-Aries-Lab/motor-module"
 
 [tool.ruff]
 line-length = 88
+fix = true
 
 lint.select = [
-    "E",      # pycodestyle (style errors)
-    "F",      # Pyflakes (logical errors)
-    "W",      # Warnings
-    "C90",    # mccabe (complexity checks)
-    "I",      # isort (import sorting)
-    "N",      # pep8-naming (naming conventions)
-    "D",      # pydocstyle (docstring conventions)
-    "UP",     # pyupgrade (Python syntax modernization)
-    "B",      # flake8-bugbear (common pitfalls and performance issues)
-    "S",      # flake8-bandit (security issues)
-    "YTT",    # flake8-2020 (Python 2 compatibility issues)
-    "Q",      # flake8-quotes (quote consistency)
-    "PL",     # pylint (general best practices)
-    "RUF",    # Ruff-specific rules
-    "T20",
-    "F841",   # unused variable
-    "ERA001"  # commented out code
+  "E","F","W","C90","I","N","D","UP","B","S","YTT","Q","PL","RUF","T20","F841","ERA001",
 ]
 
 lint.ignore = [
-    "D203",
-    "D213",
-    "E501",
-    "N803",
-    "N806",
-    "D415",
-    "S101",
-    "E203",
-    "E731",
-    "D107",
-    "PLR2004",
-    "S607",
-    "S605",
-    "S603",
+  "D203","D213","E501","N803","N806","D415","S101","E203","E731",
+  "D107","PLR2004","S607","S605","S603",
 ]
-
-fix = true
 
 [tool.ruff.lint.isort]
 known-first-party = ["motor_python"]
 combine-as-imports = true
-
-[tool.lint.pydocstyle]
-convention = "google"
 
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
 line-ending = "lf"
 
-# -------------------------
-#     BUILD SYSTEM
-# -------------------------
-# UV uses hatchling by default; Poetry build backend removed.
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+# Tell hatchling where the package lives (src layout)
+[tool.hatch.build.targets.wheel]
+packages = ["src/motor_python"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/motor_python",
+  "README.md",
+  "LICENSE",
+]
