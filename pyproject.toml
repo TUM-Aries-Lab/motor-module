@@ -22,7 +22,7 @@ dev = [
 ]
 
 [project.urls]
-homepage = "https://github.com/TUM-Aries-Lab/template-python"
+homepage = "https://github.com/TUM-Aries-Lab/motor_python"
 
 [tool.ruff]
 line-length = 88
