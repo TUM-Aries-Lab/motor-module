@@ -1,11 +1,11 @@
 """Test the CubeMars motor module."""
 
-from motor_python.cube_mars_motor import AK60Motor
+from motor_python.cube_mars_motor import CubeMarsMotor
 
 
-def test_ak60motor_initialization():
-    """Test that AK60Motor class can be imported."""
-    assert AK60Motor is not None
+def test_cubemarsmotor_initialization():
+    """Test that CubeMarsMotor class can be imported."""
+    assert CubeMarsMotor is not None
 """Test the main program."""
 
 from motor_python.cube_mars_motor import motor_v3

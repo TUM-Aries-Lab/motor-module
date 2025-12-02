@@ -290,7 +290,7 @@ CRC16_TAB = [
 ]
 
 
-class AK60Motor:
+class CubeMarsMotor:
     """AK60-6 Motor Controller for CubeMars V3 UART Protocol."""
 
     # Command constants from CubeMars Manual
@@ -626,7 +626,7 @@ class AK60Motor:
             self.serial.close()
             logger.info("Motor connection closed")
 
-    def __enter__(self) -> "AK60Motor":
+    def __enter__(self) -> "CubeMarsMotor":
         """Context manager entry.
 
         :return: Self instance for use in with statement
