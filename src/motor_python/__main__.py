@@ -3,11 +3,9 @@
 import argparse
 import time
 
-import serial
-
 from loguru import logger
 
-from motor_python.ak60_motor import AK60Motor
+from motor_python.cube_mars_motor import AK60Motor
 from motor_python.definitions import DEFAULT_LOG_LEVEL, LogLevel
 from motor_python.utils import setup_logger
 
@@ -129,6 +127,7 @@ def main(
         time.sleep(0.5)
 
     logger.info("Motor control loop complete!")
+
 
 if __name__ == "__main__":  # pragma: no cover
     parser = argparse.ArgumentParser("Run the pipeline.")
