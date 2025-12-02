@@ -1,0 +1,43 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+  id-token: write  # REQUIRED for Trusted Publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v1
+        with:
+          version: latest
+
+      - name: Sync dependencies (no dev deps needed)
+        run: uv sync
+
+      - name: Build wheel and sdist
+        run: uv build --wheel --sdist
+
+      - name: List built artifacts
+        run: ls -R dist
+
+      - name: Inspect METADATA (optional debug)
+        run: |
+          wheel=$(ls dist/*.whl)
+          unzip -p "$wheel" "$(unzip -l "$wheel" | awk '/METADATA$/ {print $NF}')" || true
+
+      - name: Publish to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          verbose: true
