@@ -51,4 +51,4 @@ build:
 	unzip -p dist/*.whl */METADATA
 
 app:
-	sudo ./.venv/bin/python src/motor_python/ak60_simple.py
+	sudo ./.venv/bin/python -m motor_python

@@ -492,10 +492,10 @@ class AK60Motor:
 
         # Parse payload according to command type
         if len(response) >= 6:
+            # Payload starts at byte 3, ends before CRC (last 3 bytes)
+            payload = response[3:-3]
+            
             try:
-                # Payload starts at byte 3, ends before CRC (last 3 bytes)
-                payload = response[3:-3]
-
                 if cmd == 0x45:  # Full status response
                     self._parse_full_status(payload)
                 elif cmd in {0x4C, 0x57}:  # Position response (0x57 is echo of 0x4C)

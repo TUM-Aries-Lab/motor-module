@@ -21,27 +21,21 @@ def main(
     """
     setup_logger(log_level=log_level, stderr_level=stderr_level)
     logger.info("Starting motor control loop...")
-    logger.info("Hello, world!")
-    logger.info("Starting motor control loop...")
 
     # Use the AK60Motor class with context manager
     with AK60Motor() as motor:
-        logger.info("Testing motor feedback response...")
-
         # Query motor status at startup
         logger.info("Initial motor status query:")
         motor.get_status()
         time.sleep(0.5)
 
         # Simulate continuous operation like with IMU input
-        # In real application: while True, read IMU, calculate position, send command
         logger.info("Simulating continuous motor control (like with IMU feedback)...")
 
         try:
             loop_count = 0
             while True:
                 # Simulate IMU reading -> position calculation
-                # For testing, we'll just cycle through some positions
                 target_position = (loop_count * 30) % 360  # 0, 30, 60, 90...
 
                 # Send position command (like you would from IMU data)
@@ -52,65 +46,13 @@ def main(
                     logger.info(f"=== Status Check at loop {loop_count} ===")
                     motor.get_status()
 
-                # Small delay between commands (adjust based on your control loop rate)
-                time.sleep(0.1)  # 10 Hz control loop
+                # Small delay between commands (10 Hz control loop)
+                time.sleep(0.1)
 
                 loop_count += 1
 
-                # Stop after 50 iterations for testing (remove this in production)
-                if loop_count >= 50:
-                    logger.info("Test complete - stopping loop")
-                    break
-
-        except KeyboardInterrupt:
-            logger.info("Interrupted by user")
-
-        # Stop motor safely
-        logger.info("Stopping motor...")
-        motor.stop()
-
-        # Final status
-        logger.info("Final motor status:")
-        motor.get_status()
-        time.sleep(0.5)
-
-    logger.info("Motor control loop complete!")
-
-    # Use the AK60Motor class with context manager
-    with AK60Motor() as motor:
-        logger.info("Testing motor feedback response...")
-
-        # Query motor status at startup
-        logger.info("Initial motor status query:")
-        motor.get_status()
-        time.sleep(0.5)
-
-        # Simulate continuous operation like with IMU input
-        # In real application: while True, read IMU, calculate position, send command
-        logger.info("Simulating continuous motor control (like with IMU feedback)...")
-
-        try:
-            loop_count = 0
-            while True:
-                # Simulate IMU reading -> position calculation
-                # For testing, we'll just cycle through some positions
-                target_position = (loop_count * 30) % 360  # 0, 30, 60, 90...
-
-                # Send position command (like you would from IMU data)
-                motor.set_position(target_position)
-
-                # Query motor status periodically (every 10 commands)
-                if loop_count % 10 == 0:
-                    logger.info(f"=== Status Check at loop {loop_count} ===")
-                    motor.get_status()
-
-                # Small delay between commands (adjust based on your control loop rate)
-                time.sleep(0.1)  # 10 Hz control loop
-
-                loop_count += 1
-
-                # Stop after 50 iterations for testing (remove this in production)
-                if loop_count >= 50:
+                # Stop after 30 iterations for testing (remove in production)
+                if loop_count >= 30:
                     logger.info("Test complete - stopping loop")
                     break
 
