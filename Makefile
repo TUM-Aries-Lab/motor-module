@@ -6,6 +6,7 @@ init:  # ENV SETUP
 	@echo "Environment initialized with uv."
 
 test:
+	uv run pytest --cov=src --cov-report=term-missing --no-cov-on-fail --cov-report=xml --cov-fail-under=40
 	uv run pytest --cov=src --cov-report=term-missing --no-cov-on-fail --cov-report=xml --cov-fail-under=60
 	rm .coverage
 
@@ -42,8 +43,16 @@ docker:
 	docker build --no-cache -f Dockerfile -t motor_python-smoke .
 	docker run --rm motor_python-smoke
 
+tree:
+	uv run python repo_tree.py --update-readme
+
+build:
+	uv build
+	unzip -l dist/*.whl
+	unzip -p dist/*.whl */METADATA
+
 app:
-	uv run python -m motor_python
+	sudo ./.venv/bin/python -m motor_python
 
 tree:
 	uv run python repo_tree.py --update-readme

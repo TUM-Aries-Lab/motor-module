@@ -8,6 +8,9 @@ requires-python = ">=3.11,<3.14"
 
 # --- Core dependencies: NO hardware here ---
 dependencies = [
+    "numpy>=2.2.3",
+    "loguru>=0.7.3",
+    "pyserial>=3.5",
   "numpy>=2.2.3",
   "loguru>=0.7.3",
 ]
