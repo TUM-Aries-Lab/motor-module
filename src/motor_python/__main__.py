@@ -1,12 +1,11 @@
-"""Motor control main entry point using CubeMarsMotor class."""
+"""Motor control main entry point using CubeMarsAK606v3 class."""
 
 import argparse
 import time
 
 from loguru import logger
 
-from motor_python.cube_mars_motor import CubeMarsMotor
-from motor_python.cube_mars_motor import motor_v3
+from motor_python.cube_mars_motor import CubeMarsAK606v3
 from motor_python.definitions import DEFAULT_LOG_LEVEL, LogLevel
 from motor_python.utils import setup_logger
 
@@ -23,8 +22,8 @@ def main(
     setup_logger(log_level=log_level, stderr_level=stderr_level)
     logger.info("Starting motor control loop...")
 
-    # Use the CubeMarsMotor class with context manager
-    with CubeMarsMotor() as motor:
+    # Use the CubeMarsAK606v3 class with context manager
+    with CubeMarsAK606v3() as motor:
         logger.info("Testing motor feedback response...")
 
         # Query motor status at startup
@@ -78,7 +77,6 @@ def main(
         time.sleep(0.5)
 
     logger.info("Motor control loop complete!")
-    motor_v3()
 
 
 if __name__ == "__main__":  # pragma: no cover
