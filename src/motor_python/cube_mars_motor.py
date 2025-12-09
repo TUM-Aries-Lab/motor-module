@@ -9,24 +9,11 @@ from loguru import logger
 
 from motor_python.definitions import (
     CRC16_TAB,
-    CRC_BYTE_MASK,
-    CRC_INITIAL_VALUE,
-    CRC_SHIFT_BITS,
-    CRC_WORD_MASK,
-    DEFAULT_MOTOR_BAUDRATE,
-    DEFAULT_MOTOR_PORT,
-    DEFAULT_STEP_DELAY,
-    FRAME_END_BYTE,
-    FRAME_START_BYTE,
-    MAX_CURRENT_AMPS,
-    MAX_DUTY_CYCLE,
-    MAX_POSITION_DEGREES,
-    MAX_VELOCITY_ERPM,
-    MIN_CURRENT_AMPS,
-    MIN_DUTY_CYCLE,
-    MIN_POSITION_DEGREES,
-    MIN_VELOCITY_ERPM,
-    POSITION_SCALE_FACTOR,
+    CRC_CONSTANTS,
+    FRAME_BYTES,
+    MOTOR_DEFAULTS,
+    MOTOR_LIMITS,
+    SCALE_FACTORS,
 )
 from motor_python.motor_status_parser import MotorStatusParser
 
@@ -47,7 +34,7 @@ class CubeMarsAK606v3:
     """AK60-6 Motor Controller for CubeMars V3 UART Protocol."""
 
     def __init__(
-        self, port: str = DEFAULT_MOTOR_PORT, baudrate: int = DEFAULT_MOTOR_BAUDRATE
+        self, port: str = MOTOR_DEFAULTS.port, baudrate: int = MOTOR_DEFAULTS.baudrate
     ) -> None:
         """Initialize motor connection.
 
@@ -102,14 +89,16 @@ class CubeMarsAK606v3:
         :param data: Bytes to calculate checksum over.
         :return: 16-bit CRC checksum.
         """
-        checksum = CRC_INITIAL_VALUE
+        checksum = CRC_CONSTANTS.initial_value
         for byte in data:
             # Extract high byte of checksum and XOR with current byte
-            high_byte = (checksum >> CRC_SHIFT_BITS) & CRC_BYTE_MASK
+            high_byte = (checksum >> CRC_CONSTANTS.shift_bits) & CRC_CONSTANTS.byte_mask
             table_index = high_byte ^ byte
             # Lookup table value and combine with shifted checksum
             table_value = CRC16_TAB[table_index]
-            shifted_checksum = (checksum << CRC_SHIFT_BITS) & CRC_WORD_MASK
+            shifted_checksum = (
+                checksum << CRC_CONSTANTS.shift_bits
+            ) & CRC_CONSTANTS.word_mask
             checksum = table_value ^ shifted_checksum
         return checksum
 
@@ -126,12 +115,12 @@ class CubeMarsAK606v3:
         crc = self._crc16(data_frame)
         frame = bytes(
             [
-                FRAME_START_BYTE,
+                FRAME_BYTES.start,
                 len(data_frame),
                 *data_frame,
                 crc >> 8,
                 crc & 0xFF,
-                FRAME_END_BYTE,
+                FRAME_BYTES.end,
             ]
         )
         return frame
@@ -203,7 +192,7 @@ class CubeMarsAK606v3:
             return
 
         # Check for valid frame structure (AA ... BB)
-        if response[0] != FRAME_START_BYTE or response[-1] != FRAME_END_BYTE:
+        if response[0] != FRAME_BYTES.start or response[-1] != FRAME_BYTES.end:
             logger.warning("Invalid response frame structure")
             return
 
@@ -244,18 +233,19 @@ class CubeMarsAK606v3:
         :return: None
         """
         if (
-            position_degrees > MAX_POSITION_DEGREES
-            or position_degrees < MIN_POSITION_DEGREES
+            position_degrees > MOTOR_LIMITS.max_position_degrees
+            or position_degrees < MOTOR_LIMITS.min_position_degrees
         ):
             logger.warning(
                 f"Position {position_degrees:.2f}° exceeds limits "
-                f"[{MIN_POSITION_DEGREES:.2f}°, {MAX_POSITION_DEGREES:.2f}°]. "
+                f"[{MOTOR_LIMITS.min_position_degrees:.2f}°, {MOTOR_LIMITS.max_position_degrees:.2f}°]. "
                 f"Clamping to safe range."
             )
         position_degrees = max(
-            min(position_degrees, MAX_POSITION_DEGREES), MIN_POSITION_DEGREES
+            min(position_degrees, MOTOR_LIMITS.max_position_degrees),
+            MOTOR_LIMITS.min_position_degrees,
         )
-        value = int(position_degrees * POSITION_SCALE_FACTOR)
+        value = int(position_degrees * SCALE_FACTORS.position)
         payload = struct.pack(">i", value)
         frame = self._build_message(MotorCommand.CMD_SET_POSITION, payload)
         self._send_message(frame)
@@ -268,16 +258,17 @@ class CubeMarsAK606v3:
         """
         velocity_erpm_int = int(velocity_erpm)
         if (
-            velocity_erpm_int > MAX_VELOCITY_ERPM
-            or velocity_erpm_int < MIN_VELOCITY_ERPM
+            velocity_erpm_int > MOTOR_LIMITS.max_velocity_erpm
+            or velocity_erpm_int < MOTOR_LIMITS.min_velocity_erpm
         ):
             logger.warning(
                 f"Velocity {velocity_erpm_int} ERPM exceeds limits "
-                f"[{MIN_VELOCITY_ERPM}, {MAX_VELOCITY_ERPM}]. "
+                f"[{MOTOR_LIMITS.min_velocity_erpm}, {MOTOR_LIMITS.max_velocity_erpm}]. "
                 f"Clamping to safe range."
             )
         velocity_erpm = max(
-            min(velocity_erpm_int, MAX_VELOCITY_ERPM), MIN_VELOCITY_ERPM
+            min(velocity_erpm_int, MOTOR_LIMITS.max_velocity_erpm),
+            MOTOR_LIMITS.min_velocity_erpm,
         )
         payload = struct.pack(">i", velocity_erpm)
         frame = self._build_message(MotorCommand.CMD_SET_SPEED, payload)
@@ -309,7 +300,7 @@ class CubeMarsAK606v3:
         self,
         target_degrees: float,
         speed_erpm: int,
-        step_delay: float = DEFAULT_STEP_DELAY,
+        step_delay: float = MOTOR_DEFAULTS.step_delay,
     ) -> None:
         """Reach the target position through speed-controlled increments.
 
@@ -340,14 +331,18 @@ class CubeMarsAK606v3:
         :return: None
         """
         # Limit to 95% to prevent saturation
-        if duty_cycle_percent > MAX_DUTY_CYCLE or duty_cycle_percent < MIN_DUTY_CYCLE:
+        if (
+            duty_cycle_percent > MOTOR_LIMITS.max_duty_cycle
+            or duty_cycle_percent < MOTOR_LIMITS.min_duty_cycle
+        ):
             logger.warning(
                 f"Duty cycle {duty_cycle_percent:.2f} exceeds limits "
-                f"[{MIN_DUTY_CYCLE:.2f}, {MAX_DUTY_CYCLE:.2f}]. "
+                f"[{MOTOR_LIMITS.min_duty_cycle:.2f}, {MOTOR_LIMITS.max_duty_cycle:.2f}]. "
                 f"Clamping to safe range."
             )
         duty_cycle_percent = max(
-            min(duty_cycle_percent, MAX_DUTY_CYCLE), MIN_DUTY_CYCLE
+            min(duty_cycle_percent, MOTOR_LIMITS.max_duty_cycle),
+            MOTOR_LIMITS.min_duty_cycle,
         )
         value = int(duty_cycle_percent * 100000.0)
         payload = struct.pack(">i", value)
@@ -360,13 +355,19 @@ class CubeMarsAK606v3:
         :param current_amps: Current in Amps
         :return: None
         """
-        if current_amps > MAX_CURRENT_AMPS or current_amps < MIN_CURRENT_AMPS:
+        if (
+            current_amps > MOTOR_LIMITS.max_current_amps
+            or current_amps < MOTOR_LIMITS.min_current_amps
+        ):
             logger.warning(
                 f"Current {current_amps:.2f}A exceeds limits "
-                f"[{MIN_CURRENT_AMPS:.2f}A, {MAX_CURRENT_AMPS:.2f}A]. "
+                f"[{MOTOR_LIMITS.min_current_amps:.2f}A, {MOTOR_LIMITS.max_current_amps:.2f}A]. "
                 f"Clamping to safe range."
             )
-        current_amps = max(min(current_amps, MAX_CURRENT_AMPS), MIN_CURRENT_AMPS)
+        current_amps = max(
+            min(current_amps, MOTOR_LIMITS.max_current_amps),
+            MOTOR_LIMITS.min_current_amps,
+        )
         value = int(current_amps * 1000.0)
         payload = struct.pack(">i", value)
         frame = self._build_message(MotorCommand.CMD_SET_CURRENT, payload)
