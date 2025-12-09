@@ -401,6 +401,3 @@ class CubeMarsAK606v3:
         :return: None
         """
         self.close()
-
-
-"""Sample doc string."""

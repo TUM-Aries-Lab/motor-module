@@ -42,14 +42,6 @@ docker:
 	docker build --no-cache -f Dockerfile -t motor_python-smoke .
 	docker run --rm motor_python-smoke
 
-tree:
-	uv run python repo_tree.py --update-readme
-
-build:
-	uv build
-	unzip -l dist/*.whl
-	unzip -p dist/*.whl */METADATA
-
 app:
 	sudo ./.venv/bin/python -m motor_python
 
