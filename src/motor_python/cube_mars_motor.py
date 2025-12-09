@@ -59,6 +59,12 @@ class CubeMarsAK606v3:
         self.baudrate = baudrate
         self.serial: serial.Serial | None = None
         self.status_parser = MotorStatusParser()
+        self.connected = False
+        self.communicating = False
+        self._consecutive_no_response = 0
+        self._max_no_response = (
+            3  # Number of failed attempts before marking as not communicating
+        )
         self._connect()
 
     def _connect(self) -> None:
@@ -75,13 +81,20 @@ class CubeMarsAK606v3:
                 dsrdtr=False,
             )
             time.sleep(0.1)  # Allow connection to stabilize
+            self.connected = True
             logger.info(f"Connected to motor on {self.port} at {self.baudrate} baud")
         except serial.SerialException as e:
-            logger.error(f"Failed to connect to motor on {self.port}: {e}")
-            raise
+            logger.warning(f"Failed to connect to motor on {self.port}: {e}")
+            logger.warning(
+                "Motor hardware not available - running in disconnected mode"
+            )
+            self.connected = False
         except Exception as e:
-            logger.error(f"Unexpected error connecting to motor: {e}")
-            raise
+            logger.warning(f"Unexpected error connecting to motor: {e}")
+            logger.warning(
+                "Motor hardware not available - running in disconnected mode"
+            )
+            self.connected = False
 
     def _crc16(self, data: bytes) -> int:
         """Calculate CRC16-CCITT checksum.
@@ -129,8 +142,9 @@ class CubeMarsAK606v3:
         :param frame: Complete frame to send.
         :return: Response bytes from motor (if any).
         """
-        if self.serial is None or not self.serial.is_open:
-            raise RuntimeError("Motor serial connection not open")
+        if not self.connected or self.serial is None or not self.serial.is_open:
+            logger.debug("Motor not connected - skipping message send")
+            return b""
 
         self.serial.write(frame)
         logger.debug(f"TX: {' '.join(f'{b:02X}' for b in frame)}")
@@ -148,8 +162,24 @@ class CubeMarsAK606v3:
             if response:
                 logger.debug(f"RX: {' '.join(f'{b:02X}' for b in response)}")
                 self._parse_motor_response(response)
+                # Reset failure counter on successful communication
+                self._consecutive_no_response = 0
+                self.communicating = True
         else:
-            logger.debug("No response from motor (expected for control commands)")
+            logger.debug("No response from motor")
+            # Track consecutive failures for status queries
+            cmd_byte = frame[2] if len(frame) > 2 else 0
+            if cmd_byte in (MotorCommand.CMD_GET_STATUS, MotorCommand.CMD_GET_POSITION):
+                self._consecutive_no_response += 1
+                if (
+                    self._consecutive_no_response >= self._max_no_response
+                    and self.communicating
+                ):
+                    logger.warning(
+                        f"Motor not responding after {self._consecutive_no_response} attempts - "
+                        "hardware may be disconnected or powered off"
+                    )
+                    self.communicating = False
 
         return response
 
@@ -364,6 +394,28 @@ class CubeMarsAK606v3:
         frame = self._build_message(MotorCommand.CMD_GET_POSITION, b"")
         response = self._send_message(frame)
         return response
+
+    def check_communication(self) -> bool:
+        """Verify motor is responding to commands.
+
+        :return: True if motor responds, False otherwise
+        """
+        if not self.connected:
+            return False
+
+        # Try to get status 2 times
+        for _attempt in range(2):
+            response = self.get_status()
+            if response and len(response) > 0:
+                self.communicating = True
+                self._consecutive_no_response = 0
+                logger.info("Motor communication verified")
+                return True
+            time.sleep(0.2)
+
+        logger.warning("Motor not responding to status queries")
+        self.communicating = False
+        return False
 
     def stop(self) -> None:
         """Stop the motor by setting all control values to zero.
