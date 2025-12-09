@@ -1,5 +1,6 @@
 """Common definitions for this module."""
 
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from enum import IntEnum
 from pathlib import Path
@@ -35,7 +36,7 @@ class LogLevel:
     error: str = "ERROR"
     critical: str = "CRITICAL"
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         """Iterate over log levels."""
         return iter(asdict(self).values())
 

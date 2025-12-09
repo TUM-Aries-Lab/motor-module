@@ -466,7 +466,12 @@ class CubeMarsAK606v3:
         """
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object | None,
+    ) -> None:
         """Context manager exit.
 
         :param exc_type: Exception type if an exception occurred.
