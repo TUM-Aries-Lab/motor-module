@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from loguru import logger
 
 from motor_python.definitions import (
-    FAULT_CODES,
     PAYLOAD_SIZES,
     SCALE_FACTORS,
+    FaultCode,
 )
 
 
@@ -209,7 +209,10 @@ class MotorStatusParser:
             return None
 
         status = self._read_byte(payload)
-        status_name = FAULT_CODES.get(status, f"UNKNOWN({status})")
+        try:
+            status_name = FaultCode(status).name
+        except ValueError:
+            status_name = f"UNKNOWN({status})"
         position = self._read_float(payload)
         motor_id = self._read_byte(payload)
 

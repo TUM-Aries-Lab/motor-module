@@ -1,6 +1,7 @@
 """Common definitions for this module."""
 
 from dataclasses import asdict, dataclass
+from enum import IntEnum
 from pathlib import Path
 
 import numpy as np
@@ -182,28 +183,34 @@ MIN_VELOCITY_ERPM = MOTOR_LIMITS.min_velocity_erpm
 MAX_POSITION_DEGREES = MOTOR_LIMITS.max_position_degrees
 MIN_POSITION_DEGREES = MOTOR_LIMITS.min_position_degrees
 
+
 # Motor Fault Codes (from CubeMars Manual)
-FAULT_CODES = {
-    0: "NONE",
-    1: "OVER_VOLTAGE",
-    2: "UNDER_VOLTAGE",
-    3: "DRV (Drive fault)",
-    4: "ABS_OVER_CURRENT (Motor over-current)",
-    5: "OVER_TEMP_FET (MOS over-temperature)",
-    6: "OVER_TEMP_MOTOR (Motor over-temperature)",
-    7: "GATE_DRIVER_OVER_VOLTAGE",
-    8: "GATE_DRIVER_UNDER_VOLTAGE",
-    9: "MCU_UNDER_VOLTAGE",
-    10: "BOOTING_FROM_WATCHDOG_RESET",
-    11: "ENCODER_SPI",
-    12: "ENCODER_SINCOS_BELOW_MIN_AMPLITUDE",
-    13: "ENCODER_SINCOS_ABOVE_MAX_AMPLITUDE",
-    14: "FLASH_CORRUPTION",
-    15: "HIGH_OFFSET_CURRENT_SENSOR_1",
-    16: "HIGH_OFFSET_CURRENT_SENSOR_2",
-    17: "HIGH_OFFSET_CURRENT_SENSOR_3",
-    18: "UNBALANCED_CURRENTS",
-}
+class FaultCode(IntEnum):
+    """Motor fault codes."""
+
+    NONE = 0
+    OVER_VOLTAGE = 1
+    UNDER_VOLTAGE = 2
+    DRV = 3  # Drive fault
+    ABS_OVER_CURRENT = 4  # Motor over-current
+    OVER_TEMP_FET = 5  # MOS over-temperature
+    OVER_TEMP_MOTOR = 6  # Motor over-temperature
+    GATE_DRIVER_OVER_VOLTAGE = 7
+    GATE_DRIVER_UNDER_VOLTAGE = 8
+    MCU_UNDER_VOLTAGE = 9
+    BOOTING_FROM_WATCHDOG_RESET = 10
+    ENCODER_SPI = 11
+    ENCODER_SINCOS_BELOW_MIN_AMPLITUDE = 12
+    ENCODER_SINCOS_ABOVE_MAX_AMPLITUDE = 13
+    FLASH_CORRUPTION = 14
+    HIGH_OFFSET_CURRENT_SENSOR_1 = 15
+    HIGH_OFFSET_CURRENT_SENSOR_2 = 16
+    HIGH_OFFSET_CURRENT_SENSOR_3 = 17
+    UNBALANCED_CURRENTS = 18
+
+
+# Backward compatibility - keep old FAULT_CODES dict as alias
+FAULT_CODES = {code.value: code.name for code in FaultCode}
 
 # CRC16 Lookup Table from CubeMars Manual
 CRC16_TAB = [
