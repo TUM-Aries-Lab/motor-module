@@ -8,6 +8,7 @@ import serial
 from loguru import logger
 
 from motor_python.definitions import (
+    CONVERSION_FACTORS,
     CRC16_TAB,
     CRC_CONSTANTS,
     FRAME_BYTES,
@@ -28,6 +29,7 @@ class MotorCommand(IntEnum):
     CMD_SET_SPEED = 0x49
     CMD_SET_POSITION = 0x4A
     CMD_GET_POSITION = 0x4C  # Get current position (updates every 10ms)
+    CMD_POSITION_ECHO = 0x57  # Echo response for position command
 
 
 class CubeMarsAK606v3:
@@ -49,9 +51,7 @@ class CubeMarsAK606v3:
         self.connected = False
         self.communicating = False
         self._consecutive_no_response = 0
-        self._max_no_response = (
-            3  # Number of failed attempts before marking as not communicating
-        )
+        self._max_no_response = MOTOR_DEFAULTS.max_no_response_attempts
         self._connect()
 
     def _connect(self) -> None:
@@ -63,11 +63,11 @@ class CubeMarsAK606v3:
             self.serial = serial.Serial(
                 port=self.port,
                 baudrate=self.baudrate,
-                timeout=1,
+                timeout=MOTOR_DEFAULTS.serial_timeout,
                 rtscts=False,
                 dsrdtr=False,
             )
-            time.sleep(0.1)  # Allow connection to stabilize
+            time.sleep(MOTOR_DEFAULTS.connection_stabilization_delay)
             self.connected = True
             logger.info(f"Connected to motor on {self.port} at {self.baudrate} baud")
         except serial.SerialException as e:
@@ -118,8 +118,8 @@ class CubeMarsAK606v3:
                 FRAME_BYTES.start,
                 len(data_frame),
                 *data_frame,
-                crc >> 8,
-                crc & 0xFF,
+                crc >> CONVERSION_FACTORS.crc_high_byte_shift,
+                crc & CONVERSION_FACTORS.byte_mask,
                 FRAME_BYTES.end,
             ]
         )
@@ -139,7 +139,7 @@ class CubeMarsAK606v3:
         logger.debug(f"TX: {' '.join(f'{b:02X}' for b in frame)}")
 
         # Wait for response - some commands need more time
-        time.sleep(0.1)
+        time.sleep(MOTOR_DEFAULTS.response_wait_delay)
 
         # Read any available response
         response = b""
@@ -157,7 +157,11 @@ class CubeMarsAK606v3:
         else:
             logger.debug("No response from motor")
             # Track consecutive failures for status queries
-            cmd_byte = frame[2] if len(frame) > 2 else 0
+            cmd_byte = (
+                frame[FRAME_BYTES.cmd_index]
+                if len(frame) > FRAME_BYTES.cmd_index
+                else 0
+            )
             if cmd_byte in (MotorCommand.CMD_GET_STATUS, MotorCommand.CMD_GET_POSITION):
                 self._consecutive_no_response += 1
                 if (
@@ -188,41 +192,54 @@ class CubeMarsAK606v3:
         :param response: Raw response bytes from motor.
         :return: None
         """
-        if len(response) < 10:  # Minimum valid response length
+        if len(response) < FRAME_BYTES.min_response_length:
             return
 
         # Check for valid frame structure (AA ... BB)
-        if response[0] != FRAME_BYTES.start or response[-1] != FRAME_BYTES.end:
+        if (
+            response[FRAME_BYTES.start_index] != FRAME_BYTES.start
+            or response[-1] != FRAME_BYTES.end
+        ):
             logger.warning("Invalid response frame structure")
             return
 
         # Extract basic frame info
-        data_length = response[1]
-        cmd = response[2] if len(response) > 2 else 0
+        data_length = response[FRAME_BYTES.length_index]
+        cmd = (
+            response[FRAME_BYTES.cmd_index]
+            if len(response) > FRAME_BYTES.cmd_index
+            else 0
+        )
 
-        logger.info("=" * 50)
+        logger.info("=" * FRAME_BYTES.separator_length)
         logger.info("MOTOR RESPONSE:")
         logger.info(f"  Command: 0x{cmd:02X}")
         logger.info(f"  Data Length: {data_length}")
 
         # Parse payload according to command type
-        if len(response) >= 6:
-            # Payload starts at byte 3, ends before CRC (last 3 bytes)
-            payload = response[3:-3]
+        if len(response) >= FRAME_BYTES.min_frame_with_payload:
+            payload = response[
+                FRAME_BYTES.payload_start_index : -FRAME_BYTES.crc_and_end_length
+            ]
 
             try:
-                if cmd == 0x45:  # Full status response
+                if cmd == MotorCommand.CMD_GET_STATUS:
                     self._parse_full_status(payload)
-                elif cmd in {0x4C, 0x57}:  # Position response (0x57 is echo of 0x4C)
-                    if len(payload) >= 4:
-                        position = struct.unpack(">f", payload[0:4])[0]
+                elif cmd in {
+                    MotorCommand.CMD_GET_POSITION,
+                    MotorCommand.CMD_POSITION_ECHO,
+                }:
+                    if len(payload) >= FRAME_BYTES.position_payload_size:
+                        position = struct.unpack(
+                            ">f", payload[0 : FRAME_BYTES.position_payload_size]
+                        )[0]
                         logger.info(f"  Position: {position:.2f}°")
 
             except Exception as e:
                 logger.warning(f"Error parsing motor response: {e}")
                 logger.info(f"  Raw payload: {payload.hex().upper()}")
 
-        logger.info("=" * 50)
+        logger.info("=" * FRAME_BYTES.separator_length)
 
     def set_position(self, position_degrees: float) -> None:
         """Set motor position in degrees.
@@ -290,7 +307,11 @@ class CubeMarsAK606v3:
         # Convert ERPM to degrees per second
         # ERPM = electrical revolutions per minute
         # degrees/sec = (ERPM / 60) * 360
-        degrees_per_second = abs(speed_erpm) / 60.0 * 360.0
+        degrees_per_second = (
+            abs(speed_erpm)
+            / CONVERSION_FACTORS.seconds_per_minute
+            * CONVERSION_FACTORS.degrees_per_revolution
+        )
 
         # Calculate time needed
         estimated_time = abs(target_degrees) / degrees_per_second
@@ -318,7 +339,7 @@ class CubeMarsAK606v3:
 
         # Calculate approximate time needed
         estimated_time = self._estimate_movement_time(target_degrees, speed_erpm)
-        time.sleep(min(estimated_time, 5.0))  # Cap at 5 seconds
+        time.sleep(min(estimated_time, MOTOR_LIMITS.max_movement_time))
 
         # Switch to position hold
         self.set_position(target_degrees)
@@ -344,7 +365,7 @@ class CubeMarsAK606v3:
             min(duty_cycle_percent, MOTOR_LIMITS.max_duty_cycle),
             MOTOR_LIMITS.min_duty_cycle,
         )
-        value = int(duty_cycle_percent * 100000.0)
+        value = int(duty_cycle_percent * SCALE_FACTORS.duty_command)
         payload = struct.pack(">i", value)
         frame = self._build_message(MotorCommand.CMD_SET_DUTY, payload)
         self._send_message(frame)
@@ -368,7 +389,7 @@ class CubeMarsAK606v3:
             min(current_amps, MOTOR_LIMITS.max_current_amps),
             MOTOR_LIMITS.min_current_amps,
         )
-        value = int(current_amps * 1000.0)
+        value = int(current_amps * SCALE_FACTORS.current_command)
         payload = struct.pack(">i", value)
         frame = self._build_message(MotorCommand.CMD_SET_CURRENT, payload)
         self._send_message(frame)
@@ -404,15 +425,15 @@ class CubeMarsAK606v3:
         if not self.connected:
             return False
 
-        # Try to get status 2 times
-        for _attempt in range(2):
+        # Try to get status multiple times
+        for _attempt in range(MOTOR_DEFAULTS.communication_check_retries):
             response = self.get_status()
             if response and len(response) > 0:
                 self.communicating = True
                 self._consecutive_no_response = 0
                 logger.info("Motor communication verified")
                 return True
-            time.sleep(0.2)
+            time.sleep(MOTOR_DEFAULTS.communication_retry_delay)
 
         logger.warning("Motor not responding to status queries")
         self.communicating = False
