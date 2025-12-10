@@ -37,14 +37,14 @@ def test_connection_success():
         assert motor.serial is not None
 
 
-def test_send_message_when_not_connected():
-    """Test that sending messages when not connected returns empty bytes."""
+def test_send_frame_when_not_connected():
+    """Test that sending frames when not connected returns empty bytes."""
     with patch("motor_python.cube_mars_motor.serial.Serial") as mock_serial:
         mock_serial.side_effect = Exception("Port not available")
         motor = CubeMarsAK606v3(port="/dev/nonexistent")
 
         # Should return empty bytes without error
-        result = motor._send_message(b"\xaa\x01\x45\xbb")
+        result = motor._send_frame(b"\xaa\x01\x45\xbb")
         assert result == b""
 
 

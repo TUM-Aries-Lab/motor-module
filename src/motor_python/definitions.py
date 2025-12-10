@@ -45,9 +45,9 @@ DEFAULT_LOG_FILENAME = "log_file"
 
 @dataclass(frozen=True)
 class MotorDefaults:
-    """Motor communication default settings."""
+    """Motor communication and timing default settings."""
 
-    port: str = "/dev/ttyTHS1"
+    port: Path = Path("/dev/ttyTHS1")
     baudrate: int = 921600
     step_delay: float = 0.05
     serial_timeout: float = 1.0  # Serial port timeout in seconds
@@ -57,7 +57,7 @@ class MotorDefaults:
     max_no_response_attempts: int = (
         3  # Max failed attempts before marking as not communicating
     )
-    communication_check_retries: int = 2  # Number of retries for communication check
+    max_communication_attempts: int = 2  # Number of retries for communication check
 
 
 @dataclass(frozen=True)
@@ -123,8 +123,8 @@ class MotorLimits:
     min_duty_cycle: float = -0.95  # Minimum duty cycle
     max_current_amps: float = 60.0  # Maximum current in amps
     min_current_amps: float = -60.0  # Minimum current in amps
-    max_velocity_erpm: int = 100000  # Maximum velocity in ERPM
-    min_velocity_erpm: int = -100000  # Minimum velocity in ERPM
+    max_velocity_electrical_rpm: int = 100000  # Maximum velocity in Electrical RPM
+    min_velocity_electrical_rpm: int = -100000  # Minimum velocity in Electrical RPM
     max_position_degrees: float = 360.0  # Maximum position: 1 full rotation
     min_position_degrees: float = -360.0  # Minimum position: -1 full rotation
     max_movement_time: float = 5.0  # Maximum movement time cap in seconds
@@ -148,39 +148,6 @@ SCALE_FACTORS = ScaleFactors()
 PAYLOAD_SIZES = PayloadSizes()
 MOTOR_LIMITS = MotorLimits()
 CONVERSION_FACTORS = ConversionFactors()
-
-# Backward compatibility - keep old constants as aliases
-DEFAULT_MOTOR_PORT = MOTOR_DEFAULTS.port
-DEFAULT_MOTOR_BAUDRATE = MOTOR_DEFAULTS.baudrate
-DEFAULT_STEP_DELAY = MOTOR_DEFAULTS.step_delay
-FRAME_START_BYTE = FRAME_BYTES.start
-FRAME_END_BYTE = FRAME_BYTES.end
-CRC_INITIAL_VALUE = CRC_CONSTANTS.initial_value
-CRC_BYTE_MASK = CRC_CONSTANTS.byte_mask
-CRC_WORD_MASK = CRC_CONSTANTS.word_mask
-CRC_SHIFT_BITS = CRC_CONSTANTS.shift_bits
-TEMP_SCALE_FACTOR = SCALE_FACTORS.temperature
-CURRENT_SCALE_FACTOR = SCALE_FACTORS.current
-DUTY_SCALE_FACTOR = SCALE_FACTORS.duty
-VOLTAGE_SCALE_FACTOR = SCALE_FACTORS.voltage
-VD_VQ_SCALE_FACTOR = SCALE_FACTORS.vd_vq
-POSITION_SCALE_FACTOR = SCALE_FACTORS.position
-TEMPERATURE_SIZE = PAYLOAD_SIZES.temperature
-CURRENT_SIZE = PAYLOAD_SIZES.current
-DUTY_SPEED_VOLTAGE_SIZE = PAYLOAD_SIZES.duty_speed_voltage
-STATUS_POSITION_ID_SIZE = PAYLOAD_SIZES.status_position_id
-RESERVED_SIZE = PAYLOAD_SIZES.reserved
-TEMP_RESERVED_SIZE = PAYLOAD_SIZES.temp_reserved
-VOLTAGE_CONTROL_SIZE = PAYLOAD_SIZES.voltage_control
-ENCODER_SIZE = PAYLOAD_SIZES.encoder
-MAX_DUTY_CYCLE = MOTOR_LIMITS.max_duty_cycle
-MIN_DUTY_CYCLE = MOTOR_LIMITS.min_duty_cycle
-MAX_CURRENT_AMPS = MOTOR_LIMITS.max_current_amps
-MIN_CURRENT_AMPS = MOTOR_LIMITS.min_current_amps
-MAX_VELOCITY_ERPM = MOTOR_LIMITS.max_velocity_erpm
-MIN_VELOCITY_ERPM = MOTOR_LIMITS.min_velocity_erpm
-MAX_POSITION_DEGREES = MOTOR_LIMITS.max_position_degrees
-MIN_POSITION_DEGREES = MOTOR_LIMITS.min_position_degrees
 
 # Motor Fault Codes (from CubeMars Manual)
 FAULT_CODES = {

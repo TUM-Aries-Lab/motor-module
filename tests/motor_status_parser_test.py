@@ -57,7 +57,7 @@ class TestMotorStatusParser:
 
         assert dsv is not None
         assert dsv.duty_cycle_percent == pytest.approx(0.5, rel=1e-3)
-        assert dsv.speed_erpm == 10000
+        assert dsv.speed_electrical_rpm == 10000
         assert dsv.voltage_volts == pytest.approx(48.0, rel=1e-2)
 
     def test_parse_status_position(self):
@@ -142,7 +142,7 @@ class TestMotorStatusParser:
         assert status.temperatures.mos_temp_celsius == pytest.approx(45.0, rel=1e-2)
         assert status.temperatures.motor_temp_celsius == pytest.approx(60.0, rel=1e-2)
         assert status.currents.output_current_amps == pytest.approx(10.0, rel=1e-2)
-        assert status.duty_speed_voltage.speed_erpm == 10000
+        assert status.duty_speed_voltage.speed_electrical_rpm == 10000
         assert status.status_position.position_degrees == pytest.approx(90.0, rel=1e-2)
         assert status.voltages_control.control_mode == 1
         assert status.encoders.encoder_angle_degrees == pytest.approx(90.0, rel=1e-2)

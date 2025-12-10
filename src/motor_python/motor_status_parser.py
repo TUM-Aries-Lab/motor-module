@@ -35,7 +35,7 @@ class MotorDutySpeedVoltage:
     """Motor duty cycle, speed, and voltage readings."""
 
     duty_cycle_percent: float
-    speed_erpm: int
+    speed_electrical_rpm: int
     voltage_volts: float
 
 
@@ -195,7 +195,7 @@ class MotorStatusParser:
 
         return MotorDutySpeedVoltage(
             duty_cycle_percent=duty,
-            speed_erpm=speed,
+            speed_electrical_rpm=speed,
             voltage_volts=voltage,
         )
 
@@ -336,7 +336,7 @@ class MotorStatusParser:
         )
         logger.info(
             f"  Duty: {status.duty_speed_voltage.duty_cycle_percent:.1f}% | "
-            f"Speed: {status.duty_speed_voltage.speed_erpm} ERPM | "
+            f"Speed: {status.duty_speed_voltage.speed_electrical_rpm} Electrical RPM | "
             f"Voltage: {status.duty_speed_voltage.voltage_volts:.1f}V"
         )
         logger.info(
