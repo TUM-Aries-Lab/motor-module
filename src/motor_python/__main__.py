@@ -7,6 +7,7 @@ from loguru import logger
 
 from motor_python.cube_mars_motor import CubeMarsAK606v3
 from motor_python.definitions import DEFAULT_LOG_LEVEL, LogLevel
+from motor_python.examples import run_two_rotation_test
 from motor_python.utils import setup_logger
 
 
@@ -52,41 +53,8 @@ def main(
         motor.get_status()
         time.sleep(0.5)
 
-        # Test motor with two full rotations: slow then fast
-        logger.info("Starting motor test: 2 full rotations (slow then fast)...")
-
-        try:
-            # First rotation: SLOW (0.5 second delays)
-            logger.info("=== ROTATION 1: SLOW ===")
-            for i in range(12):
-                target_position = (i * 30) % 360  # 0, 30, 60, 90...
-                logger.info(f"Slow: Moving to {target_position}° (position {i + 1}/12)")
-                motor.set_position(target_position)
-                time.sleep(0.5)  # Slow movement
-
-                # Query status at key positions
-                if i % 3 == 0:
-                    motor.get_status()
-
-            logger.info("First rotation complete!")
-            time.sleep(1.0)
-
-            # Second rotation: FAST (0.2 second delays)
-            logger.info("=== ROTATION 2: FAST ===")
-            for i in range(12):
-                target_position = (i * 30) % 360  # 0, 30, 60, 90...
-                logger.info(f"Fast: Moving to {target_position}° (position {i + 1}/12)")
-                motor.set_position(target_position)
-                time.sleep(0.2)  # Fast movement
-
-                # Query status at key positions
-                if i % 6 == 0:
-                    motor.get_status()
-
-            logger.info("Second rotation complete! Test finished.")
-
-        except KeyboardInterrupt:
-            logger.info("Interrupted by user")
+        # Run example test
+        run_two_rotation_test(motor)
 
         # Stop motor safely
         logger.info("Stopping motor...")

@@ -466,12 +466,17 @@ class CubeMarsAK606v3:
         """
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Context manager exit.
+    def __exit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        _exc_val: BaseException | None,
+        _exc_tb: object | None,
+    ) -> None:
+        """Context manager exit - ensures motor is properly closed.
 
-        :param exc_type: Exception type if an exception occurred.
-        :param exc_val: Exception value if an exception occurred.
-        :param exc_tb: Exception traceback if an exception occurred.
+        :param _exc_type: Exception type if an exception occurred (unused).
+        :param _exc_val: Exception value if an exception occurred (unused).
+        :param _exc_tb: Exception traceback if an exception occurred (unused).
         :return: None
         """
         self.close()

@@ -210,7 +210,7 @@ class MotorStatusParser:
 
         status = self._read_byte(payload)
         try:
-            status_name = FaultCode(status).name
+            status_name = FaultCode(status).get_description()
         except ValueError:
             status_name = f"UNKNOWN({status})"
         position = self._read_float(payload)

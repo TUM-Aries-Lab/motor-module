@@ -191,10 +191,10 @@ class FaultCode(IntEnum):
     NONE = 0
     OVER_VOLTAGE = 1
     UNDER_VOLTAGE = 2
-    DRV = 3  # Drive fault
-    ABS_OVER_CURRENT = 4  # Motor over-current
-    OVER_TEMP_FET = 5  # MOS over-temperature
-    OVER_TEMP_MOTOR = 6  # Motor over-temperature
+    DRV = 3
+    ABS_OVER_CURRENT = 4
+    OVER_TEMP_FET = 5
+    OVER_TEMP_MOTOR = 6
     GATE_DRIVER_OVER_VOLTAGE = 7
     GATE_DRIVER_UNDER_VOLTAGE = 8
     MCU_UNDER_VOLTAGE = 9
@@ -208,9 +208,34 @@ class FaultCode(IntEnum):
     HIGH_OFFSET_CURRENT_SENSOR_3 = 17
     UNBALANCED_CURRENTS = 18
 
+    def get_description(self) -> str:
+        """Get human-readable description of fault code.
 
-# Backward compatibility - keep old FAULT_CODES dict as alias
-FAULT_CODES = {code.value: code.name for code in FaultCode}
+        :return: Formatted string with code name and description.
+        """
+        descriptions = {
+            FaultCode.NONE: "NONE",
+            FaultCode.OVER_VOLTAGE: "OVER_VOLTAGE",
+            FaultCode.UNDER_VOLTAGE: "UNDER_VOLTAGE",
+            FaultCode.DRV: "DRV (Drive fault)",
+            FaultCode.ABS_OVER_CURRENT: "ABS_OVER_CURRENT (Motor over-current)",
+            FaultCode.OVER_TEMP_FET: "OVER_TEMP_FET (MOS over-temperature)",
+            FaultCode.OVER_TEMP_MOTOR: "OVER_TEMP_MOTOR (Motor over-temperature)",
+            FaultCode.GATE_DRIVER_OVER_VOLTAGE: "GATE_DRIVER_OVER_VOLTAGE",
+            FaultCode.GATE_DRIVER_UNDER_VOLTAGE: "GATE_DRIVER_UNDER_VOLTAGE",
+            FaultCode.MCU_UNDER_VOLTAGE: "MCU_UNDER_VOLTAGE",
+            FaultCode.BOOTING_FROM_WATCHDOG_RESET: "BOOTING_FROM_WATCHDOG_RESET",
+            FaultCode.ENCODER_SPI: "ENCODER_SPI",
+            FaultCode.ENCODER_SINCOS_BELOW_MIN_AMPLITUDE: "ENCODER_SINCOS_BELOW_MIN_AMPLITUDE",
+            FaultCode.ENCODER_SINCOS_ABOVE_MAX_AMPLITUDE: "ENCODER_SINCOS_ABOVE_MAX_AMPLITUDE",
+            FaultCode.FLASH_CORRUPTION: "FLASH_CORRUPTION",
+            FaultCode.HIGH_OFFSET_CURRENT_SENSOR_1: "HIGH_OFFSET_CURRENT_SENSOR_1",
+            FaultCode.HIGH_OFFSET_CURRENT_SENSOR_2: "HIGH_OFFSET_CURRENT_SENSOR_2",
+            FaultCode.HIGH_OFFSET_CURRENT_SENSOR_3: "HIGH_OFFSET_CURRENT_SENSOR_3",
+            FaultCode.UNBALANCED_CURRENTS: "UNBALANCED_CURRENTS",
+        }
+        return descriptions.get(self, self.name)
+
 
 # CRC16 Lookup Table from CubeMars Manual
 CRC16_TAB = [
