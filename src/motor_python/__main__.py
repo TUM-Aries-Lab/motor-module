@@ -27,25 +27,20 @@ def main(
         motor = CubeMarsAK606v3()
     except Exception as e:
         logger.error(f"Failed to initialize motor controller: {e}")
-        logger.info("Exiting gracefully - hardware not available")
+        logger.info("Hardware not available")
         return
 
     with motor:
-        if not motor.connected:
-            logger.warning("Motor hardware not connected - cannot run motor test")
-            logger.info("Exiting gracefully - hardware not available")
+        if not motor.connected or not motor.check_communication():
+            if not motor.connected:
+                logger.warning("Motor hardware not connected - cannot run motor test")
+            else:
+                logger.warning(
+                    "Motor is connected but not responding - hardware may be powered off or cables disconnected"
+                )
             return
 
         logger.info("Testing motor feedback response...")
-
-        # Verify motor is communicating
-        logger.info("Verifying motor communication...")
-        if not motor.check_communication():
-            logger.warning(
-                "Motor is connected but not responding - hardware may be powered off or cables disconnected"
-            )
-            logger.info("Exiting gracefully - hardware not communicating")
-            return
 
         # Query motor status at startup
         logger.info("Initial motor status query:")

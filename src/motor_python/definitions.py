@@ -46,6 +46,8 @@ DEFAULT_LOG_FILENAME = "log_file"
 DEFAULT_MOTOR_PORT = "/dev/ttyTHS1"
 DEFAULT_MOTOR_BAUDRATE = 921600
 DEFAULT_STEP_DELAY = 0.05
+MAX_COMMUNICATION_ATTEMPTS = 2  # Maximum attempts for communication checks
+COMMUNICATION_RETRY_DELAY = 0.2  # Delay between retry attempts (seconds)
 
 # Motor protocol frame bytes
 FRAME_START_BYTE = 0xAA

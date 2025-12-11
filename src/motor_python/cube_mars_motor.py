@@ -8,6 +8,7 @@ import serial
 from loguru import logger
 
 from motor_python.definitions import (
+    COMMUNICATION_RETRY_DELAY,
     CRC16_TAB,
     CRC_BYTE_MASK,
     CRC_INITIAL_VALUE,
@@ -18,6 +19,7 @@ from motor_python.definitions import (
     DEFAULT_STEP_DELAY,
     FRAME_END_BYTE,
     FRAME_START_BYTE,
+    MAX_COMMUNICATION_ATTEMPTS,
     MAX_CURRENT_AMPS,
     MAX_DUTY_CYCLE,
     MAX_POSITION_DEGREES,
@@ -85,15 +87,10 @@ class CubeMarsAK606v3:
             logger.info(f"Connected to motor on {self.port} at {self.baudrate} baud")
         except serial.SerialException as e:
             logger.warning(f"Failed to connect to motor on {self.port}: {e}")
-            logger.warning(
-                "Motor hardware not available - running in disconnected mode"
-            )
             self.connected = False
         except Exception as e:
             logger.warning(f"Unexpected error connecting to motor: {e}")
-            logger.warning(
-                "Motor hardware not available - running in disconnected mode"
-            )
+            self.connected = False
             self.connected = False
 
     def _crc16(self, data: bytes) -> int:
@@ -136,8 +133,18 @@ class CubeMarsAK606v3:
         )
         return frame
 
+    def _get_command_from_frame(self, frame: bytes) -> int:
+        """Extract command byte from frame.
+
+        :param frame: Frame bytes.
+        :return: Command byte, or 0 if frame is too short.
+        """
+        # Frame structure: AA | DataLength | CMD | Payload | CRC_H | CRC_L | BB
+        # Command byte is at index 2
+        return frame[2] if len(frame) > 2 else 0
+
     def _send_message(self, frame: bytes) -> bytes:
-        """Send message to motor over UART and read response.
+        """Send frame to motor over UART and read response.
 
         :param frame: Complete frame to send.
         :return: Response bytes from motor (if any).
@@ -168,7 +175,7 @@ class CubeMarsAK606v3:
         else:
             logger.debug("No response from motor")
             # Track consecutive failures for status queries
-            cmd_byte = frame[2] if len(frame) > 2 else 0
+            cmd_byte = self._get_command_from_frame(frame)
             if cmd_byte in (MotorCommand.CMD_GET_STATUS, MotorCommand.CMD_GET_POSITION):
                 self._consecutive_no_response += 1
                 if (
@@ -403,15 +410,15 @@ class CubeMarsAK606v3:
         if not self.connected:
             return False
 
-        # Try to get status 2 times
-        for _attempt in range(2):
-            response = self.get_status()
-            if response and len(response) > 0:
+        # Try to get status MAX_COMMUNICATION_ATTEMPTS times
+        for _attempt in range(MAX_COMMUNICATION_ATTEMPTS):
+            status = self.get_status()
+            if status and len(status) > 0:
                 self.communicating = True
                 self._consecutive_no_response = 0
                 logger.info("Motor communication verified")
                 return True
-            time.sleep(0.2)
+            time.sleep(COMMUNICATION_RETRY_DELAY)
 
         logger.warning("Motor not responding to status queries")
         self.communicating = False
