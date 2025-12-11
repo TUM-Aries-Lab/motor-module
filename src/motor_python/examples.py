@@ -1,5 +1,6 @@
 """Example usage functions for motor control."""
 
+import itertools
 import math
 import time
 
@@ -8,15 +9,19 @@ from loguru import logger
 from motor_python.cube_mars_motor import CubeMarsAK606v3
 
 
-def run_position_control(motor: CubeMarsAK606v3) -> None:
+def run_position_control(
+    motor: CubeMarsAK606v3, num_steps: int = 10, max_angle_degrees: float = 30.0
+) -> None:
     """Run position control mode with sine wave motion.
 
     :param motor: Motor controller instance.
+    :param num_steps: Number of steps in the sine wave cycle.
+    :param max_angle_degrees: Maximum angle in degrees for the sine wave.
     :return: None
     """
-    for step in range(10):
-        # Sine wave: -30° to +30° over 10 steps
-        angle = 30 * math.sin(step * 2 * math.pi / 10)
+    for step in range(num_steps):
+        # Sine wave: -max_angle_degrees to +max_angle_degrees over num_steps
+        angle = max_angle_degrees * math.sin(step * 2 * math.pi / num_steps)
         motor.set_position(angle)
         time.sleep(0.1)
 
@@ -25,19 +30,20 @@ def run_position_control(motor: CubeMarsAK606v3) -> None:
             motor.get_status()
 
 
-def run_velocity_control(motor: CubeMarsAK606v3) -> None:
+def run_velocity_control(motor: CubeMarsAK606v3, velocity_erpm: int = 5000) -> None:
     """Run velocity control mode with forward and reverse.
 
     :param motor: Motor controller instance.
+    :param velocity_erpm: Velocity in electrical RPM (ERPM). Positive for forward, negative for reverse.
     :return: None
     """
     logger.info("Forward velocity...")
-    motor.set_velocity(5000)  # Forward
+    motor.set_velocity(velocity_erpm)  # Forward
     time.sleep(0.5)
     motor.get_status()
 
     logger.info("Reverse velocity...")
-    motor.set_velocity(-5000)  # Reverse
+    motor.set_velocity(-velocity_erpm)  # Reverse
     time.sleep(0.5)
     motor.get_status()
 
@@ -86,11 +92,11 @@ def run_motor_loop(motor: CubeMarsAK606v3) -> None:
 
     try:
         loop_count = 0
-        while True:
+        # Cycle through control modes indefinitely
+        for mode_name, control_mode_func in itertools.cycle(control_modes):
             loop_count += 1
-            mode_name, mode_func = control_modes[loop_count % len(control_modes)]
-            logger.info(f"Running {mode_name} (iteration {loop_count})...")
-            mode_func(motor)
+            logger.info(f"[Loop {loop_count}] {mode_name}")
+            control_mode_func(motor)
             time.sleep(0.5)
     except KeyboardInterrupt:
         logger.info("Loop stopped by user")

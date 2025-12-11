@@ -43,52 +43,125 @@ class LogLevel:
 DEFAULT_LOG_LEVEL = LogLevel.info
 DEFAULT_LOG_FILENAME = "log_file"
 
-# Motor communication defaults
-DEFAULT_MOTOR_PORT = "/dev/ttyTHS1"
-DEFAULT_MOTOR_BAUDRATE = 921600
-DEFAULT_STEP_DELAY = 0.05
-MAX_COMMUNICATION_ATTEMPTS = 2  # Maximum attempts for communication checks
-COMMUNICATION_RETRY_DELAY = 0.2  # Delay between retry attempts (seconds)
 
-# Motor protocol frame bytes
-FRAME_START_BYTE = 0xAA
-FRAME_END_BYTE = 0xBB
+@dataclass(frozen=True)
+class MotorDefaults:
+    """Motor communication and timing default settings."""
 
-# CRC16 calculation constants
-CRC_INITIAL_VALUE = 0
-CRC_BYTE_MASK = 0xFF
-CRC_WORD_MASK = 0xFFFF
-CRC_SHIFT_BITS = 8
+    port: Path = Path("/dev/ttyTHS1")
+    baudrate: int = 921600
+    step_delay: float = 0.05
+    serial_timeout: float = 1.0  # Serial port timeout in seconds
+    connection_stabilization_delay: float = 0.1  # Delay after opening serial port
+    response_wait_delay: float = 0.1  # Delay before reading response
+    communication_retry_delay: float = 0.2  # Delay between communication check retries
+    max_no_response_attempts: int = (
+        3  # Max failed attempts before marking as not communicating
+    )
+    max_communication_attempts: int = 2  # Number of retries for communication check
 
-# Motor status payload scaling factors
-TEMP_SCALE_FACTOR = 10.0  # Temperature is sent as int16 * 10
-CURRENT_SCALE_FACTOR = 100.0  # Current is sent as int32 * 100
-DUTY_SCALE_FACTOR = 1000.0  # Duty cycle is sent as int16 * 1000
-VOLTAGE_SCALE_FACTOR = 10.0  # Voltage is sent as int16 * 10
-VD_VQ_SCALE_FACTOR = 1000.0  # Vd/Vq voltages are sent as int32 * 1000
-POSITION_SCALE_FACTOR = 1_000_000.0  # Position is sent as int32 * 1,000,000
 
-# Motor status payload structure sizes
-TEMPERATURE_SIZE = 4  # 2 int16 values
-CURRENT_SIZE = 16  # 4 int32 values
-DUTY_SPEED_VOLTAGE_SIZE = 8  # 1 int16 + 1 int32 + 1 int16
-STATUS_POSITION_ID_SIZE = 6  # 1 byte + 1 float + 1 byte
-RESERVED_SIZE = 24  # Reserved bytes
-TEMP_RESERVED_SIZE = 6  # Temperature reserved bytes
-VOLTAGE_CONTROL_SIZE = 12  # 2 int32 + 1 int32
-ENCODER_SIZE = 8  # 2 float values
+@dataclass(frozen=True)
+class FrameBytes:
+    """Motor protocol frame bytes."""
 
-# Motor control limits
-MAX_DUTY_CYCLE = 0.95  # Maximum duty cycle (95% to prevent saturation)
-MIN_DUTY_CYCLE = -0.95  # Minimum duty cycle
-MAX_CURRENT_AMPS = 60.0  # Maximum current in amps
-MIN_CURRENT_AMPS = -60.0  # Minimum current in amps
-MAX_VELOCITY_ERPM = 100000  # Maximum velocity in ERPM
-MIN_VELOCITY_ERPM = -100000  # Minimum velocity in ERPM
-MAX_POSITION_DEGREES = (
-    360.0  # Maximum position: 1 full rotation (safe for exosuit joints)
-)
-MIN_POSITION_DEGREES = -360.0  # Minimum position: -1 full rotation
+    start: int = 0xAA
+    end: int = 0xBB
+    min_response_length: int = 10  # Minimum valid response frame length
+    min_frame_with_payload: int = 6  # Minimum frame length that includes payload
+    separator_length: int = 50  # Length of separator line in logs
+    start_index: int = 0  # Index of start byte in frame
+    length_index: int = 1  # Index of length byte in frame
+    cmd_index: int = 2  # Index of command byte in frame
+    payload_start_index: int = 3  # Index where payload starts
+    crc_and_end_length: int = 3  # CRC (2 bytes) + end byte (1 byte)
+    position_payload_size: int = 4  # Size of position data in payload
+
+
+@dataclass(frozen=True)
+class CRCConstants:
+    """CRC16 calculation constants."""
+
+    initial_value: int = 0
+    byte_mask: int = 0xFF
+    word_mask: int = 0xFFFF
+    shift_bits: int = 8
+
+
+@dataclass(frozen=True)
+class ScaleFactors:
+    """Motor status payload scaling factors.
+
+    The motor protocol transmits values as scaled integers to preserve precision.
+    These factors convert between the motor's integer representation and SI units:
+    - Temperature: Motor sends deci-degrees Celsius (0.1°C units) as int16
+    - Current: Motor sends centi-amps (0.01A units) as int32
+    - Voltage: Motor sends deci-volts (0.1V units) as int16
+    - Duty: Motor sends per-mille (0.1% units) as int16 for status, different scaling for commands
+    - Position: Motor sends micro-degrees (0.000001° units) as int32
+    """
+
+    temperature: float = (
+        10.0  # Temperature is sent as int16 * 10 (deci-degrees Celsius)
+    )
+    current: float = 100.0  # Current is sent as int32 * 100 (centi-amps)
+    duty: float = 1000.0  # Duty cycle is sent as int16 * 1000 (per-mille)
+    duty_command: float = 100000.0  # Duty cycle command is sent as int32 * 100000
+    current_command: float = 1000.0  # Current command is sent as int32 * 1000
+    voltage: float = 10.0  # Voltage is sent as int16 * 10 (deci-volts)
+    vd_vq: float = 1000.0  # Vd/Vq voltages are sent as int32 * 1000
+    position: float = (
+        1_000_000.0  # Position is sent as int32 * 1,000,000 (micro-degrees)
+    )
+
+
+@dataclass(frozen=True)
+class PayloadSizes:
+    """Motor status payload structure sizes."""
+
+    temperature: int = 4  # 2 int16 values
+    current: int = 16  # 4 int32 values
+    duty_speed_voltage: int = 8  # 1 int16 + 1 int32 + 1 int16
+    status_position_id: int = 6  # 1 byte + 1 float + 1 byte
+    reserved: int = 24  # Reserved bytes
+    temp_reserved: int = 6  # Temperature reserved bytes
+    voltage_control: int = 12  # 2 int32 + 1 int32
+    encoder: int = 8  # 2 float values
+
+
+@dataclass(frozen=True)
+class MotorLimits:
+    """Motor control limits."""
+
+    max_duty_cycle: float = 0.95  # Maximum duty cycle (95% to prevent saturation)
+    min_duty_cycle: float = -0.95  # Minimum duty cycle
+    max_current_amps: float = 60.0  # Maximum current in amps
+    min_current_amps: float = -60.0  # Minimum current in amps
+    max_velocity_electrical_rpm: int = 100000  # Maximum velocity in Electrical RPM
+    min_velocity_electrical_rpm: int = -100000  # Minimum velocity in Electrical RPM
+    max_position_degrees: float = 360.0  # Maximum position: 1 full rotation
+    min_position_degrees: float = -360.0  # Minimum position: -1 full rotation
+    max_movement_time: float = 5.0  # Maximum movement time cap in seconds
+
+
+@dataclass(frozen=True)
+class ConversionFactors:
+    """Unit conversion factors."""
+
+    seconds_per_minute: float = 60.0  # Seconds in a minute
+    degrees_per_revolution: float = 360.0  # Degrees in one full revolution
+    crc_high_byte_shift: int = 8  # Bit shift for CRC high byte
+    byte_mask: int = 0xFF  # Mask for extracting single byte
+
+
+# Instantiate frozen dataclasses for easy access
+MOTOR_DEFAULTS = MotorDefaults()
+FRAME_BYTES = FrameBytes()
+CRC_CONSTANTS = CRCConstants()
+SCALE_FACTORS = ScaleFactors()
+PAYLOAD_SIZES = PayloadSizes()
+MOTOR_LIMITS = MotorLimits()
+CONVERSION_FACTORS = ConversionFactors()
 
 
 # Motor Fault Codes (from CubeMars Manual)
