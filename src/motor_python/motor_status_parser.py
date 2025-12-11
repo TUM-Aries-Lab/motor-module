@@ -11,7 +11,6 @@ from motor_python.definitions import (
     DUTY_SCALE_FACTOR,
     DUTY_SPEED_VOLTAGE_SIZE,
     ENCODER_SIZE,
-    FAULT_CODES,
     RESERVED_SIZE,
     STATUS_POSITION_ID_SIZE,
     TEMP_RESERVED_SIZE,
@@ -20,6 +19,7 @@ from motor_python.definitions import (
     VD_VQ_SCALE_FACTOR,
     VOLTAGE_CONTROL_SIZE,
     VOLTAGE_SCALE_FACTOR,
+    FaultCode,
 )
 
 
@@ -220,7 +220,10 @@ class MotorStatusParser:
             return None
 
         status = self._read_byte(payload)
-        status_name = FAULT_CODES.get(status, f"UNKNOWN({status})")
+        try:
+            status_name = FaultCode(status).get_description()
+        except ValueError:
+            status_name = f"UNKNOWN({status})"
         position = self._read_float(payload)
         motor_id = self._read_byte(payload)
 

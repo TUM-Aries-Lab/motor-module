@@ -1,6 +1,7 @@
 """Common definitions for this module."""
 
 from dataclasses import asdict, dataclass
+from enum import IntEnum
 from pathlib import Path
 
 import numpy as np
@@ -89,28 +90,59 @@ MAX_POSITION_DEGREES = (
 )
 MIN_POSITION_DEGREES = -360.0  # Minimum position: -1 full rotation
 
+
 # Motor Fault Codes (from CubeMars Manual)
-FAULT_CODES = {
-    0: "NONE",
-    1: "OVER_VOLTAGE",
-    2: "UNDER_VOLTAGE",
-    3: "DRV (Drive fault)",
-    4: "ABS_OVER_CURRENT (Motor over-current)",
-    5: "OVER_TEMP_FET (MOS over-temperature)",
-    6: "OVER_TEMP_MOTOR (Motor over-temperature)",
-    7: "GATE_DRIVER_OVER_VOLTAGE",
-    8: "GATE_DRIVER_UNDER_VOLTAGE",
-    9: "MCU_UNDER_VOLTAGE",
-    10: "BOOTING_FROM_WATCHDOG_RESET",
-    11: "ENCODER_SPI",
-    12: "ENCODER_SINCOS_BELOW_MIN_AMPLITUDE",
-    13: "ENCODER_SINCOS_ABOVE_MAX_AMPLITUDE",
-    14: "FLASH_CORRUPTION",
-    15: "HIGH_OFFSET_CURRENT_SENSOR_1",
-    16: "HIGH_OFFSET_CURRENT_SENSOR_2",
-    17: "HIGH_OFFSET_CURRENT_SENSOR_3",
-    18: "UNBALANCED_CURRENTS",
-}
+class FaultCode(IntEnum):
+    """Motor fault codes."""
+
+    NONE = 0
+    OVER_VOLTAGE = 1
+    UNDER_VOLTAGE = 2
+    DRV = 3
+    ABS_OVER_CURRENT = 4
+    OVER_TEMP_FET = 5
+    OVER_TEMP_MOTOR = 6
+    GATE_DRIVER_OVER_VOLTAGE = 7
+    GATE_DRIVER_UNDER_VOLTAGE = 8
+    MCU_UNDER_VOLTAGE = 9
+    BOOTING_FROM_WATCHDOG_RESET = 10
+    ENCODER_SPI = 11
+    ENCODER_SINCOS_BELOW_MIN_AMPLITUDE = 12
+    ENCODER_SINCOS_ABOVE_MAX_AMPLITUDE = 13
+    FLASH_CORRUPTION = 14
+    HIGH_OFFSET_CURRENT_SENSOR_1 = 15
+    HIGH_OFFSET_CURRENT_SENSOR_2 = 16
+    HIGH_OFFSET_CURRENT_SENSOR_3 = 17
+    UNBALANCED_CURRENTS = 18
+
+    def get_description(self) -> str:
+        """Get human-readable description of fault code.
+
+        :return: Formatted string with code name and description.
+        """
+        descriptions = {
+            FaultCode.NONE: "NONE",
+            FaultCode.OVER_VOLTAGE: "OVER_VOLTAGE",
+            FaultCode.UNDER_VOLTAGE: "UNDER_VOLTAGE",
+            FaultCode.DRV: "DRV (Drive fault)",
+            FaultCode.ABS_OVER_CURRENT: "ABS_OVER_CURRENT (Motor over-current)",
+            FaultCode.OVER_TEMP_FET: "OVER_TEMP_FET (MOS over-temperature)",
+            FaultCode.OVER_TEMP_MOTOR: "OVER_TEMP_MOTOR (Motor over-temperature)",
+            FaultCode.GATE_DRIVER_OVER_VOLTAGE: "GATE_DRIVER_OVER_VOLTAGE",
+            FaultCode.GATE_DRIVER_UNDER_VOLTAGE: "GATE_DRIVER_UNDER_VOLTAGE",
+            FaultCode.MCU_UNDER_VOLTAGE: "MCU_UNDER_VOLTAGE",
+            FaultCode.BOOTING_FROM_WATCHDOG_RESET: "BOOTING_FROM_WATCHDOG_RESET",
+            FaultCode.ENCODER_SPI: "ENCODER_SPI",
+            FaultCode.ENCODER_SINCOS_BELOW_MIN_AMPLITUDE: "ENCODER_SINCOS_BELOW_MIN_AMPLITUDE",
+            FaultCode.ENCODER_SINCOS_ABOVE_MAX_AMPLITUDE: "ENCODER_SINCOS_ABOVE_MAX_AMPLITUDE",
+            FaultCode.FLASH_CORRUPTION: "FLASH_CORRUPTION",
+            FaultCode.HIGH_OFFSET_CURRENT_SENSOR_1: "HIGH_OFFSET_CURRENT_SENSOR_1",
+            FaultCode.HIGH_OFFSET_CURRENT_SENSOR_2: "HIGH_OFFSET_CURRENT_SENSOR_2",
+            FaultCode.HIGH_OFFSET_CURRENT_SENSOR_3: "HIGH_OFFSET_CURRENT_SENSOR_3",
+            FaultCode.UNBALANCED_CURRENTS: "UNBALANCED_CURRENTS",
+        }
+        return descriptions.get(self, self.name)
+
 
 # CRC16 Lookup Table from CubeMars Manual
 CRC16_TAB = [
