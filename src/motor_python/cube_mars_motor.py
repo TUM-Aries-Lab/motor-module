@@ -3,6 +3,7 @@
 import struct
 import time
 from enum import IntEnum
+from pathlib import Path
 
 import serial
 from loguru import logger
@@ -49,7 +50,9 @@ class CubeMarsAK606v3:
     """AK60-6 Motor Controller for CubeMars V3 UART Protocol."""
 
     def __init__(
-        self, port: str = DEFAULT_MOTOR_PORT, baudrate: int = DEFAULT_MOTOR_BAUDRATE
+        self,
+        port: Path | str = DEFAULT_MOTOR_PORT,
+        baudrate: int = DEFAULT_MOTOR_BAUDRATE,
     ) -> None:
         """Initialize motor connection.
 
@@ -57,7 +60,7 @@ class CubeMarsAK606v3:
         :param baudrate: Communication baudrate (default: DEFAULT_MOTOR_BAUDRATE).
         :return: None
         """
-        self.port = port
+        self.port = str(port)  # Convert Path to str for serial library
         self.baudrate = baudrate
         self.serial: serial.Serial | None = None
         self.status_parser = MotorStatusParser()
