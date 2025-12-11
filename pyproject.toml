@@ -11,8 +11,6 @@ dependencies = [
     "numpy>=2.2.3",
     "loguru>=0.7.3",
     "pyserial>=3.5",
-  "numpy>=2.2.3",
-  "loguru>=0.7.3",
 ]
 
 [dependency-groups]

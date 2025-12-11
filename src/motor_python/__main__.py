@@ -7,6 +7,7 @@ from loguru import logger
 
 from motor_python.cube_mars_motor import CubeMarsAK606v3
 from motor_python.definitions import DEFAULT_LOG_LEVEL, LogLevel
+from motor_python.examples import run_motor_loop
 from motor_python.utils import setup_logger
 
 
@@ -23,7 +24,21 @@ def main(
     logger.info("Starting motor control loop...")
 
     # Use the CubeMarsAK606v3 class with context manager
-    with CubeMarsAK606v3() as motor:
+    try:
+        motor = CubeMarsAK606v3()
+    except Exception as e:
+        logger.error(f"Failed to initialize motor controller: {e}")
+        return
+
+    with motor:
+        if not motor.connected or not motor.check_communication():
+            logger.warning(
+                "Motor hardware not connected - cannot run motor test"
+                if not motor.connected
+                else "Motor is connected but not responding - hardware may be powered off or cables disconnected"
+            )
+            return
+
         logger.info("Testing motor feedback response...")
 
         # Query motor status at startup
@@ -31,39 +46,9 @@ def main(
         motor.get_status()
         time.sleep(0.5)
 
-        # Test motor with two full rotations: slow then fast
-        logger.info("Starting motor test: 2 full rotations (slow then fast)...")
-
+        # Run the motor control loop with all modes
         try:
-            # First rotation: SLOW (0.5 second delays)
-            logger.info("=== ROTATION 1: SLOW ===")
-            for i in range(12):
-                target_position = (i * 30) % 360  # 0, 30, 60, 90...
-                logger.info(f"Slow: Moving to {target_position}° (position {i + 1}/12)")
-                motor.set_position(target_position)
-                time.sleep(0.5)  # Slow movement
-
-                # Query status at key positions
-                if i % 3 == 0:
-                    motor.get_status()
-
-            logger.info("First rotation complete!")
-            time.sleep(1.0)
-
-            # Second rotation: FAST (0.2 second delays)
-            logger.info("=== ROTATION 2: FAST ===")
-            for i in range(12):
-                target_position = (i * 30) % 360  # 0, 30, 60, 90...
-                logger.info(f"Fast: Moving to {target_position}° (position {i + 1}/12)")
-                motor.set_position(target_position)
-                time.sleep(0.2)  # Fast movement
-
-                # Query status at key positions
-                if i % 6 == 0:
-                    motor.get_status()
-
-            logger.info("Second rotation complete! Test finished.")
-
+            run_motor_loop(motor)
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
 

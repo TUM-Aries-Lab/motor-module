@@ -6,20 +6,9 @@ from dataclasses import dataclass
 from loguru import logger
 
 from motor_python.definitions import (
-    CURRENT_SCALE_FACTOR,
-    CURRENT_SIZE,
-    DUTY_SCALE_FACTOR,
-    DUTY_SPEED_VOLTAGE_SIZE,
-    ENCODER_SIZE,
-    FAULT_CODES,
-    RESERVED_SIZE,
-    STATUS_POSITION_ID_SIZE,
-    TEMP_RESERVED_SIZE,
-    TEMP_SCALE_FACTOR,
-    TEMPERATURE_SIZE,
-    VD_VQ_SCALE_FACTOR,
-    VOLTAGE_CONTROL_SIZE,
-    VOLTAGE_SCALE_FACTOR,
+    PAYLOAD_SIZES,
+    SCALE_FACTORS,
+    FaultCode,
 )
 
 
@@ -159,11 +148,11 @@ class MotorStatusParser:
         :param payload: Payload bytes.
         :return: MotorTemperatures object or None if insufficient data.
         """
-        if len(payload) < self.payload_offset + TEMPERATURE_SIZE:
+        if len(payload) < self.payload_offset + PAYLOAD_SIZES.temperature:
             return None
 
-        mos_temp = self._read_int16(payload) / TEMP_SCALE_FACTOR
-        motor_temp = self._read_int16(payload) / TEMP_SCALE_FACTOR
+        mos_temp = self._read_int16(payload) / SCALE_FACTORS.temperature
+        motor_temp = self._read_int16(payload) / SCALE_FACTORS.temperature
 
         return MotorTemperatures(
             mos_temp_celsius=mos_temp,
@@ -176,13 +165,13 @@ class MotorStatusParser:
         :param payload: Payload bytes.
         :return: MotorCurrents object or None if insufficient data.
         """
-        if len(payload) < self.payload_offset + CURRENT_SIZE:
+        if len(payload) < self.payload_offset + PAYLOAD_SIZES.current:
             return None
 
-        output_current = self._read_int32(payload) / CURRENT_SCALE_FACTOR
-        input_current = self._read_int32(payload) / CURRENT_SCALE_FACTOR
-        id_current = self._read_int32(payload) / CURRENT_SCALE_FACTOR
-        iq_current = self._read_int32(payload) / CURRENT_SCALE_FACTOR
+        output_current = self._read_int32(payload) / SCALE_FACTORS.current
+        input_current = self._read_int32(payload) / SCALE_FACTORS.current
+        id_current = self._read_int32(payload) / SCALE_FACTORS.current
+        iq_current = self._read_int32(payload) / SCALE_FACTORS.current
 
         return MotorCurrents(
             output_current_amps=output_current,
@@ -197,12 +186,12 @@ class MotorStatusParser:
         :param payload: Payload bytes.
         :return: MotorDutySpeedVoltage object or None if insufficient data.
         """
-        if len(payload) < self.payload_offset + DUTY_SPEED_VOLTAGE_SIZE:
+        if len(payload) < self.payload_offset + PAYLOAD_SIZES.duty_speed_voltage:
             return None
 
-        duty = self._read_int16(payload) / DUTY_SCALE_FACTOR
+        duty = self._read_int16(payload) / SCALE_FACTORS.duty
         speed = self._read_int32(payload)
-        voltage = self._read_int16(payload) / VOLTAGE_SCALE_FACTOR
+        voltage = self._read_int16(payload) / SCALE_FACTORS.voltage
 
         return MotorDutySpeedVoltage(
             duty_cycle_percent=duty,
@@ -216,11 +205,14 @@ class MotorStatusParser:
         :param payload: Payload bytes.
         :return: MotorStatusPosition object or None if insufficient data.
         """
-        if len(payload) < self.payload_offset + STATUS_POSITION_ID_SIZE:
+        if len(payload) < self.payload_offset + PAYLOAD_SIZES.status_position_id:
             return None
 
         status = self._read_byte(payload)
-        status_name = FAULT_CODES.get(status, f"UNKNOWN({status})")
+        try:
+            status_name = FaultCode(status).get_description()
+        except ValueError:
+            status_name = f"UNKNOWN({status})"
         position = self._read_float(payload)
         motor_id = self._read_byte(payload)
 
@@ -237,11 +229,11 @@ class MotorStatusParser:
         :param payload: Payload bytes.
         :return: MotorVoltagesControl object or None if insufficient data.
         """
-        if len(payload) < self.payload_offset + VOLTAGE_CONTROL_SIZE:
+        if len(payload) < self.payload_offset + PAYLOAD_SIZES.voltage_control:
             return None
 
-        vd = self._read_int32(payload) / VD_VQ_SCALE_FACTOR
-        vq = self._read_int32(payload) / VD_VQ_SCALE_FACTOR
+        vd = self._read_int32(payload) / SCALE_FACTORS.vd_vq
+        vq = self._read_int32(payload) / SCALE_FACTORS.vd_vq
         ctrl_mode = self._read_int32(payload)
 
         return MotorVoltagesControl(
@@ -256,7 +248,7 @@ class MotorStatusParser:
         :param payload: Payload bytes.
         :return: MotorEncoders object or None if insufficient data.
         """
-        if len(payload) < self.payload_offset + ENCODER_SIZE:
+        if len(payload) < self.payload_offset + PAYLOAD_SIZES.encoder:
             return None
 
         enc_angle = self._read_float(payload)
@@ -282,12 +274,12 @@ class MotorStatusParser:
             duty_speed_voltage = self.parse_duty_speed_voltage(payload)
 
             # Skip reserved bytes
-            self._skip_bytes(RESERVED_SIZE)
+            self._skip_bytes(PAYLOAD_SIZES.reserved)
 
             status_position = self.parse_status_position(payload)
 
             # Skip temperature reserved bytes
-            self._skip_bytes(TEMP_RESERVED_SIZE)
+            self._skip_bytes(PAYLOAD_SIZES.temp_reserved)
 
             voltages_control = self.parse_voltages_control(payload)
             encoders = self.parse_encoders(payload)

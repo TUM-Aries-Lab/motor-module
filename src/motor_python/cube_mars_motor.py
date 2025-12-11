@@ -3,30 +3,19 @@
 import struct
 import time
 from enum import IntEnum
+from pathlib import Path
 
+import numpy as np
 import serial
 from loguru import logger
 
 from motor_python.definitions import (
     CRC16_TAB,
-    CRC_BYTE_MASK,
-    CRC_INITIAL_VALUE,
-    CRC_SHIFT_BITS,
-    CRC_WORD_MASK,
-    DEFAULT_MOTOR_BAUDRATE,
-    DEFAULT_MOTOR_PORT,
-    DEFAULT_STEP_DELAY,
-    FRAME_END_BYTE,
-    FRAME_START_BYTE,
-    MAX_CURRENT_AMPS,
-    MAX_DUTY_CYCLE,
-    MAX_POSITION_DEGREES,
-    MAX_VELOCITY_ERPM,
-    MIN_CURRENT_AMPS,
-    MIN_DUTY_CYCLE,
-    MIN_POSITION_DEGREES,
-    MIN_VELOCITY_ERPM,
-    POSITION_SCALE_FACTOR,
+    CRC_CONSTANTS,
+    FRAME_BYTES,
+    MOTOR_DEFAULTS,
+    MOTOR_LIMITS,
+    SCALE_FACTORS,
 )
 from motor_python.motor_status_parser import MotorStatusParser
 
@@ -47,18 +36,24 @@ class CubeMarsAK606v3:
     """AK60-6 Motor Controller for CubeMars V3 UART Protocol."""
 
     def __init__(
-        self, port: str = DEFAULT_MOTOR_PORT, baudrate: int = DEFAULT_MOTOR_BAUDRATE
+        self,
+        port: Path | str = MOTOR_DEFAULTS.port,
+        baudrate: int = MOTOR_DEFAULTS.baudrate,
     ) -> None:
         """Initialize motor connection.
 
-        :param port: Serial port path (default: DEFAULT_MOTOR_PORT).
-        :param baudrate: Communication baudrate (default: DEFAULT_MOTOR_BAUDRATE).
+        :param port: Serial port path (default: MOTOR_DEFAULTS.port).
+        :param baudrate: Communication baudrate (default: MOTOR_DEFAULTS.baudrate).
         :return: None
         """
-        self.port = port
+        self.port = str(port)  # Convert Path to str for serial library
         self.baudrate = baudrate
         self.serial: serial.Serial | None = None
         self.status_parser = MotorStatusParser()
+        self.connected = False
+        self.communicating = False
+        self._consecutive_no_response = 0
+        self._max_no_response = MOTOR_DEFAULTS.max_no_response_attempts
         self._connect()
 
     def _connect(self) -> None:
@@ -75,13 +70,14 @@ class CubeMarsAK606v3:
                 dsrdtr=False,
             )
             time.sleep(0.1)  # Allow connection to stabilize
+            self.connected = True
             logger.info(f"Connected to motor on {self.port} at {self.baudrate} baud")
         except serial.SerialException as e:
-            logger.error(f"Failed to connect to motor on {self.port}: {e}")
-            raise
+            logger.warning(f"Failed to connect to motor on {self.port}: {e}")
+            self.connected = False
         except Exception as e:
-            logger.error(f"Unexpected error connecting to motor: {e}")
-            raise
+            logger.warning(f"Unexpected error connecting to motor: {e}")
+            self.connected = False
 
     def _crc16(self, data: bytes) -> int:
         """Calculate CRC16-CCITT checksum.
@@ -89,18 +85,20 @@ class CubeMarsAK606v3:
         :param data: Bytes to calculate checksum over.
         :return: 16-bit CRC checksum.
         """
-        checksum = CRC_INITIAL_VALUE
+        checksum = CRC_CONSTANTS.initial_value
         for byte in data:
             # Extract high byte of checksum and XOR with current byte
-            high_byte = (checksum >> CRC_SHIFT_BITS) & CRC_BYTE_MASK
+            high_byte = (checksum >> CRC_CONSTANTS.shift_bits) & CRC_CONSTANTS.byte_mask
             table_index = high_byte ^ byte
             # Lookup table value and combine with shifted checksum
             table_value = CRC16_TAB[table_index]
-            shifted_checksum = (checksum << CRC_SHIFT_BITS) & CRC_WORD_MASK
+            shifted_checksum = (
+                checksum << CRC_CONSTANTS.shift_bits
+            ) & CRC_CONSTANTS.word_mask
             checksum = table_value ^ shifted_checksum
         return checksum
 
-    def _build_message(self, cmd: int, payload: bytes) -> bytes:
+    def _build_frame(self, cmd: int, payload: bytes) -> bytes:
         """Build CubeMars UART frame with proper structure.
 
         Frame structure: AA | DataLength | CMD | Payload | CRC_H | CRC_L | BB
@@ -113,24 +111,35 @@ class CubeMarsAK606v3:
         crc = self._crc16(data_frame)
         frame = bytes(
             [
-                FRAME_START_BYTE,
+                FRAME_BYTES.start,
                 len(data_frame),
                 *data_frame,
                 crc >> 8,
                 crc & 0xFF,
-                FRAME_END_BYTE,
+                FRAME_BYTES.end,
             ]
         )
         return frame
 
-    def _send_message(self, frame: bytes) -> bytes:
-        """Send message to motor over UART and read response.
+    def _get_command_from_frame(self, frame: bytes) -> int:
+        """Extract command byte from frame.
+
+        :param frame: Frame bytes.
+        :return: Command byte, or 0 if frame is too short.
+        """
+        # Frame structure: AA | DataLength | CMD | Payload | CRC_H | CRC_L | BB
+        # Command byte is at index 2
+        return frame[2] if len(frame) > 2 else 0
+
+    def _send_frame(self, frame: bytes) -> bytes:
+        """Send frame to motor over UART and read response.
 
         :param frame: Complete frame to send.
         :return: Response bytes from motor (if any).
         """
-        if self.serial is None or not self.serial.is_open:
-            raise RuntimeError("Motor serial connection not open")
+        if not self.connected or self.serial is None or not self.serial.is_open:
+            logger.debug("Motor not connected - skipping message send")
+            return b""
 
         self.serial.write(frame)
         logger.debug(f"TX: {' '.join(f'{b:02X}' for b in frame)}")
@@ -148,8 +157,24 @@ class CubeMarsAK606v3:
             if response:
                 logger.debug(f"RX: {' '.join(f'{b:02X}' for b in response)}")
                 self._parse_motor_response(response)
+                # Reset failure counter on successful communication
+                self._consecutive_no_response = 0
+                self.communicating = True
         else:
-            logger.debug("No response from motor (expected for control commands)")
+            logger.debug("No response from motor")
+            # Track consecutive failures for status queries
+            cmd_byte = self._get_command_from_frame(frame)
+            if cmd_byte in (MotorCommand.CMD_GET_STATUS, MotorCommand.CMD_GET_POSITION):
+                self._consecutive_no_response += 1
+                if (
+                    self._consecutive_no_response >= self._max_no_response
+                    and self.communicating
+                ):
+                    logger.warning(
+                        f"Motor not responding after {self._consecutive_no_response} attempts - "
+                        "hardware may be disconnected or powered off"
+                    )
+                    self.communicating = False
 
         return response
 
@@ -173,7 +198,7 @@ class CubeMarsAK606v3:
             return
 
         # Check for valid frame structure (AA ... BB)
-        if response[0] != FRAME_START_BYTE or response[-1] != FRAME_END_BYTE:
+        if response[0] != FRAME_BYTES.start or response[-1] != FRAME_BYTES.end:
             logger.warning("Invalid response frame structure")
             return
 
@@ -214,21 +239,23 @@ class CubeMarsAK606v3:
         :return: None
         """
         if (
-            position_degrees > MAX_POSITION_DEGREES
-            or position_degrees < MIN_POSITION_DEGREES
+            position_degrees > MOTOR_LIMITS.max_position_degrees
+            or position_degrees < MOTOR_LIMITS.min_position_degrees
         ):
             logger.warning(
                 f"Position {position_degrees:.2f}° exceeds limits "
-                f"[{MIN_POSITION_DEGREES:.2f}°, {MAX_POSITION_DEGREES:.2f}°]. "
+                f"[{MOTOR_LIMITS.min_position_degrees:.2f}°, {MOTOR_LIMITS.max_position_degrees:.2f}°]. "
                 f"Clamping to safe range."
             )
-        position_degrees = max(
-            min(position_degrees, MAX_POSITION_DEGREES), MIN_POSITION_DEGREES
+        position_degrees = np.clip(
+            position_degrees,
+            MOTOR_LIMITS.min_position_degrees,
+            MOTOR_LIMITS.max_position_degrees,
         )
-        value = int(position_degrees * POSITION_SCALE_FACTOR)
+        value = int(position_degrees * SCALE_FACTORS.position)
         payload = struct.pack(">i", value)
-        frame = self._build_message(MotorCommand.CMD_SET_POSITION, payload)
-        self._send_message(frame)
+        frame = self._build_frame(MotorCommand.CMD_SET_POSITION, payload)
+        self._send_frame(frame)
 
     def set_velocity(self, velocity_erpm: int) -> None:
         """Set motor velocity in electrical RPM.
@@ -238,38 +265,42 @@ class CubeMarsAK606v3:
         """
         velocity_erpm_int = int(velocity_erpm)
         if (
-            velocity_erpm_int > MAX_VELOCITY_ERPM
-            or velocity_erpm_int < MIN_VELOCITY_ERPM
+            velocity_erpm_int > MOTOR_LIMITS.max_velocity_electrical_rpm
+            or velocity_erpm_int < MOTOR_LIMITS.min_velocity_electrical_rpm
         ):
             logger.warning(
                 f"Velocity {velocity_erpm_int} ERPM exceeds limits "
-                f"[{MIN_VELOCITY_ERPM}, {MAX_VELOCITY_ERPM}]. "
+                f"[{MOTOR_LIMITS.min_velocity_electrical_rpm}, {MOTOR_LIMITS.max_velocity_electrical_rpm}]. "
                 f"Clamping to safe range."
             )
-        velocity_erpm = max(
-            min(velocity_erpm_int, MAX_VELOCITY_ERPM), MIN_VELOCITY_ERPM
+        velocity_erpm = np.clip(
+            velocity_erpm_int,
+            MOTOR_LIMITS.min_velocity_electrical_rpm,
+            MOTOR_LIMITS.max_velocity_electrical_rpm,
         )
         payload = struct.pack(">i", velocity_erpm)
-        frame = self._build_message(MotorCommand.CMD_SET_SPEED, payload)
-        self._send_message(frame)
+        frame = self._build_frame(MotorCommand.CMD_SET_SPEED, payload)
+        self._send_frame(frame)
 
-    def _estimate_movement_time(self, target_degrees: float, speed_erpm: int) -> float:
+    def _estimate_movement_time(
+        self, target_degrees: float, motor_speed_erpm: int
+    ) -> float:
         """Estimate time needed to reach target position at given speed.
 
         Converts ERPM to degrees/second and calculates travel time.
         This is a rough estimate - actual time may vary.
 
         :param target_degrees: Target position in degrees
-        :param speed_erpm: Motor speed in electrical RPM
+        :param motor_speed_erpm: Motor speed in electrical RPM (absolute value used for calculation)
         :return: Estimated time in seconds
         """
-        if speed_erpm == 0:
+        if motor_speed_erpm == 0:
             return 0.0
 
         # Convert ERPM to degrees per second
         # ERPM = electrical revolutions per minute
         # degrees/sec = (ERPM / 60) * 360
-        degrees_per_second = abs(speed_erpm) / 60.0 * 360.0
+        degrees_per_second = abs(motor_speed_erpm) / 60.0 * 360.0
 
         # Calculate time needed
         estimated_time = abs(target_degrees) / degrees_per_second
@@ -278,13 +309,13 @@ class CubeMarsAK606v3:
     def move_to_position_with_speed(
         self,
         target_degrees: float,
-        speed_erpm: int,
-        step_delay: float = DEFAULT_STEP_DELAY,
+        motor_speed_erpm: int,
+        step_delay: float = MOTOR_DEFAULTS.step_delay,
     ) -> None:
         """Reach the target position through speed-controlled increments.
 
         :param target_degrees: Target position in degrees.
-        :param speed_erpm: Motor speed in electrical RPM.
+        :param motor_speed_erpm: Motor speed in electrical RPM (absolute value, direction determined by target).
         :param step_delay: Delay between steps in seconds.
         :return: None
         """
@@ -293,15 +324,15 @@ class CubeMarsAK606v3:
 
         # Use velocity control to move at specified speed
         direction = 1 if target_degrees > 0 else -1
-        self.set_velocity(speed_erpm * direction)
+        self.set_velocity(motor_speed_erpm * direction)
 
         # Calculate approximate time needed
-        estimated_time = self._estimate_movement_time(target_degrees, speed_erpm)
+        estimated_time = self._estimate_movement_time(target_degrees, motor_speed_erpm)
         time.sleep(min(estimated_time, 5.0))  # Cap at 5 seconds
 
         # Switch to position hold
         self.set_position(target_degrees)
-        logger.info(f"Reached position: {target_degrees}° at {speed_erpm} ERPM")
+        logger.info(f"Reached position: {target_degrees}° at {motor_speed_erpm} ERPM")
 
     def set_duty_cycle(self, duty_cycle_percent: float) -> None:
         """Set motor PWM duty cycle percentage.
@@ -310,19 +341,24 @@ class CubeMarsAK606v3:
         :return: None
         """
         # Limit to 95% to prevent saturation
-        if duty_cycle_percent > MAX_DUTY_CYCLE or duty_cycle_percent < MIN_DUTY_CYCLE:
+        if (
+            duty_cycle_percent > MOTOR_LIMITS.max_duty_cycle
+            or duty_cycle_percent < MOTOR_LIMITS.min_duty_cycle
+        ):
             logger.warning(
                 f"Duty cycle {duty_cycle_percent:.2f} exceeds limits "
-                f"[{MIN_DUTY_CYCLE:.2f}, {MAX_DUTY_CYCLE:.2f}]. "
+                f"[{MOTOR_LIMITS.min_duty_cycle:.2f}, {MOTOR_LIMITS.max_duty_cycle:.2f}]. "
                 f"Clamping to safe range."
             )
-        duty_cycle_percent = max(
-            min(duty_cycle_percent, MAX_DUTY_CYCLE), MIN_DUTY_CYCLE
+        duty_cycle_percent = np.clip(
+            duty_cycle_percent,
+            MOTOR_LIMITS.min_duty_cycle,
+            MOTOR_LIMITS.max_duty_cycle,
         )
         value = int(duty_cycle_percent * 100000.0)
         payload = struct.pack(">i", value)
-        frame = self._build_message(MotorCommand.CMD_SET_DUTY, payload)
-        self._send_message(frame)
+        frame = self._build_frame(MotorCommand.CMD_SET_DUTY, payload)
+        self._send_frame(frame)
 
     def set_current(self, current_amps: float) -> None:
         """Set motor current in amperes.
@@ -330,27 +366,34 @@ class CubeMarsAK606v3:
         :param current_amps: Current in Amps
         :return: None
         """
-        if current_amps > MAX_CURRENT_AMPS or current_amps < MIN_CURRENT_AMPS:
+        if (
+            current_amps > MOTOR_LIMITS.max_current_amps
+            or current_amps < MOTOR_LIMITS.min_current_amps
+        ):
             logger.warning(
                 f"Current {current_amps:.2f}A exceeds limits "
-                f"[{MIN_CURRENT_AMPS:.2f}A, {MAX_CURRENT_AMPS:.2f}A]. "
+                f"[{MOTOR_LIMITS.min_current_amps:.2f}A, {MOTOR_LIMITS.max_current_amps:.2f}A]. "
                 f"Clamping to safe range."
             )
-        current_amps = max(min(current_amps, MAX_CURRENT_AMPS), MIN_CURRENT_AMPS)
+        current_amps = np.clip(
+            current_amps,
+            MOTOR_LIMITS.min_current_amps,
+            MOTOR_LIMITS.max_current_amps,
+        )
         value = int(current_amps * 1000.0)
         payload = struct.pack(">i", value)
-        frame = self._build_message(MotorCommand.CMD_SET_CURRENT, payload)
-        self._send_message(frame)
+        frame = self._build_frame(MotorCommand.CMD_SET_CURRENT, payload)
+        self._send_frame(frame)
 
     def get_status(self) -> bytes:
         """Get all motor parameters.
 
-        :return: Raw response bytes from motor.
+        :return: Raw status bytes from motor.
         """
         # Command 0x45 requires no payload - it returns everything
-        frame = self._build_message(MotorCommand.CMD_GET_STATUS, b"")
-        response = self._send_message(frame)
-        return response
+        frame = self._build_frame(MotorCommand.CMD_GET_STATUS, b"")
+        status = self._send_frame(frame)
+        return status
 
     def get_position(self) -> bytes:
         """Get current motor position via command 0x4C.
@@ -361,9 +404,31 @@ class CubeMarsAK606v3:
         :return: Raw response bytes from motor containing position
         """
         # Command 0x4C with no payload
-        frame = self._build_message(MotorCommand.CMD_GET_POSITION, b"")
-        response = self._send_message(frame)
+        frame = self._build_frame(MotorCommand.CMD_GET_POSITION, b"")
+        response = self._send_frame(frame)
         return response
+
+    def check_communication(self) -> bool:
+        """Verify motor is responding to commands.
+
+        :return: True if motor responds, False otherwise
+        """
+        if not self.connected:
+            return False
+
+        # Try to get status MOTOR_DEFAULTS.max_communication_attempts times
+        for _attempt in range(MOTOR_DEFAULTS.max_communication_attempts):
+            status = self.get_status()
+            if status and len(status) > 0:
+                self.communicating = True
+                self._consecutive_no_response = 0
+                logger.info("Motor communication verified")
+                return True
+            time.sleep(MOTOR_DEFAULTS.communication_retry_delay)
+
+        logger.warning("Motor not responding to status queries")
+        self.communicating = False
+        return False
 
     def stop(self) -> None:
         """Stop the motor by setting all control values to zero.
