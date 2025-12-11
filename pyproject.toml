@@ -52,6 +52,13 @@ quote-style = "double"
 indent-style = "space"
 line-ending = "lf"
 
+[tool.pytest.ini_options]
+markers = [
+    "hardware: tests that require actual motor hardware (deselect with '-m \"not hardware\"')",
+]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
