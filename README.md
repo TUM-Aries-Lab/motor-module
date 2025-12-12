@@ -46,6 +46,34 @@ if __name__ == "__main__":
 uv run python -m motor_python
 ```
 
+## Testing
+
+### Unit Tests (No Hardware Required)
+Run unit tests without hardware (using mocks):
+```bash
+make test
+# or
+uv run pytest -m "not hardware"
+```
+
+### Hardware Tests
+Run hardware integration tests (requires motor connected):
+```bash
+make test-hardware
+# or
+uv run pytest -m hardware
+```
+
+### All Tests (Full Coverage)
+Run all tests including hardware tests:
+```bash
+make test-all
+# or
+uv run pytest
+```
+
+**Note:** Hardware tests are skipped automatically if motor hardware is not available.
+
 ## Structure
 <!-- TREE-START -->
 ```
