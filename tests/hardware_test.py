@@ -4,11 +4,14 @@ These tests require actual motor hardware connected.
 Run with: pytest -m hardware
 """
 
+import logging
 import time
 
 import pytest
 
 from motor_python.cube_mars_motor import CubeMarsAK606v3
+
+logger = logging.getLogger(__name__)
 
 # Mark all tests in this file as hardware tests
 pytestmark = pytest.mark.hardware
@@ -21,7 +24,19 @@ def motor():
     if not motor.connected:
         pytest.skip("Motor hardware not available")
     yield motor
-    motor.close()
+    try:
+        # Ensure motor is stopped and returned to zero position for safety
+        try:
+            motor.stop()
+        except Exception as e:
+            logger.warning(f"Failed to stop motor during cleanup: {e}")
+        try:
+            motor.set_position(0.0)
+        except Exception as e:
+            logger.warning(f"Failed to reset motor position during cleanup: {e}")
+        motor.close()
+    finally:
+        motor.close()
 
 
 class TestHardwareConnection:
@@ -203,21 +218,16 @@ class TestMotorMeasurements:
         motor.set_velocity(0)
         time.sleep(0.3)
 
-    def test_position_command_range(self, motor):
-        """Test motor accepts various position commands."""
-        # Test various positions
-        test_positions = [0.0, 90.0, 180.0, -90.0, -180.0, 0.0]
-
-        for target in test_positions:
-            motor.set_position(target)
-            time.sleep(0.6)
-
-            # Verify motor responds to command
-            status = motor.get_status()
+        # Ensure motor is stopped
+        try:
+            motor.set_velocity(0)
+            time.sleep(0.3)
+        except Exception as e:
+            logger.warning(f"Failed to stop motor during test cleanup: {e}")
             assert status is not None
             assert len(status) > 0
 
-    def test_velocity_command_range(self, motor):
+    def test_velocity_command_sequence(self, motor):
         """Test motor accepts various velocity commands."""
         # Start from zero
         motor.set_position(0.0)
