@@ -208,16 +208,16 @@ class TestMotorMeasurements:
     def test_velocity_command_response(self, motor):
         """Test that motor responds during velocity commands."""
         # Set velocity and check motor responds
-        motor.set_velocity(3000)
-        time.sleep(0.5)
+        try:
+            motor.set_velocity(3000)
+            time.sleep(0.5)
 
-        status = motor.get_status()
-        assert status is not None
-        assert len(status) > 0
-
-        motor.set_velocity(0)
-        time.sleep(0.3)
-
+            status = motor.get_status()
+            assert status is not None
+            assert len(status) > 0
+        finally:
+            motor.set_velocity(0)
+            time.sleep(0.3)
         # Ensure motor is stopped
         try:
             motor.set_velocity(0)
