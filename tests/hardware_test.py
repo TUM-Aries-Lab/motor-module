@@ -52,29 +52,49 @@ class TestHardwareConnection:
 
 
 class TestHardwareMotorControl:
-    """Test motor control with actual hardware."""
+    """Test motor control with actual hardware - verify motor responds to commands."""
 
     def test_set_position(self, motor):
-        """Test setting motor position."""
+        """Test setting motor position command works."""
         # Set to zero position
         motor.set_position(0.0)
-        time.sleep(0.2)
+        time.sleep(0.5)  # Give motor time to move
 
-        # Get status to verify
+        # Get status to verify motor responds
         status = motor.get_status()
         assert status is not None
+        assert len(status) > 0
+
+    def test_position_movement(self, motor):
+        """Test motor accepts multiple position commands."""
+        # Test sequence of positions
+        positions = [0.0, 45.0, 90.0, 0.0]
+
+        for target_position in positions:
+            motor.set_position(target_position)
+            time.sleep(0.6)  # Give time to move
+
+            # Verify motor responds
+            status = motor.get_status()
+            assert status is not None
+            assert len(status) > 0
 
     def test_set_velocity(self, motor):
-        """Test setting motor velocity."""
-        # Set low velocity
-        motor.set_velocity(1000)
-        time.sleep(0.2)
+        """Test setting motor velocity command works."""
+        # Set velocity
+        motor.set_velocity(5000)  # eRPM
+        time.sleep(0.5)
+
+        # Verify motor responds
+        status = motor.get_status()
+        assert status is not None
+        assert len(status) > 0
 
         # Stop
         motor.set_velocity(0)
-        time.sleep(0.1)
+        time.sleep(0.2)
 
-        # Get status
+        # Verify still responding
         status = motor.get_status()
         assert status is not None
 
@@ -152,3 +172,69 @@ class TestHardwareEdgeCases:
 
         status = motor.get_status()
         assert status is not None
+
+
+class TestMotorMeasurements:
+    """Test that motor measurements can be retrieved."""
+
+    def test_status_retrieval_consistency(self, motor):
+        """Test that status can be retrieved consistently."""
+        # Set to known position
+        motor.set_position(0.0)
+        time.sleep(0.5)
+
+        # Read status multiple times - should always succeed
+        for _ in range(5):
+            status = motor.get_status()
+            assert status is not None
+            assert len(status) > 0
+            time.sleep(0.1)
+
+    def test_velocity_command_response(self, motor):
+        """Test that motor responds during velocity commands."""
+        # Set velocity and check motor responds
+        motor.set_velocity(3000)
+        time.sleep(0.5)
+
+        status = motor.get_status()
+        assert status is not None
+        assert len(status) > 0
+
+        motor.set_velocity(0)
+        time.sleep(0.3)
+
+    def test_position_command_range(self, motor):
+        """Test motor accepts various position commands."""
+        # Test various positions
+        test_positions = [0.0, 90.0, 180.0, -90.0, -180.0, 0.0]
+
+        for target in test_positions:
+            motor.set_position(target)
+            time.sleep(0.6)
+
+            # Verify motor responds to command
+            status = motor.get_status()
+            assert status is not None
+            assert len(status) > 0
+
+    def test_velocity_command_range(self, motor):
+        """Test motor accepts various velocity commands."""
+        # Start from zero
+        motor.set_position(0.0)
+        time.sleep(0.5)
+
+        # Test different velocities
+        velocities = [5000, 10000, 15000]
+
+        for vel in velocities:
+            motor.set_velocity(vel)
+            time.sleep(0.3)
+
+            # Verify motor responds
+            status = motor.get_status()
+            assert status is not None
+            assert len(status) > 0
+
+        # Stop
+        motor.set_velocity(0)
+        time.sleep(0.3)
