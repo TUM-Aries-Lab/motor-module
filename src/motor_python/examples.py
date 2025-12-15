@@ -22,7 +22,7 @@ def run_position_control(
     for step in range(num_steps):
         # Sine wave: -max_angle_degrees to +max_angle_degrees over num_steps
         angle = max_angle_degrees * math.sin(step * 2 * math.pi / num_steps)
-        motor.set_position(angle)
+        motor.set_position(position_degrees=angle)
         time.sleep(0.1)
 
         # Query status periodically
@@ -38,16 +38,16 @@ def run_velocity_control(motor: CubeMarsAK606v3, velocity_erpm: int = 5000) -> N
     :return: None
     """
     logger.info("Forward velocity...")
-    motor.set_velocity(velocity_erpm)  # Forward
+    motor.set_velocity(velocity_erpm=velocity_erpm)  # Forward
     time.sleep(0.5)
     motor.get_status()
 
     logger.info("Reverse velocity...")
-    motor.set_velocity(-velocity_erpm)  # Reverse
+    motor.set_velocity(velocity_erpm=-velocity_erpm)  # Reverse
     time.sleep(0.5)
     motor.get_status()
 
-    motor.set_velocity(0)  # Stop
+    motor.set_velocity(velocity_erpm=0)  # Stop
 
 
 def run_duty_cycle_control(motor: CubeMarsAK606v3) -> None:
@@ -57,7 +57,7 @@ def run_duty_cycle_control(motor: CubeMarsAK606v3) -> None:
     :return: None
     """
     for duty in [0.1, 0.0, -0.1, 0.0]:
-        motor.set_duty_cycle(duty)
+        motor.set_duty_cycle(duty_cycle_percent=duty)
         time.sleep(0.3)
     motor.get_status()
 
@@ -69,7 +69,7 @@ def run_current_control(motor: CubeMarsAK606v3) -> None:
     :return: None
     """
     for current in [1.0, 0.0, -1.0, 0.0]:
-        motor.set_current(current)
+        motor.set_current(current_amps=current)
         time.sleep(0.3)
     motor.get_status()
 
