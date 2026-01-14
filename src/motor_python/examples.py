@@ -74,6 +74,27 @@ def run_current_control(motor: CubeMarsAK606v3) -> None:
     motor.get_status()
 
 
+def run_max_rpm_test(motor: CubeMarsAK606v3, duration_seconds: float = 3.0) -> None:
+    """Spin motor at maximum RPM for a specified duration.
+
+    :param motor: Motor controller instance.
+    :param duration_seconds: Duration to run at maximum RPM (default: 3 seconds).
+    :return: None
+    """
+    max_erpm = 100000  # Maximum ERPM for the motor
+    logger.info(
+        f"Spinning at maximum RPM ({max_erpm} ERPM) for {duration_seconds} seconds..."
+    )
+
+    motor.set_velocity(velocity_erpm=max_erpm)
+    time.sleep(duration_seconds)
+
+    logger.info("Stopping motor...")
+    motor.set_velocity(velocity_erpm=0)  # Stop
+    time.sleep(0.5)  # Allow motor to come to a complete stop
+    motor.get_status()
+
+
 def run_motor_loop(motor: CubeMarsAK606v3) -> None:
     """Run continuous motor control loop cycling through different modes.
 
@@ -88,6 +109,7 @@ def run_motor_loop(motor: CubeMarsAK606v3) -> None:
         ("Velocity control mode", run_velocity_control),
         ("Duty cycle control mode", run_duty_cycle_control),
         ("Current control mode", run_current_control),
+        ("Max RPM test mode", run_max_rpm_test),
     ]
 
     try:
