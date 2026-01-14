@@ -53,6 +53,7 @@ class CubeMarsAK606v3:
         self.connected = False
         self.communicating = False
         self._consecutive_no_response = 0
+        self._consecutive_invalid_response = 0
         self._max_no_response = MOTOR_DEFAULTS.max_no_response_attempts
         self._connect()
 
@@ -156,10 +157,24 @@ class CubeMarsAK606v3:
             response = self.serial.read(bytes_waiting)
             if response:
                 logger.debug(f"RX: {' '.join(f'{b:02X}' for b in response)}")
-                self._parse_motor_response(response)
-                # Reset failure counter on successful communication
-                self._consecutive_no_response = 0
-                self.communicating = True
+                # Check if response is valid
+                is_valid = self._parse_motor_response(response)
+                if is_valid:
+                    # Reset failure counters on successful communication
+                    self._consecutive_no_response = 0
+                    self._consecutive_invalid_response = 0
+                    self.communicating = True
+                else:
+                    # Track consecutive invalid responses
+                    self._consecutive_invalid_response += 1
+                    if self._consecutive_invalid_response >= self._max_no_response:
+                        logger.warning(
+                            f"Motor sending invalid responses after {self._consecutive_invalid_response} attempts - "
+                            "hardware may be powered off or cables disconnected"
+                        )
+                        self.communicating = False
+                    # Clear response since it's invalid
+                    response = b""
         else:
             logger.debug("No response from motor")
             # Track consecutive failures for status queries
@@ -188,19 +203,19 @@ class CubeMarsAK606v3:
         if status:
             self.status_parser.log_motor_status(status)
 
-    def _parse_motor_response(self, response: bytes) -> None:
+    def _parse_motor_response(self, response: bytes) -> bool:
         """Parse and display motor response data.
 
         :param response: Raw response bytes from motor.
-        :return: None
+        :return: True if response was valid, False otherwise
         """
         if len(response) < 10:  # Minimum valid response length
-            return
+            return False
 
         # Check for valid frame structure (AA ... BB)
         if response[0] != FRAME_BYTES.start or response[-1] != FRAME_BYTES.end:
             logger.warning("Invalid response frame structure")
-            return
+            return False
 
         # Extract basic frame info
         data_length = response[1]
@@ -229,6 +244,7 @@ class CubeMarsAK606v3:
                 logger.info(f"  Raw payload: {payload.hex().upper()}")
 
         logger.info("=" * 50)
+        return True
 
     def set_position(self, position_degrees: float) -> None:
         """Set motor position in degrees.
