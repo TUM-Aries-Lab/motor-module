@@ -46,12 +46,36 @@ update-deep:
 	uv cache clean
 	make update
 
+install-can:
+	uv pip install spidev
+	@echo "CAN dependencies (spidev) installed."
+
 docker:
 	docker build --no-cache -f Dockerfile -t motor_python-smoke .
 	docker run --rm motor_python-smoke
 
 app:
-	uv run python -m motor_python
+	@echo "=========================================="
+	@echo "  Motor Control Interface Selection"
+	@echo "=========================================="
+	@echo "1) UART (RS485/Serial)"
+	@echo "2) CAN (MCP2515 SPI-CAN) - Motor ID: 0x68"
+	@echo ""
+	@read -p "Select interface [1-2]: " choice; \
+	case $$choice in \
+		1) \
+			echo ""; \
+			echo "Starting UART interface..."; \
+			uv run python -m motor_python --interface uart ;; \
+		2) \
+			echo ""; \
+			echo "Starting CAN interface (Motor ID: 0x68)..."; \
+			uv run python -m motor_python --interface can --motor-id 0x68 ;; \
+		*) \
+			echo ""; \
+			echo "Invalid choice. Defaulting to UART..."; \
+			uv run python -m motor_python --interface uart ;; \
+	esac
 
 tree:
 	uv run python repo_tree.py --update-readme

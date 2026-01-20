@@ -62,6 +62,20 @@ class MotorDefaults:
 
 
 @dataclass(frozen=True)
+class CANDefaults:
+    """CAN communication default settings."""
+
+    spi_device: str = "/dev/spidev0.0"  # SPI device for MCP2515
+    can_baudrate: int = 500000  # CAN bus baudrate (500 Kbps)
+    oscillator_freq: int = 8000000  # 8 MHz crystal oscillator
+    motor_id: int = 0x68  # Default motor CAN ID (example from manual)
+    response_timeout: float = 0.1  # Timeout waiting for CAN response
+    max_no_response_attempts: int = (
+        3  # Max failed attempts before marking as not communicating
+    )
+
+
+@dataclass(frozen=True)
 class FrameBytes:
     """Motor protocol frame bytes."""
 
@@ -154,13 +168,47 @@ class ConversionFactors:
     byte_mask: int = 0xFF  # Mask for extracting single byte
 
 
+@dataclass(frozen=True)
+class CANScaleFactors:
+    """CAN message scaling factors.
+
+    The motor CAN protocol uses fixed-point representation for values:
+    - Position: int16 range -32000 to 32000 = -3200° to 3200° (scale by 0.1)
+    - Speed: int16 range -32000 to 32000 = -320000 to 320000 rpm (scale by 10.0)
+    - Current: int16 range -6000 to 6000 = -60 to 60 A (scale by 0.01)
+    - Temperature: int8 range -20 to 127 = -20°C to 127°C (no scaling)
+    """
+
+    position: float = 0.1  # Position scaling: int16 * 0.1 = degrees
+    speed: float = 10.0  # Speed scaling: int16 * 10.0 = rpm
+    current: float = 0.01  # Current scaling: int16 * 0.01 = amps
+    temperature: float = 1.0  # Temperature scaling: int8 * 1.0 = degrees C
+
+
+@dataclass(frozen=True)
+class CANLimits:
+    """CAN protocol value limits (in scaled integer representation)."""
+
+    max_position_int: int = 32000  # Maximum position int16 value
+    min_position_int: int = -32000  # Minimum position int16 value
+    max_speed_int: int = 32000  # Maximum speed int16 value
+    min_speed_int: int = -32000  # Minimum speed int16 value
+    max_current_int: int = 6000  # Maximum current int16 value
+    min_current_int: int = -6000  # Minimum current int16 value
+    max_temperature_int: int = 127  # Maximum temperature int8 value
+    min_temperature_int: int = -20  # Minimum temperature int8 value
+
+
 # Instantiate frozen dataclasses for easy access
 MOTOR_DEFAULTS = MotorDefaults()
+CAN_DEFAULTS = CANDefaults()
 FRAME_BYTES = FrameBytes()
 CRC_CONSTANTS = CRCConstants()
 SCALE_FACTORS = ScaleFactors()
+CAN_SCALE_FACTORS = CANScaleFactors()
 PAYLOAD_SIZES = PayloadSizes()
 MOTOR_LIMITS = MotorLimits()
+CAN_LIMITS = CANLimits()
 CONVERSION_FACTORS = ConversionFactors()
 
 
@@ -213,6 +261,36 @@ class FaultCode(IntEnum):
             FaultCode.HIGH_OFFSET_CURRENT_SENSOR_2: "HIGH_OFFSET_CURRENT_SENSOR_2",
             FaultCode.HIGH_OFFSET_CURRENT_SENSOR_3: "HIGH_OFFSET_CURRENT_SENSOR_3",
             FaultCode.UNBALANCED_CURRENTS: "UNBALANCED_CURRENTS",
+        }
+        return descriptions.get(self, self.name)
+
+
+class CANErrorCode(IntEnum):
+    """Motor CAN fault codes (from CAN manual)."""
+
+    NONE = 0
+    MOTOR_OVER_TEMP = 1
+    OVER_CURRENT = 2
+    OVER_VOLTAGE = 3
+    UNDER_VOLTAGE = 4
+    ENCODER_FAULT = 5
+    MOSFET_OVER_TEMP = 6
+    MOTOR_LOCK = 7
+
+    def get_description(self) -> str:
+        """Get human-readable description of CAN error code.
+
+        :return: Formatted string with code name and description.
+        """
+        descriptions = {
+            CANErrorCode.NONE: "No fault",
+            CANErrorCode.MOTOR_OVER_TEMP: "Motor over-temperature fault",
+            CANErrorCode.OVER_CURRENT: "Over-current fault",
+            CANErrorCode.OVER_VOLTAGE: "Over-voltage fault",
+            CANErrorCode.UNDER_VOLTAGE: "Under-voltage fault",
+            CANErrorCode.ENCODER_FAULT: "Encoder fault",
+            CANErrorCode.MOSFET_OVER_TEMP: "MOSFET over-temperature fault",
+            CANErrorCode.MOTOR_LOCK: "Motor lock-up",
         }
         return descriptions.get(self, self.name)
 

@@ -281,6 +281,11 @@ dependencies = [
     { name = "pyserial" },
 ]
 
+[package.optional-dependencies]
+can = [
+    { name = "spidev" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "coveralls" },
@@ -297,7 +302,9 @@ requires-dist = [
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "numpy", specifier = ">=2.2.3" },
     { name = "pyserial", specifier = ">=3.5" },
+    { name = "spidev", marker = "extra == 'can'", specifier = ">=3.5" },
 ]
+provides-extras = ["can"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -612,6 +619,12 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/a8/b5/d0b7d145963136b564806f6584647af45ab98946660d399ec4da79cae036/ruff-0.14.7-py3-none-win_amd64.whl", hash = "sha256:e17a20ad0d3fad47a326d773a042b924d3ac31c6ca6deb6c72e9e6b5f661a7c6", size = 14531726, upload-time = "2025-11-28T20:54:59.121Z" },
     { url = "https://files.pythonhosted.org/packages/1d/d2/1637f4360ada6a368d3265bf39f2cf737a0aaab15ab520fc005903e883f8/ruff-0.14.7-py3-none-win_arm64.whl", hash = "sha256:be4d653d3bea1b19742fcc6502354e32f65cd61ff2fbdb365803ef2c2aec6228", size = 13609215, upload-time = "2025-11-28T20:55:15.375Z" },
 ]
+
+[[package]]
+name = "spidev"
+version = "3.8"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/67/87/039b6eeea781598015b538691bc174cc0bf77df9d4d2d3b8bf9245c0de8c/spidev-3.8.tar.gz", hash = "sha256:2bc02fb8c6312d519ebf1f4331067427c0921d3f77b8bcaf05189a2e8b8382c0", size = 13893, upload-time = "2025-09-15T18:56:20.672Z" }
 
 [[package]]
 name = "tomli"
