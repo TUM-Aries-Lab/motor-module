@@ -249,25 +249,9 @@ class CubeMarsAK606v3:
     def set_position(self, position_degrees: float) -> None:
         """Set motor position in degrees.
 
-        Limited to ±360° for exosuit joint safety.
-
-        :param position_degrees: Target position in degrees (±360° = ±1 rotation)
+        :param position_degrees: Target position in degrees
         :return: None
         """
-        if (
-            position_degrees > MOTOR_LIMITS.max_position_degrees
-            or position_degrees < MOTOR_LIMITS.min_position_degrees
-        ):
-            logger.warning(
-                f"Position {position_degrees:.2f}° exceeds limits "
-                f"[{MOTOR_LIMITS.min_position_degrees:.2f}°, {MOTOR_LIMITS.max_position_degrees:.2f}°]. "
-                f"Clamping to safe range."
-            )
-        position_degrees = np.clip(
-            position_degrees,
-            MOTOR_LIMITS.min_position_degrees,
-            MOTOR_LIMITS.max_position_degrees,
-        )
         value = int(position_degrees * SCALE_FACTORS.position)
         payload = struct.pack(">i", value)
         frame = self._build_frame(MotorCommand.CMD_SET_POSITION, payload)
