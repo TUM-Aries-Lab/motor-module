@@ -22,7 +22,7 @@ def run_position_control(
     for step in range(num_steps):
         # Sine wave: -max_angle_degrees to +max_angle_degrees over num_steps
         angle = max_angle_degrees * math.sin(step * 2 * math.pi / num_steps)
-        motor.set_position(angle)
+        motor.set_position(position_degrees=angle)
         time.sleep(0.1)
 
         # Query status periodically
@@ -38,16 +38,16 @@ def run_velocity_control(motor: CubeMarsAK606v3, velocity_erpm: int = 5000) -> N
     :return: None
     """
     logger.info("Forward velocity...")
-    motor.set_velocity(velocity_erpm)  # Forward
+    motor.set_velocity(velocity_erpm=velocity_erpm)  # Forward
     time.sleep(0.5)
     motor.get_status()
 
     logger.info("Reverse velocity...")
-    motor.set_velocity(-velocity_erpm)  # Reverse
+    motor.set_velocity(velocity_erpm=-velocity_erpm)  # Reverse
     time.sleep(0.5)
     motor.get_status()
 
-    motor.set_velocity(0)  # Stop
+    motor.set_velocity(velocity_erpm=0)  # Stop
 
 
 def run_duty_cycle_control(motor: CubeMarsAK606v3) -> None:
@@ -57,7 +57,7 @@ def run_duty_cycle_control(motor: CubeMarsAK606v3) -> None:
     :return: None
     """
     for duty in [0.1, 0.0, -0.1, 0.0]:
-        motor.set_duty_cycle(duty)
+        motor.set_duty_cycle(duty_cycle_percent=duty)
         time.sleep(0.3)
     motor.get_status()
 
@@ -69,8 +69,29 @@ def run_current_control(motor: CubeMarsAK606v3) -> None:
     :return: None
     """
     for current in [1.0, 0.0, -1.0, 0.0]:
-        motor.set_current(current)
+        motor.set_current(current_amps=current)
         time.sleep(0.3)
+    motor.get_status()
+
+
+def run_max_rpm_test(motor: CubeMarsAK606v3, duration_seconds: float = 3.0) -> None:
+    """Spin motor at maximum RPM for a specified duration.
+
+    :param motor: Motor controller instance.
+    :param duration_seconds: Duration to run at maximum RPM (default: 3 seconds).
+    :return: None
+    """
+    max_erpm = 100000  # Maximum ERPM for the motor
+    logger.info(
+        f"Spinning at maximum RPM ({max_erpm} ERPM) for {duration_seconds} seconds..."
+    )
+
+    motor.set_velocity(velocity_erpm=max_erpm)
+    time.sleep(duration_seconds)
+
+    logger.info("Stopping motor...")
+    motor.set_velocity(velocity_erpm=0)  # Stop
+    time.sleep(0.5)  # Allow motor to come to a complete stop
     motor.get_status()
 
 
@@ -88,6 +109,7 @@ def run_motor_loop(motor: CubeMarsAK606v3) -> None:
         ("Velocity control mode", run_velocity_control),
         ("Duty cycle control mode", run_duty_cycle_control),
         ("Current control mode", run_current_control),
+        ("Max RPM test mode", run_max_rpm_test),
     ]
 
     try:
