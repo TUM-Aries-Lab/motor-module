@@ -51,7 +51,7 @@ docker:
 	docker run --rm motor_python-smoke
 
 app:
-	./.venv/bin/python -m motor_python
+	uv run python -m motor_python
 
 tree:
 	uv run python repo_tree.py --update-readme
