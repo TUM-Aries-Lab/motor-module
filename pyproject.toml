@@ -1,7 +1,7 @@
 [project]
 name = "motor_python"
-version = "0.0.5"
-description = "Motor module for exosuit"
+version = "0.0.6"
+description = "CubeMars motor module for Aries exosuits."
 readme = "README.md"
 authors = [{ name = "Tsmorz", email = "tony.smoragiewicz@tum.de"},{ name = "Hannes", email = "hannes.nguyen@tum.de" }]
 requires-python = ">=3.11,<3.14"

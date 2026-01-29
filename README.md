@@ -31,11 +31,13 @@ The package can then be found at: https://pypi.org/project/motor_python
 
 from loguru import logger
 
-from motor_python import definitions
+from motor_python.cube_mars_motor import CubeMarsAK606v3
 
 def main() -> None:
     """Run a simple demonstration."""
-    logger.info("Hello World!")
+    motor = CubeMarsAK606v3()
+    motor.get_status()
+    motor.set_position(position_degrees=0.0)
 
 if __name__ == "__main__":
     main()
