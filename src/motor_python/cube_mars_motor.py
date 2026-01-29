@@ -233,9 +233,26 @@ class CubeMarsAK606v3:
     def set_position(self, position_degrees: float) -> None:
         """Set motor position in degrees.
 
+        Hardware limited to approximately ±2147.5° (~6 rotations) due to int32 encoding.
+
         :param position_degrees: Target position in degrees
         :return: None
         """
+        # Check hardware limits (int32 range)
+        if (
+            position_degrees > MOTOR_LIMITS.max_position_degrees
+            or position_degrees < MOTOR_LIMITS.min_position_degrees
+        ):
+            logger.warning(
+                f"Position {position_degrees:.2f}° exceeds hardware limits "
+                f"[{MOTOR_LIMITS.min_position_degrees:.1f}°, {MOTOR_LIMITS.max_position_degrees:.1f}°]. "
+                f"Clamping to hardware range."
+            )
+        position_degrees = np.clip(
+            position_degrees,
+            MOTOR_LIMITS.min_position_degrees,
+            MOTOR_LIMITS.max_position_degrees,
+        )
         value = int(position_degrees * SCALE_FACTORS.position)
         payload = struct.pack(">i", value)
         frame = self._build_frame(MotorCommand.CMD_SET_POSITION, payload)

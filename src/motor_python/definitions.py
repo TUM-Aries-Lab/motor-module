@@ -139,6 +139,8 @@ class MotorLimits:
     min_current_amps: float = -60.0  # Minimum current in amps
     max_velocity_electrical_rpm: int = 100000  # Maximum velocity in Electrical RPM
     min_velocity_electrical_rpm: int = -100000  # Minimum velocity in Electrical RPM
+    max_position_degrees: float = 2147.483647  # Maximum position based on int32 limit
+    min_position_degrees: float = -2147.483648  # Minimum position based on int32 limit
     max_movement_time: float = 5.0  # Maximum movement time cap in seconds
 
 
