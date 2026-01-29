@@ -64,7 +64,6 @@ uv run python -m motor_python
 │   └── Jetson-Orin-Nano-DevKit.pdf
 ├── src
 │   └── motor_python
-│       ├── config
 │       ├── __init__.py
 │       ├── __main__.py
 │       ├── cube_mars_motor.py
