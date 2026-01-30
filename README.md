@@ -74,7 +74,6 @@ make test-all      # Run all tests including hardware tests (full coverage)
 │   └── Jetson-Orin-Nano-DevKit.pdf
 ├── src
 │   └── motor_python
-│       ├── config
 │       ├── __init__.py
 │       ├── __main__.py
 │       ├── cube_mars_motor.py
@@ -86,6 +85,7 @@ make test-all      # Run all tests including hardware tests (full coverage)
 │   ├── __init__.py
 │   ├── conftest.py
 │   ├── cube_mars_motor_test.py
+│   ├── hardware_test.py
 │   ├── motor_status_parser_test.py
 │   └── utils_test.py
 ├── .dockerignore
