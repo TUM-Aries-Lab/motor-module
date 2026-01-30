@@ -22,13 +22,9 @@ ENCODING = "utf-8"
 MANUAL_IGNORE = {
     ".git",
     ".venv",
-    "__pycache__",
-    ".mypy_cache",
     ".pytest_cache",
     ".ruff_cache",
-    ".DS_Store",
     "data",
-    "simulink",
     ".github",
 }
 
