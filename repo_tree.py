@@ -122,7 +122,7 @@ def update_readme_block(readme_path: Path) -> None:
     tree = generate_markdown_tree().splitlines()
 
     new_readme = readme[:start] + tree + readme[end:]
-    readme_path.write_text("\n".join(new_readme), encoding=ENCODING)
+    readme_path.write_text("\n".join(new_readme) + "\n", encoding=ENCODING)
 
     logger.success("README updated with latest repo tree (gitignored files excluded).")
 
