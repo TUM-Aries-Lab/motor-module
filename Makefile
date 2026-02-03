@@ -10,10 +10,6 @@ test:
 	rm .coverage
 
 test-hardware:
-	uv run pytest -m hardware --cov=src --cov-report=term-missing --no-cov-on-fail --cov-report=xml --cov-fail-under=55
-	rm .coverage
-
-test-all:
 	uv run pytest --cov=src --cov-report=term-missing --no-cov-on-fail --cov-report=xml --cov-fail-under=55
 	rm .coverage
 
