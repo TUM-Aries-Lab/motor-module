@@ -49,14 +49,13 @@ uv run python -m motor_python
 ## Testing
 
 ### Unit Tests (No Hardware Required)
-Run unit tests without hardware (using mocks):
+Run tests with or without hardware:
 ```bash
-make test          # Run unit tests only (no hardware required)
-make test-hardware # Run hardware integration tests (requires motor connected)
-make test-all      # Run all tests including hardware tests (full coverage)
+make test          # Run unit tests only (no hardware required, using mocks)
+make test-hardware # Run ALL tests with hardware integration (requires motor connected)
 ```
 
-**Note:** Hardware tests are skipped automatically if motor hardware is not available.
+**Note:** `make test-hardware` runs all tests (unit + hardware integration) with full coverage reporting. Hardware tests are skipped automatically if motor hardware is not available.
 
 ## Structure
 <!-- TREE-START -->
