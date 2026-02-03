@@ -26,7 +26,7 @@ pytestmark = pytest.mark.hardware
 
 
 def get_status_with_retry(
-    motor: CubeMarsAK606v3, max_retries: int = 5, delay: float = 0.1
+    motor: CubeMarsAK606v3, max_retries: int = 8, delay: float = 0.12
 ) -> bytes:
     """Get motor status with retry logic for unreliable communication.
 
