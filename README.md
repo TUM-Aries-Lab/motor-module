@@ -48,6 +48,17 @@ if __name__ == "__main__":
 uv run python -m motor_python
 ```
 
+## Testing
+
+### Unit Tests (No Hardware Required)
+Run tests with or without hardware:
+```bash
+make test          # Run unit tests only (no hardware required, using mocks)
+make test-hardware # Run ALL tests with hardware integration (requires motor connected)
+```
+
+**Note:** `make test-hardware` runs all tests (unit + hardware integration) with full coverage reporting. Hardware tests are skipped automatically if motor hardware is not available.
+
 ## Structure
 <!-- TREE-START -->
 ```
@@ -75,6 +86,7 @@ uv run python -m motor_python
 │   ├── __init__.py
 │   ├── conftest.py
 │   ├── cube_mars_motor_test.py
+│   ├── hardware_test.py
 │   ├── motor_status_parser_test.py
 │   └── utils_test.py
 ├── .dockerignore
