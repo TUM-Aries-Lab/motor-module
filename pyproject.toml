@@ -19,6 +19,7 @@ dev = [
   "mypy>=1.11",
   "pytest>=8.3",
   "pytest-cov>=6.0",
+  "pytest-rerunfailures>=15.0",
   "pre-commit>=4.1.0",
   "coveralls>=4.0.1",
   "pyright>=1.1.407",
