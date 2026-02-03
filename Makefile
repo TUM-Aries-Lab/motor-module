@@ -6,7 +6,7 @@ init:  # ENV SETUP
 	@echo "Environment initialized with uv."
 
 test:
-	uv run pytest -m "not hardware" --cov=src --cov-report=term-missing --no-cov-on-fail --cov-report=xml --cov-fail-under=65
+	uv run pytest -m "not hardware" --cov=src --cov-report=term-missing --no-cov-on-fail --cov-report=xml --cov-fail-under=70
 	rm .coverage
 
 test-hardware:
