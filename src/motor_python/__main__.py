@@ -7,7 +7,7 @@ from loguru import logger
 
 from motor_python.cube_mars_motor import CubeMarsAK606v3
 from motor_python.definitions import DEFAULT_LOG_LEVEL, LogLevel
-from motor_python.examples import run_motor_loop
+from motor_python.examples import run_motor_demo
 from motor_python.utils import setup_logger
 
 
@@ -46,20 +46,13 @@ def main(
         motor.get_status()
         time.sleep(0.5)
 
-        # Run the motor control loop with all modes
+        # Run the motor demo
         try:
-            run_motor_loop(motor)
+            run_motor_demo(motor)
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
 
-        # Stop motor safely
-        logger.info("Stopping motor...")
-        motor.stop()
-
-        # Final status
-        logger.info("Final motor status:")
-        motor.get_status()
-        time.sleep(0.5)
+        # Motor will be stopped and closed by context manager exit
 
     logger.info("Motor control loop complete!")
 

@@ -20,8 +20,6 @@ ENCODING: str = "utf-8"
 
 DATE_FORMAT = "%Y-%m-%d_%H-%M-%S"
 
-DUMMY_VARIABLE = "dummy_variable"
-
 
 @dataclass
 class LogLevel:
@@ -106,8 +104,6 @@ class ScaleFactors:
     )
     current: float = 100.0  # Current is sent as int32 * 100 (centi-amps)
     duty: float = 1000.0  # Duty cycle is sent as int16 * 1000 (per-mille)
-    duty_command: float = 100000.0  # Duty cycle command is sent as int32 * 100000
-    current_command: float = 1000.0  # Current command is sent as int32 * 1000
     voltage: float = 10.0  # Voltage is sent as int16 * 10 (deci-volts)
     vd_vq: float = 1000.0  # Vd/Vq voltages are sent as int32 * 1000
     position: float = (
@@ -131,17 +127,21 @@ class PayloadSizes:
 
 @dataclass(frozen=True)
 class MotorLimits:
-    """Motor control limits."""
+    """Motor velocity and position control limits.
 
-    max_duty_cycle: float = 0.95  # Maximum duty cycle (95% to prevent saturation)
-    min_duty_cycle: float = -0.95  # Minimum duty cycle
-    max_current_amps: float = 60.0  # Maximum current in amps
-    min_current_amps: float = -60.0  # Minimum current in amps
-    max_velocity_electrical_rpm: int = 100000  # Maximum velocity in Electrical RPM
-    min_velocity_electrical_rpm: int = -100000  # Minimum velocity in Electrical RPM
-    max_position_degrees: float = 2147.483647  # Maximum position based on int32 limit
-    min_position_degrees: float = -2147.483648  # Minimum position based on int32 limit
+    Low speeds (< 5000 ERPM) with high firmware acceleration settings cause
+    current oscillations and noise. Position is limited to +/-360 degrees
+    (one full rotation each direction) for exosuit joint safety.
+    """
+
+    max_velocity_electrical_rpm: int = 100000
+    min_velocity_electrical_rpm: int = -100000
+    min_safe_velocity_erpm: int = 5000  # Below this, firmware accel causes oscillations
+    max_position_degrees: float = 360.0  # Maximum position: 1 full rotation
+    min_position_degrees: float = -360.0  # Minimum position: -1 full rotation
     max_movement_time: float = 5.0  # Maximum movement time cap in seconds
+    soft_start_current_ma: int = 3000  # Gentle current (mA) to pre-spin past noisy zone
+    soft_start_duration: float = 0.15  # Seconds to hold pre-spin current
 
 
 @dataclass(frozen=True)
