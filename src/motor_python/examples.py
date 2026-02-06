@@ -1,7 +1,5 @@
-"""Example usage functions for motor control."""
+"""Example usage functions for exosuit motor control."""
 
-import itertools
-import math
 import time
 
 from loguru import logger
@@ -9,117 +7,103 @@ from loguru import logger
 from motor_python.cube_mars_motor import CubeMarsAK606v3
 
 
-def run_position_control(
-    motor: CubeMarsAK606v3, num_steps: int = 10, max_angle_degrees: float = 30.0
-) -> None:
-    """Run position control mode with sine wave motion.
+def run_velocity_control(motor: CubeMarsAK606v3, velocity_erpm: int = 8000) -> None:
+    """Run velocity control with forward and reverse.
 
-    :param motor: Motor controller instance.
-    :param num_steps: Number of steps in the sine wave cycle.
-    :param max_angle_degrees: Maximum angle in degrees for the sine wave.
-    :return: None
-    """
-    for step in range(num_steps):
-        # Sine wave: -max_angle_degrees to +max_angle_degrees over num_steps
-        angle = max_angle_degrees * math.sin(step * 2 * math.pi / num_steps)
-        motor.set_position(position_degrees=angle)
-        time.sleep(0.1)
-
-        # Query status periodically
-        if step % 3 == 0:
-            motor.get_status()
-
-
-def run_velocity_control(motor: CubeMarsAK606v3, velocity_erpm: int = 5000) -> None:
-    """Run velocity control mode with forward and reverse.
-
-    :param motor: Motor controller instance.
-    :param velocity_erpm: Velocity in electrical RPM (ERPM). Positive for forward, negative for reverse.
+    :param motor: Motor controller instance
+    :param velocity_erpm: Velocity in ERPM (positive=forward, negative=reverse)
     :return: None
     """
     logger.info("Forward velocity...")
-    motor.set_velocity(velocity_erpm=velocity_erpm)  # Forward
+    motor.set_velocity(velocity_erpm=velocity_erpm)
     time.sleep(0.5)
     motor.get_status()
 
     logger.info("Reverse velocity...")
-    motor.set_velocity(velocity_erpm=-velocity_erpm)  # Reverse
+    motor.set_velocity(velocity_erpm=-velocity_erpm)
     time.sleep(0.5)
     motor.get_status()
 
-    motor.set_velocity(velocity_erpm=0)  # Stop
-
-
-def run_duty_cycle_control(motor: CubeMarsAK606v3) -> None:
-    """Run duty cycle control mode.
-
-    :param motor: Motor controller instance.
-    :return: None
-    """
-    for duty in [0.1, 0.0, -0.1, 0.0]:
-        motor.set_duty_cycle(duty_cycle_percent=duty)
-        time.sleep(0.3)
-    motor.get_status()
-
-
-def run_current_control(motor: CubeMarsAK606v3) -> None:
-    """Run current control mode with precise torque.
-
-    :param motor: Motor controller instance.
-    :return: None
-    """
-    for current in [1.0, 0.0, -1.0, 0.0]:
-        motor.set_current(current_amps=current)
-        time.sleep(0.3)
+    logger.info("Stop...")
+    motor.set_velocity(velocity_erpm=0)
     motor.get_status()
 
 
 def run_max_rpm_test(motor: CubeMarsAK606v3, duration_seconds: float = 3.0) -> None:
-    """Spin motor at maximum RPM for a specified duration.
+    """Spin motor at maximum RPM.
 
-    :param motor: Motor controller instance.
-    :param duration_seconds: Duration to run at maximum RPM (default: 3 seconds).
+    :param motor: Motor controller instance
+    :param duration_seconds: Duration to run at max RPM (default: 3s)
     :return: None
     """
-    max_erpm = 100000  # Maximum ERPM for the motor
-    logger.info(
-        f"Spinning at maximum RPM ({max_erpm} ERPM) for {duration_seconds} seconds..."
-    )
+    max_erpm = 100000
+    logger.info(f"Spinning at max RPM ({max_erpm} ERPM) for {duration_seconds}s...")
 
     motor.set_velocity(velocity_erpm=max_erpm)
     time.sleep(duration_seconds)
 
     logger.info("Stopping motor...")
-    motor.set_velocity(velocity_erpm=0)  # Stop
-    time.sleep(0.5)  # Allow motor to come to a complete stop
+    motor.set_velocity(velocity_erpm=0)
+    time.sleep(0.5)
     motor.get_status()
 
 
-def run_motor_loop(motor: CubeMarsAK606v3) -> None:
-    """Run continuous motor control loop cycling through different modes.
+def run_exosuit_tendon_control(motor: CubeMarsAK606v3) -> None:
+    """Demonstrate exosuit tendon control.
 
-    :param motor: Motor controller instance.
+    Recommended control pattern for spool-based tendon systems.
+
+    :param motor: Motor controller instance
     :return: None
     """
-    logger.info("Starting continuous motor control loop...")
+    logger.info("Exosuit tendon control demo...")
+
+    logger.info("Pull tendon (lift)")
+    motor.control_exosuit_tendon(action="pull", velocity_erpm=12000)
+    time.sleep(0.8)
+
+    logger.info("Release tendon (lower)")
+    motor.control_exosuit_tendon(action="release", velocity_erpm=8000)
+    time.sleep(0.8)
+
+    logger.info("Stop")
+    motor.control_exosuit_tendon(action="stop")
+    time.sleep(0.3)
+    motor.get_status()
+
+
+def run_motor_demo(motor: CubeMarsAK606v3) -> None:
+    """Run motor control demonstration for exosuit.
+
+    :param motor: Motor controller instance
+    :return: None
+    """
+    logger.info("Starting exosuit motor demo...")
     logger.info("Press Ctrl+C to stop")
 
-    control_modes = [
-        ("Position control mode", run_position_control),
-        ("Velocity control mode", run_velocity_control),
-        ("Duty cycle control mode", run_duty_cycle_control),
-        ("Current control mode", run_current_control),
-        ("Max RPM test mode", run_max_rpm_test),
-    ]
-
     try:
-        loop_count = 0
-        # Cycle through control modes indefinitely
-        for mode_name, control_mode_func in itertools.cycle(control_modes):
-            loop_count += 1
-            logger.info(f"[Loop {loop_count}] {mode_name}")
-            control_mode_func(motor)
-            time.sleep(0.5)
+        # Demo 1: Basic velocity control
+        logger.info("\n" + "=" * 60)
+        logger.info(">>> RUNNING: run_velocity_control(8000 ERPM)")
+        logger.info("=" * 60)
+        run_velocity_control(motor, velocity_erpm=8000)
+        motor.stop()
+        time.sleep(2.0)
+
+        # Demo 2: Exosuit tendon control
+        logger.info("\n" + "=" * 60)
+        logger.info(">>> RUNNING: run_exosuit_tendon_control()")
+        logger.info("=" * 60)
+        run_exosuit_tendon_control(motor)
+        motor.stop()
+        time.sleep(2.0)
+
+        # Demo 3: Max RPM test
+        logger.info("\n" + "=" * 60)
+        logger.info(">>> RUNNING: run_max_rpm_test(2s)")
+        logger.info("=" * 60)
+        run_max_rpm_test(motor, duration_seconds=2.0)
+
     except KeyboardInterrupt:
-        logger.info("Loop stopped by user")
+        logger.info("Demo stopped by user")
         motor.stop()

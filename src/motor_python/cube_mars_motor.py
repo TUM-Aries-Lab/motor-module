@@ -15,7 +15,6 @@ from motor_python.definitions import (
     FRAME_BYTES,
     MOTOR_DEFAULTS,
     MOTOR_LIMITS,
-    SCALE_FACTORS,
 )
 from motor_python.motor_status_parser import MotorStatusParser
 
@@ -23,13 +22,8 @@ from motor_python.motor_status_parser import MotorStatusParser
 class MotorCommand(IntEnum):
     """CubeMars UART command codes."""
 
-    CMD_GET_PARAMS = 0x13  # Get specific parameters based on bit field
     CMD_GET_STATUS = 0x45  # Get all motor parameters
-    CMD_SET_DUTY = 0x46
-    CMD_SET_CURRENT = 0x47
-    CMD_SET_SPEED = 0x49
-    CMD_SET_POSITION = 0x4A
-    CMD_GET_POSITION = 0x4C  # Get current position (updates every 10ms)
+    CMD_SET_SPEED = 0x49  # Set velocity (primary exosuit control)
 
 
 class CubeMarsAK606v3:
@@ -179,7 +173,7 @@ class CubeMarsAK606v3:
             logger.debug("No response from motor")
             # Track consecutive failures for status queries
             cmd_byte = self._get_command_from_frame(frame)
-            if cmd_byte in (MotorCommand.CMD_GET_STATUS, MotorCommand.CMD_GET_POSITION):
+            if cmd_byte == MotorCommand.CMD_GET_STATUS:
                 self._consecutive_no_response += 1
                 if (
                     self._consecutive_no_response >= self._max_no_response
@@ -234,10 +228,6 @@ class CubeMarsAK606v3:
             try:
                 if cmd == 0x45:  # Full status response
                     self._parse_full_status(payload)
-                elif cmd in {0x4C, 0x57}:  # Position response (0x57 is echo of 0x4C)
-                    if len(payload) >= 4:
-                        position = struct.unpack(">f", payload[0:4])[0]
-                        logger.info(f"  Position: {position:.2f}°")
 
             except Exception as e:
                 logger.warning(f"Error parsing motor response: {e}")
@@ -246,160 +236,40 @@ class CubeMarsAK606v3:
         logger.info("=" * 50)
         return True
 
-    def set_position(self, position_degrees: float) -> None:
-        """Set motor position in degrees.
-
-        Hardware limited to approximately ±2147.5° (~6 rotations) due to int32 encoding.
-
-        :param position_degrees: Target position in degrees
-        :return: None
-        """
-        # Check hardware limits (int32 range)
-        if (
-            position_degrees > MOTOR_LIMITS.max_position_degrees
-            or position_degrees < MOTOR_LIMITS.min_position_degrees
-        ):
-            logger.warning(
-                f"Position {position_degrees:.2f}° exceeds hardware limits "
-                f"[{MOTOR_LIMITS.min_position_degrees:.1f}°, {MOTOR_LIMITS.max_position_degrees:.1f}°]. "
-                f"Clamping to hardware range."
-            )
-        position_degrees = np.clip(
-            position_degrees,
-            MOTOR_LIMITS.min_position_degrees,
-            MOTOR_LIMITS.max_position_degrees,
-        )
-        value = int(position_degrees * SCALE_FACTORS.position)
-        payload = struct.pack(">i", value)
-        frame = self._build_frame(MotorCommand.CMD_SET_POSITION, payload)
-        self._send_frame(frame)
-
-    def set_velocity(self, velocity_erpm: int) -> None:
+    def set_velocity(self, velocity_erpm: int, allow_low_speed: bool = False) -> None:
         """Set motor velocity in electrical RPM.
 
-        :param velocity_erpm: Target velocity in ERPM
+        Low speeds (<5000 ERPM) with high firmware acceleration cause current
+        oscillations and audible noise. Use medium-to-high speeds for exosuit.
+
+        :param velocity_erpm: Target velocity in ERPM (safe range: 5000-100000)
+        :param allow_low_speed: Bypass the 5000 ERPM safety floor (default: False)
         :return: None
+        :raises ValueError: If velocity below safe threshold and allow_low_speed=False
         """
         velocity_erpm_int = int(velocity_erpm)
-        if (
-            velocity_erpm_int > MOTOR_LIMITS.max_velocity_electrical_rpm
-            or velocity_erpm_int < MOTOR_LIMITS.min_velocity_electrical_rpm
-        ):
-            logger.warning(
-                f"Velocity {velocity_erpm_int} ERPM exceeds limits "
-                f"[{MOTOR_LIMITS.min_velocity_electrical_rpm}, {MOTOR_LIMITS.max_velocity_electrical_rpm}]. "
-                f"Clamping to safe range."
-            )
+
+        # Block dangerously low speeds unless explicitly allowed or stopping
+        if not allow_low_speed and velocity_erpm_int != 0:
+            if 0 < abs(velocity_erpm_int) < MOTOR_LIMITS.min_safe_velocity_erpm:
+                raise ValueError(
+                    f"Velocity {velocity_erpm_int} ERPM below safe threshold "
+                    f"({MOTOR_LIMITS.min_safe_velocity_erpm} ERPM min). "
+                    f"Use allow_low_speed=True to bypass."
+                )
+
+        # Clamp to absolute limits
         velocity_erpm = np.clip(
             velocity_erpm_int,
             MOTOR_LIMITS.min_velocity_electrical_rpm,
             MOTOR_LIMITS.max_velocity_electrical_rpm,
         )
+        if velocity_erpm != velocity_erpm_int:
+            logger.warning(
+                f"Velocity {velocity_erpm_int} ERPM clamped to {velocity_erpm} ERPM"
+            )
         payload = struct.pack(">i", velocity_erpm)
         frame = self._build_frame(MotorCommand.CMD_SET_SPEED, payload)
-        self._send_frame(frame)
-
-    def _estimate_movement_time(
-        self, target_degrees: float, motor_speed_erpm: int
-    ) -> float:
-        """Estimate time needed to reach target position at given speed.
-
-        Converts ERPM to degrees/second and calculates travel time.
-        This is a rough estimate - actual time may vary.
-
-        :param target_degrees: Target position in degrees
-        :param motor_speed_erpm: Motor speed in electrical RPM (absolute value used for calculation)
-        :return: Estimated time in seconds
-        """
-        if motor_speed_erpm == 0:
-            return 0.0
-
-        # Convert ERPM to degrees per second
-        # ERPM = electrical revolutions per minute
-        # degrees/sec = (ERPM / 60) * 360
-        degrees_per_second = abs(motor_speed_erpm) / 60.0 * 360.0
-
-        # Calculate time needed
-        estimated_time = abs(target_degrees) / degrees_per_second
-        return estimated_time
-
-    def move_to_position_with_speed(
-        self,
-        target_degrees: float,
-        motor_speed_erpm: int,
-        step_delay: float = MOTOR_DEFAULTS.step_delay,
-    ) -> None:
-        """Reach the target position through speed-controlled increments.
-
-        :param target_degrees: Target position in degrees.
-        :param motor_speed_erpm: Motor speed in electrical RPM (absolute value, direction determined by target).
-        :param step_delay: Delay between steps in seconds.
-        :return: None
-        """
-        # Get current position (assume we're tracking it)
-        # For now, we'll send velocity command to move, then switch to position
-
-        # Use velocity control to move at specified speed
-        direction = 1 if target_degrees > 0 else -1
-        self.set_velocity(motor_speed_erpm * direction)
-
-        # Calculate approximate time needed
-        estimated_time = self._estimate_movement_time(target_degrees, motor_speed_erpm)
-        time.sleep(min(estimated_time, 5.0))  # Cap at 5 seconds
-
-        # Switch to position hold
-        self.set_position(target_degrees)
-        logger.info(f"Reached position: {target_degrees}° at {motor_speed_erpm} ERPM")
-
-    def set_duty_cycle(self, duty_cycle_percent: float) -> None:
-        """Set motor PWM duty cycle percentage.
-
-        :param duty_cycle_percent: Duty cycle value (-1.0 to 1.0, where 1.0 = 100%)
-        :return: None
-        """
-        # Limit to 95% to prevent saturation
-        if (
-            duty_cycle_percent > MOTOR_LIMITS.max_duty_cycle
-            or duty_cycle_percent < MOTOR_LIMITS.min_duty_cycle
-        ):
-            logger.warning(
-                f"Duty cycle {duty_cycle_percent:.2f} exceeds limits "
-                f"[{MOTOR_LIMITS.min_duty_cycle:.2f}, {MOTOR_LIMITS.max_duty_cycle:.2f}]. "
-                f"Clamping to safe range."
-            )
-        duty_cycle_percent = np.clip(
-            duty_cycle_percent,
-            MOTOR_LIMITS.min_duty_cycle,
-            MOTOR_LIMITS.max_duty_cycle,
-        )
-        value = int(duty_cycle_percent * 100000.0)
-        payload = struct.pack(">i", value)
-        frame = self._build_frame(MotorCommand.CMD_SET_DUTY, payload)
-        self._send_frame(frame)
-
-    def set_current(self, current_amps: float) -> None:
-        """Set motor current in amperes.
-
-        :param current_amps: Current in Amps
-        :return: None
-        """
-        if (
-            current_amps > MOTOR_LIMITS.max_current_amps
-            or current_amps < MOTOR_LIMITS.min_current_amps
-        ):
-            logger.warning(
-                f"Current {current_amps:.2f}A exceeds limits "
-                f"[{MOTOR_LIMITS.min_current_amps:.2f}A, {MOTOR_LIMITS.max_current_amps:.2f}A]. "
-                f"Clamping to safe range."
-            )
-        current_amps = np.clip(
-            current_amps,
-            MOTOR_LIMITS.min_current_amps,
-            MOTOR_LIMITS.max_current_amps,
-        )
-        value = int(current_amps * 1000.0)
-        payload = struct.pack(">i", value)
-        frame = self._build_frame(MotorCommand.CMD_SET_CURRENT, payload)
         self._send_frame(frame)
 
     def get_status(self) -> bytes:
@@ -411,19 +281,6 @@ class CubeMarsAK606v3:
         frame = self._build_frame(MotorCommand.CMD_GET_STATUS, b"")
         status = self._send_frame(frame)
         return status
-
-    def get_position(self) -> bytes:
-        """Get current motor position via command 0x4C.
-
-        Command 0x4C returns current position every 10ms.
-        Lightweight query for position feedback only.
-
-        :return: Raw response bytes from motor containing position
-        """
-        # Command 0x4C with no payload
-        frame = self._build_frame(MotorCommand.CMD_GET_POSITION, b"")
-        response = self._send_frame(frame)
-        return response
 
     def check_communication(self) -> bool:
         """Verify motor is responding to commands.
@@ -447,14 +304,44 @@ class CubeMarsAK606v3:
         self.communicating = False
         return False
 
+    def control_exosuit_tendon(
+        self,
+        action: str,
+        velocity_erpm: int = 10000,
+    ) -> None:
+        """Control exosuit tendon using safe velocity commands.
+
+        :param action: Action - 'pull', 'release', 'stop'
+        :param velocity_erpm: Velocity in ERPM (default: 10000, min: 5000)
+        :return: None
+        :raises ValueError: If action is invalid
+        """
+        if action == "pull":
+            logger.info(f"Pulling tendon at {velocity_erpm} ERPM")
+            self.set_velocity(velocity_erpm=abs(velocity_erpm))
+        elif action == "release":
+            logger.info(f"Releasing tendon at {velocity_erpm} ERPM")
+            self.set_velocity(velocity_erpm=-abs(velocity_erpm))
+        elif action == "stop":
+            logger.info("Stopping tendon motion")
+            self.set_velocity(velocity_erpm=0)
+        else:
+            raise ValueError(
+                f"Invalid action '{action}'. Use: 'pull', 'release', or 'stop'"
+            )
+
     def stop(self) -> None:
-        """Stop the motor by setting all control values to zero.
+        """Stop the motor.
+
+        Sends velocity=0 twice with a delay to let the motor fully decelerate
+        before the firmware's velocity control loop settles.
 
         :return: None
         """
-        self.set_duty_cycle(0.0)
-        self.set_current(0.0)
         self.set_velocity(0)
+        time.sleep(0.3)
+        self.set_velocity(0)
+        time.sleep(0.3)
         logger.info("Motor stopped")
 
     def close(self) -> None:
