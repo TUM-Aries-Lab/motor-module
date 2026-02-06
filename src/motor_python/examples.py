@@ -25,8 +25,41 @@ def run_velocity_control(motor: CubeMarsAK606v3, velocity_erpm: int = 8000) -> N
     motor.get_status()
 
     logger.info("Stop...")
-    motor.set_velocity(velocity_erpm=0)
+    motor.stop()
     motor.get_status()
+
+
+def run_position_control(motor: CubeMarsAK606v3) -> None:
+    """Run position control demo.
+
+    Demonstrates set_position, get_position, and move_to_position_with_speed.
+
+    :param motor: Motor controller instance
+    :return: None
+    """
+    logger.info("Position control: move to 90 degrees...")
+    motor.set_position(position_degrees=90.0)
+    time.sleep(1.0)
+    motor.get_position()
+    motor.stop()
+
+    logger.info("Position control: move to -90 degrees...")
+    motor.set_position(position_degrees=-90.0)
+    time.sleep(1.0)
+    motor.get_position()
+    motor.stop()
+
+    logger.info("Position control: move to 180 degrees at 6000 ERPM...")
+    motor.move_to_position_with_speed(target_degrees=180.0, motor_speed_erpm=6000)
+    time.sleep(0.5)
+    motor.get_position()
+    motor.stop()
+
+    logger.info("Position control: return to home (0 degrees)...")
+    motor.set_position(position_degrees=0.0)
+    time.sleep(1.0)
+    motor.get_status()
+    motor.stop()
 
 
 def run_max_rpm_test(motor: CubeMarsAK606v3, duration_seconds: float = 3.0) -> None:
@@ -43,7 +76,7 @@ def run_max_rpm_test(motor: CubeMarsAK606v3, duration_seconds: float = 3.0) -> N
     time.sleep(duration_seconds)
 
     logger.info("Stopping motor...")
-    motor.set_velocity(velocity_erpm=0)
+    motor.stop()
     time.sleep(0.5)
     motor.get_status()
 
@@ -90,7 +123,15 @@ def run_motor_demo(motor: CubeMarsAK606v3) -> None:
         motor.stop()
         time.sleep(2.0)
 
-        # Demo 2: Exosuit tendon control
+        # Demo 2: Position control
+        logger.info("\n" + "=" * 60)
+        logger.info(">>> RUNNING: run_position_control()")
+        logger.info("=" * 60)
+        run_position_control(motor)
+        motor.stop()
+        time.sleep(2.0)
+
+        # Demo 3: Exosuit tendon control
         logger.info("\n" + "=" * 60)
         logger.info(">>> RUNNING: run_exosuit_tendon_control()")
         logger.info("=" * 60)
@@ -98,7 +139,7 @@ def run_motor_demo(motor: CubeMarsAK606v3) -> None:
         motor.stop()
         time.sleep(2.0)
 
-        # Demo 3: Max RPM test
+        # Demo 4: Max RPM test
         logger.info("\n" + "=" * 60)
         logger.info(">>> RUNNING: run_max_rpm_test(2s)")
         logger.info("=" * 60)

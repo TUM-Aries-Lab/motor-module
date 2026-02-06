@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-# Add the src directory to the path so that the quaternion_ekf package can be imported
+# Add the src directory to the path so that the motor_python package can be imported
 my_path = Path(__file__).parent
 sys.path.insert(0, str(my_path / "../src"))
 

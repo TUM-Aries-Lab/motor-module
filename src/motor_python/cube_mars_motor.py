@@ -15,6 +15,7 @@ from motor_python.definitions import (
     FRAME_BYTES,
     MOTOR_DEFAULTS,
     MOTOR_LIMITS,
+    SCALE_FACTORS,
 )
 from motor_python.motor_status_parser import MotorStatusParser
 
@@ -23,7 +24,10 @@ class MotorCommand(IntEnum):
     """CubeMars UART command codes."""
 
     CMD_GET_STATUS = 0x45  # Get all motor parameters
+    CMD_SET_CURRENT = 0x47  # Set current in amps (0A = release motor)
     CMD_SET_SPEED = 0x49  # Set velocity (primary exosuit control)
+    CMD_SET_POSITION = 0x4A  # Set target position in degrees
+    CMD_GET_POSITION = 0x4C  # Get current position (updates every 10ms)
 
 
 class CubeMarsAK606v3:
@@ -98,7 +102,7 @@ class CubeMarsAK606v3:
 
         Frame structure: AA | DataLength | CMD | Payload | CRC_H | CRC_L | BB
 
-        :param cmd: Command byte (0x46, 0x47, 0x49, 0x4A).
+        :param cmd: Command byte (0x45, 0x47, 0x49, 0x4A, 0x4C).
         :param payload: Command payload data.
         :return: Complete frame ready to send.
         """
@@ -173,7 +177,7 @@ class CubeMarsAK606v3:
             logger.debug("No response from motor")
             # Track consecutive failures for status queries
             cmd_byte = self._get_command_from_frame(frame)
-            if cmd_byte == MotorCommand.CMD_GET_STATUS:
+            if cmd_byte in (MotorCommand.CMD_GET_STATUS, MotorCommand.CMD_GET_POSITION):
                 self._consecutive_no_response += 1
                 if (
                     self._consecutive_no_response >= self._max_no_response
@@ -229,12 +233,129 @@ class CubeMarsAK606v3:
                 if cmd == 0x45:  # Full status response
                     self._parse_full_status(payload)
 
+                elif cmd in {0x4C, 0x57}:  # Position response (0x57 is echo of 0x4C)
+                    if len(payload) >= 4:
+                        position = struct.unpack(">f", payload[0:4])[0]
+                        logger.info(f"  Position: {position:.2f}\u00b0")
+
             except Exception as e:
                 logger.warning(f"Error parsing motor response: {e}")
                 logger.info(f"  Raw payload: {payload.hex().upper()}")
 
         logger.info("=" * 50)
         return True
+
+    def set_position(self, position_degrees: float) -> None:
+        """Set motor position in degrees.
+
+        Limited to +/-360 degrees (one full rotation) for exosuit joint safety.
+
+        :param position_degrees: Target position in degrees (-360.0 to 360.0)
+        :return: None
+        :raises ValueError: If position exceeds safe limits
+        """
+        if (
+            position_degrees > MOTOR_LIMITS.max_position_degrees
+            or position_degrees < MOTOR_LIMITS.min_position_degrees
+        ):
+            logger.warning(
+                f"Position {position_degrees:.2f}\u00b0 exceeds limits "
+                f"[{MOTOR_LIMITS.min_position_degrees:.2f}\u00b0, "
+                f"{MOTOR_LIMITS.max_position_degrees:.2f}\u00b0]. "
+                f"Clamping to safe range."
+            )
+        position_degrees = np.clip(
+            position_degrees,
+            MOTOR_LIMITS.min_position_degrees,
+            MOTOR_LIMITS.max_position_degrees,
+        )
+        value = int(position_degrees * SCALE_FACTORS.position)
+        payload = struct.pack(">i", value)
+        frame = self._build_frame(MotorCommand.CMD_SET_POSITION, payload)
+        self._send_frame(frame)
+
+    def get_position(self) -> bytes:
+        """Get current motor position via command 0x4C.
+
+        Command 0x4C returns current position every 10ms.
+        Lightweight query for position feedback only.
+
+        :return: Raw response bytes from motor containing position
+        """
+        frame = self._build_frame(MotorCommand.CMD_GET_POSITION, b"")
+        response = self._send_frame(frame)
+        return response
+
+    def _estimate_movement_time(
+        self, target_degrees: float, motor_speed_erpm: int
+    ) -> float:
+        """Estimate time needed to reach target position at given speed.
+
+        Converts ERPM to degrees/second and calculates travel time.
+        This is a rough estimate -- actual time may vary.
+
+        :param target_degrees: Target position in degrees
+        :param motor_speed_erpm: Motor speed in ERPM (absolute value used)
+        :return: Estimated time in seconds
+        """
+        if motor_speed_erpm == 0:
+            return 0.0
+
+        # ERPM -> degrees/sec = (ERPM / 60) * 360
+        degrees_per_second = abs(motor_speed_erpm) / 60.0 * 360.0
+        estimated_time = abs(target_degrees) / degrees_per_second
+        return estimated_time
+
+    def move_to_position_with_speed(
+        self,
+        target_degrees: float,
+        motor_speed_erpm: int,
+        step_delay: float = MOTOR_DEFAULTS.step_delay,
+    ) -> None:
+        """Reach a target position using velocity control then hold with position.
+
+        Uses velocity to move the motor toward the target, then switches to
+        position hold once the estimated travel time elapses.
+
+        :param target_degrees: Target position in degrees (-360 to 360).
+        :param motor_speed_erpm: Motor speed in ERPM (absolute, direction auto).
+        :param step_delay: Delay between steps in seconds.
+        :return: None
+        """
+        # Use velocity control to move at specified speed
+        direction = 1 if target_degrees > 0 else -1
+        self.set_velocity(
+            velocity_erpm=motor_speed_erpm * direction, allow_low_speed=True
+        )
+
+        # Calculate approximate time needed
+        estimated_time = self._estimate_movement_time(target_degrees, motor_speed_erpm)
+        time.sleep(min(estimated_time, MOTOR_LIMITS.max_movement_time))
+
+        # Switch to position hold
+        self.set_position(target_degrees)
+        logger.info(
+            f"Reached position: {target_degrees}\u00b0 at {motor_speed_erpm} ERPM"
+        )
+
+    def _soft_start(self, direction: int) -> None:
+        """Pre-spin motor with gentle current to pass the noisy low-speed zone.
+
+        The firmware's velocity PID has a fixed 60k ERPM/s² acceleration that
+        causes current oscillations and high-pitch noise at low speeds (0-5000
+        ERPM).  By first sending a moderate current command, the motor
+        accelerates gently under direct torque control (no velocity PID) until
+        it is past the dangerous zone, then the caller switches to velocity
+        mode.
+
+        :param direction: 1 for forward, -1 for reverse
+        :return: None
+        """
+        current_ma = MOTOR_LIMITS.soft_start_current_ma * direction
+        payload = struct.pack(">i", current_ma)
+        frame = self._build_frame(MotorCommand.CMD_SET_CURRENT, payload)
+        self._send_frame(frame)
+        time.sleep(MOTOR_LIMITS.soft_start_duration)
 
     def set_velocity(self, velocity_erpm: int, allow_low_speed: bool = False) -> None:
         """Set motor velocity in electrical RPM.
@@ -249,8 +370,14 @@ class CubeMarsAK606v3:
         """
         velocity_erpm_int = int(velocity_erpm)
 
-        # Block dangerously low speeds unless explicitly allowed or stopping
-        if not allow_low_speed and velocity_erpm_int != 0:
+        # Velocity 0 means stop -- use current=0 to release windings cleanly
+        # instead of velocity PID which decelerates through the noisy zone
+        if velocity_erpm_int == 0:
+            self.stop()
+            return
+
+        # Block dangerously low speeds unless explicitly allowed
+        if not allow_low_speed:
             if 0 < abs(velocity_erpm_int) < MOTOR_LIMITS.min_safe_velocity_erpm:
                 raise ValueError(
                     f"Velocity {velocity_erpm_int} ERPM below safe threshold "
@@ -268,6 +395,11 @@ class CubeMarsAK606v3:
             logger.warning(
                 f"Velocity {velocity_erpm_int} ERPM clamped to {velocity_erpm} ERPM"
             )
+
+        # Soft-start: pre-spin with current to avoid noisy low-speed zone
+        direction = 1 if velocity_erpm > 0 else -1
+        self._soft_start(direction)
+
         payload = struct.pack(">i", velocity_erpm)
         frame = self._build_frame(MotorCommand.CMD_SET_SPEED, payload)
         self._send_frame(frame)
@@ -324,25 +456,31 @@ class CubeMarsAK606v3:
             self.set_velocity(velocity_erpm=-abs(velocity_erpm))
         elif action == "stop":
             logger.info("Stopping tendon motion")
-            self.set_velocity(velocity_erpm=0)
+            self.stop()
         else:
             raise ValueError(
                 f"Invalid action '{action}'. Use: 'pull', 'release', or 'stop'"
             )
 
     def stop(self) -> None:
-        """Stop the motor.
+        """Stop the motor by setting current to zero (release windings).
 
-        Sends velocity=0 twice with a delay to let the motor fully decelerate
-        before the firmware's velocity control loop settles.
+        Sends current=0 via command 0x47 which puts the motor controller into
+        current mode with a 0A target.  This releases the motor windings
+        completely -- no velocity PID deceleration through the noisy low-speed
+        zone, no PWM switching.  The rotor coasts to a mechanical stop.
 
         :return: None
         """
-        self.set_velocity(0)
-        time.sleep(0.3)
-        self.set_velocity(0)
-        time.sleep(0.3)
-        logger.info("Motor stopped")
+        # current=0A -> payload = int(0 * 1000) = 0, packed big-endian int32
+        payload = struct.pack(">i", 0)
+        frame = self._build_frame(MotorCommand.CMD_SET_CURRENT, payload)
+        self._send_frame(frame)
+        time.sleep(0.1)
+        # Send a second time in case UART dropped the first frame
+        self._send_frame(frame)
+        time.sleep(0.2)
+        logger.info("Motor stopped (current=0, windings released)")
 
     def close(self) -> None:
         """Close serial connection to motor.

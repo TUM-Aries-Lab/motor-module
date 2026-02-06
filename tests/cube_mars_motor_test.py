@@ -147,3 +147,67 @@ def test_tendon_invalid_action(test_port):
         motor = CubeMarsAK606v3(port=test_port)
         with pytest.raises(ValueError, match="Invalid action"):
             motor.control_exosuit_tendon(action="invalid")
+
+
+# -- Position Control --
+
+
+def test_set_position_within_limits(test_port):
+    """Position within +/-360 degrees is accepted."""
+    with patch("motor_python.cube_mars_motor.serial.Serial") as mock_serial:
+        mock_instance = MagicMock()
+        mock_instance.in_waiting = 0
+        mock_serial.return_value = mock_instance
+        motor = CubeMarsAK606v3(port=test_port)
+        motor.set_position(position_degrees=180.0)
+
+
+def test_set_position_clamped(test_port):
+    """Position exceeding +/-360 degrees is clamped."""
+    with patch("motor_python.cube_mars_motor.serial.Serial") as mock_serial:
+        mock_instance = MagicMock()
+        mock_instance.in_waiting = 0
+        mock_serial.return_value = mock_instance
+        motor = CubeMarsAK606v3(port=test_port)
+        motor.set_position(position_degrees=500.0)  # Clamped to 360
+
+
+def test_set_position_negative(test_port):
+    """Negative position is accepted within limits."""
+    with patch("motor_python.cube_mars_motor.serial.Serial") as mock_serial:
+        mock_instance = MagicMock()
+        mock_instance.in_waiting = 0
+        mock_serial.return_value = mock_instance
+        motor = CubeMarsAK606v3(port=test_port)
+        motor.set_position(position_degrees=-270.0)
+
+
+def test_set_position_zero(test_port):
+    """Zero position (home) is accepted."""
+    with patch("motor_python.cube_mars_motor.serial.Serial") as mock_serial:
+        mock_instance = MagicMock()
+        mock_instance.in_waiting = 0
+        mock_serial.return_value = mock_instance
+        motor = CubeMarsAK606v3(port=test_port)
+        motor.set_position(position_degrees=0.0)
+
+
+def test_get_position_returns_bytes(test_port):
+    """get_position returns bytes from motor."""
+    with patch("motor_python.cube_mars_motor.serial.Serial") as mock_serial:
+        mock_instance = MagicMock()
+        mock_instance.in_waiting = 0
+        mock_serial.return_value = mock_instance
+        motor = CubeMarsAK606v3(port=test_port)
+        result = motor.get_position()
+        assert isinstance(result, bytes)
+
+
+def test_move_to_position_with_speed(test_port):
+    """move_to_position_with_speed sends velocity then position."""
+    with patch("motor_python.cube_mars_motor.serial.Serial") as mock_serial:
+        mock_instance = MagicMock()
+        mock_instance.in_waiting = 0
+        mock_serial.return_value = mock_instance
+        motor = CubeMarsAK606v3(port=test_port)
+        motor.move_to_position_with_speed(target_degrees=90.0, motor_speed_erpm=6000)

@@ -20,8 +20,6 @@ ENCODING: str = "utf-8"
 
 DATE_FORMAT = "%Y-%m-%d_%H-%M-%S"
 
-DUMMY_VARIABLE = "dummy_variable"
-
 
 @dataclass
 class LogLevel:
@@ -108,6 +106,9 @@ class ScaleFactors:
     duty: float = 1000.0  # Duty cycle is sent as int16 * 1000 (per-mille)
     voltage: float = 10.0  # Voltage is sent as int16 * 10 (deci-volts)
     vd_vq: float = 1000.0  # Vd/Vq voltages are sent as int32 * 1000
+    position: float = (
+        1_000_000.0  # Position is sent as int32 * 1,000,000 (micro-degrees)
+    )
 
 
 @dataclass(frozen=True)
@@ -126,15 +127,21 @@ class PayloadSizes:
 
 @dataclass(frozen=True)
 class MotorLimits:
-    """Motor velocity control limits.
+    """Motor velocity and position control limits.
 
-    Only velocity control is supported. Low speeds (< 5000 ERPM) with high
-    firmware acceleration settings cause current oscillations and noise.
+    Low speeds (< 5000 ERPM) with high firmware acceleration settings cause
+    current oscillations and noise. Position is limited to +/-360 degrees
+    (one full rotation each direction) for exosuit joint safety.
     """
 
     max_velocity_electrical_rpm: int = 100000
     min_velocity_electrical_rpm: int = -100000
     min_safe_velocity_erpm: int = 5000  # Below this, firmware accel causes oscillations
+    max_position_degrees: float = 360.0  # Maximum position: 1 full rotation
+    min_position_degrees: float = -360.0  # Minimum position: -1 full rotation
+    max_movement_time: float = 5.0  # Maximum movement time cap in seconds
+    soft_start_current_ma: int = 3000  # Gentle current (mA) to pre-spin past noisy zone
+    soft_start_duration: float = 0.15  # Seconds to hold pre-spin current
 
 
 @dataclass(frozen=True)
