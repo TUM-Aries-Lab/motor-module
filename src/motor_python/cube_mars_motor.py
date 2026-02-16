@@ -16,6 +16,7 @@ from motor_python.definitions import (
     MOTOR_DEFAULTS,
     MOTOR_LIMITS,
     SCALE_FACTORS,
+    TendonAction,
 )
 from motor_python.motor_status_parser import MotorStatusParser
 
@@ -28,6 +29,7 @@ class MotorCommand(IntEnum):
     CMD_SET_SPEED = 0x49  # Set velocity (primary exosuit control)
     CMD_SET_POSITION = 0x4A  # Set target position in degrees
     CMD_GET_POSITION = 0x4C  # Get current position (updates every 10ms)
+    CMD_POSITION_ECHO = 0x57  # Position command echo response
 
 
 class CubeMarsAK606v3:
@@ -102,7 +104,7 @@ class CubeMarsAK606v3:
 
         Frame structure: AA | DataLength | CMD | Payload | CRC_H | CRC_L | BB
 
-        :param cmd: Command byte (0x45, 0x47, 0x49, 0x4A, 0x4C).
+        :param cmd: Command byte from MotorCommand enum.
         :param payload: Command payload data.
         :return: Complete frame ready to send.
         """
@@ -192,7 +194,7 @@ class CubeMarsAK606v3:
         return response
 
     def _parse_full_status(self, payload: bytes) -> None:
-        """Parse full status response (command 0x45).
+        """Parse full status response (CMD_GET_STATUS).
 
         :param payload: Response payload bytes.
         :return: None
@@ -230,13 +232,16 @@ class CubeMarsAK606v3:
             payload = response[3:-3]
 
             try:
-                if cmd == 0x45:  # Full status response
+                if cmd == MotorCommand.CMD_GET_STATUS:
                     self._parse_full_status(payload)
 
-                elif cmd in {0x4C, 0x57}:  # Position response (0x57 is echo of 0x4C)
+                elif cmd in {
+                    MotorCommand.CMD_GET_POSITION,
+                    MotorCommand.CMD_POSITION_ECHO,
+                }:
                     if len(payload) >= 4:
                         position = struct.unpack(">f", payload[0:4])[0]
-                        logger.info(f"  Position: {position:.2f}\u00b0")
+                        logger.info(f"  Position: {position:.2f} deg")
 
             except Exception as e:
                 logger.warning(f"Error parsing motor response: {e}")
@@ -259,9 +264,9 @@ class CubeMarsAK606v3:
             or position_degrees < MOTOR_LIMITS.min_position_degrees
         ):
             logger.warning(
-                f"Position {position_degrees:.2f}\u00b0 exceeds limits "
-                f"[{MOTOR_LIMITS.min_position_degrees:.2f}\u00b0, "
-                f"{MOTOR_LIMITS.max_position_degrees:.2f}\u00b0]. "
+                f"Position {position_degrees:.2f} deg exceeds limits "
+                f"[{MOTOR_LIMITS.min_position_degrees:.2f} deg, "
+                f"{MOTOR_LIMITS.max_position_degrees:.2f} deg]. "
                 f"Clamping to safe range."
             )
         position_degrees = np.clip(
@@ -275,9 +280,9 @@ class CubeMarsAK606v3:
         self._send_frame(frame)
 
     def get_position(self) -> bytes:
-        """Get current motor position via command 0x4C.
+        """Get current motor position via CMD_GET_POSITION.
 
-        Command 0x4C returns current position every 10ms.
+        Returns current position every 10ms.
         Lightweight query for position feedback only.
 
         :return: Raw response bytes from motor containing position
@@ -295,7 +300,7 @@ class CubeMarsAK606v3:
         This is a rough estimate -- actual time may vary.
 
         :param target_degrees: Target position in degrees
-        :param motor_speed_erpm: Motor speed in ERPM (absolute value used)
+        :param motor_speed_erpm: Motor speed in electrical RPM (absolute value used for calculation)
         :return: Estimated time in seconds
         """
         if motor_speed_erpm == 0:
@@ -335,7 +340,7 @@ class CubeMarsAK606v3:
         # Switch to position hold
         self.set_position(target_degrees)
         logger.info(
-            f"Reached position: {target_degrees}\u00b0 at {motor_speed_erpm} ERPM"
+            f"Reached position: {target_degrees} deg at {motor_speed_erpm} ERPM"
         )
 
     def _soft_start(self, direction: int) -> None:
@@ -409,7 +414,7 @@ class CubeMarsAK606v3:
 
         :return: Raw status bytes from motor.
         """
-        # Command 0x45 requires no payload - it returns everything
+        # CMD_GET_STATUS requires no payload - it returns everything
         frame = self._build_frame(MotorCommand.CMD_GET_STATUS, b"")
         status = self._send_frame(frame)
         return status
@@ -438,37 +443,37 @@ class CubeMarsAK606v3:
 
     def control_exosuit_tendon(
         self,
-        action: str,
-        velocity_erpm: int = 10000,
+        action: TendonAction,
+        velocity_erpm: int = MOTOR_LIMITS.default_tendon_velocity_erpm,
     ) -> None:
         """Control exosuit tendon using safe velocity commands.
 
-        :param action: Action - 'pull', 'release', 'stop'
+        :param action: TendonAction enum (PULL, RELEASE, or STOP)
         :param velocity_erpm: Velocity in ERPM (default: 10000, min: 5000)
         :return: None
         :raises ValueError: If action is invalid
         """
-        if action == "pull":
+        if action == TendonAction.PULL:
             logger.info(f"Pulling tendon at {velocity_erpm} ERPM")
             self.set_velocity(velocity_erpm=abs(velocity_erpm))
-        elif action == "release":
+        elif action == TendonAction.RELEASE:
             logger.info(f"Releasing tendon at {velocity_erpm} ERPM")
             self.set_velocity(velocity_erpm=-abs(velocity_erpm))
-        elif action == "stop":
+        elif action == TendonAction.STOP:
             logger.info("Stopping tendon motion")
             self.stop()
         else:
             raise ValueError(
-                f"Invalid action '{action}'. Use: 'pull', 'release', or 'stop'"
+                f"Invalid action {action}. Use TendonAction.PULL, TendonAction.RELEASE, or TendonAction.STOP"
             )
 
     def stop(self) -> None:
         """Stop the motor by setting current to zero (release windings).
 
-        Sends current=0 via command 0x47 which puts the motor controller into
-        current mode with a 0A target.  This releases the motor windings
+        Sends current=0 via CMD_SET_CURRENT which puts the motor controller
+        into current mode with a 0A target. This releases the motor windings
         completely -- no velocity PID deceleration through the noisy low-speed
-        zone, no PWM switching.  The rotor coasts to a mechanical stop.
+        zone, no PWM switching. The rotor coasts to a mechanical stop.
 
         :return: None
         """

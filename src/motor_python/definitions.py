@@ -67,6 +67,8 @@ class FrameBytes:
     end: int = 0xBB
     min_response_length: int = 10  # Minimum valid response frame length
     min_frame_with_payload: int = 6  # Minimum frame length that includes payload
+    expected_status_response_length: int = 90  # Full status response (cmd 0x45)
+    min_status_response_length: int = 85  # Minimum acceptable status response
     separator_length: int = 50  # Length of separator line in logs
     start_index: int = 0  # Index of start byte in frame
     length_index: int = 1  # Index of length byte in frame
@@ -142,6 +144,8 @@ class MotorLimits:
     max_movement_time: float = 5.0  # Maximum movement time cap in seconds
     soft_start_current_ma: int = 3000  # Gentle current (mA) to pre-spin past noisy zone
     soft_start_duration: float = 0.15  # Seconds to hold pre-spin current
+    default_tendon_velocity_erpm: int = 10000  # Default velocity for tendon control
+    default_velocity_demo_erpm: int = 8000  # Safe moderate velocity for demo/testing
 
 
 @dataclass(frozen=True)
@@ -162,6 +166,15 @@ SCALE_FACTORS = ScaleFactors()
 PAYLOAD_SIZES = PayloadSizes()
 MOTOR_LIMITS = MotorLimits()
 CONVERSION_FACTORS = ConversionFactors()
+
+
+# Tendon action control
+class TendonAction(IntEnum):
+    """Exosuit tendon control actions."""
+
+    PULL = 0  # Pull tendon (lift/assist)
+    RELEASE = 1  # Release tendon (lower/relax)
+    STOP = 2  # Stop motion
 
 
 # Motor Fault Codes (from CubeMars Manual)

@@ -5,9 +5,12 @@ import time
 from loguru import logger
 
 from motor_python.cube_mars_motor import CubeMarsAK606v3
+from motor_python.definitions import MOTOR_LIMITS, TendonAction
 
 
-def run_velocity_control(motor: CubeMarsAK606v3, velocity_erpm: int = 8000) -> None:
+def run_velocity_control(
+    motor: CubeMarsAK606v3, velocity_erpm: int = MOTOR_LIMITS.default_velocity_demo_erpm
+) -> None:
     """Run velocity control with forward and reverse.
 
     :param motor: Motor controller instance
@@ -69,7 +72,7 @@ def run_max_rpm_test(motor: CubeMarsAK606v3, duration_seconds: float = 3.0) -> N
     :param duration_seconds: Duration to run at max RPM (default: 3s)
     :return: None
     """
-    max_erpm = 100000
+    max_erpm = MOTOR_LIMITS.max_velocity_electrical_rpm
     logger.info(f"Spinning at max RPM ({max_erpm} ERPM) for {duration_seconds}s...")
 
     motor.set_velocity(velocity_erpm=max_erpm)
@@ -92,15 +95,15 @@ def run_exosuit_tendon_control(motor: CubeMarsAK606v3) -> None:
     logger.info("Exosuit tendon control demo...")
 
     logger.info("Pull tendon (lift)")
-    motor.control_exosuit_tendon(action="pull", velocity_erpm=12000)
+    motor.control_exosuit_tendon(action=TendonAction.PULL, velocity_erpm=12000)
     time.sleep(0.8)
 
     logger.info("Release tendon (lower)")
-    motor.control_exosuit_tendon(action="release", velocity_erpm=8000)
+    motor.control_exosuit_tendon(action=TendonAction.RELEASE, velocity_erpm=8000)
     time.sleep(0.8)
 
     logger.info("Stop")
-    motor.control_exosuit_tendon(action="stop")
+    motor.control_exosuit_tendon(action=TendonAction.STOP)
     time.sleep(0.3)
     motor.get_status()
 
@@ -117,9 +120,13 @@ def run_motor_demo(motor: CubeMarsAK606v3) -> None:
     try:
         # Demo 1: Basic velocity control
         logger.info("\n" + "=" * 60)
-        logger.info(">>> RUNNING: run_velocity_control(8000 ERPM)")
+        logger.info(
+            f">>> RUNNING: run_velocity_control({MOTOR_LIMITS.default_velocity_demo_erpm} ERPM)"
+        )
         logger.info("=" * 60)
-        run_velocity_control(motor, velocity_erpm=8000)
+        run_velocity_control(
+            motor, velocity_erpm=MOTOR_LIMITS.default_velocity_demo_erpm
+        )
         motor.stop()
         time.sleep(2.0)
 

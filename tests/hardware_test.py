@@ -10,6 +10,7 @@ from collections.abc import Generator
 import pytest
 
 from motor_python.cube_mars_motor import CubeMarsAK606v3
+from motor_python.definitions import FRAME_BYTES, TendonAction
 
 logger = logging.getLogger(__name__)
 
@@ -19,21 +20,27 @@ pytestmark = pytest.mark.hardware
 def get_status_with_retry(
     motor: CubeMarsAK606v3, max_retries: int = 8, delay: float = 0.12
 ) -> bytes:
-    """Get motor status with retry logic for unreliable UART.
+    """Get motor status with retry logic for unreliable communication.
 
-    :param motor: Motor instance
-    :param max_retries: Maximum retry attempts
-    :param delay: Delay between retries in seconds
-    :return: Valid status bytes (>= 85 bytes)
+    Args:
+        motor: Motor instance.
+        max_retries: Maximum retry attempts.
+        delay: Delay between retries in seconds.
+
+    Returns:
+        Valid status bytes (>= 85 bytes).
+
     """
     for attempt in range(max_retries):
         status = motor.get_status()
-        if status is not None and len(status) >= 85:
+        if status is not None and len(status) >= FRAME_BYTES.min_status_response_length:
             return status
         if attempt < max_retries - 1:
             time.sleep(delay)
     status = motor.get_status()
-    assert status is not None and len(status) >= 85, (
+    assert (
+        status is not None and len(status) >= FRAME_BYTES.min_status_response_length
+    ), (
         f"Failed to get valid status after retries (got {len(status) if status else 0} bytes)"
     )
     return status
@@ -42,9 +49,13 @@ def get_status_with_retry(
 def parse_speed_from_status(motor: CubeMarsAK606v3, status: bytes) -> int | None:
     """Parse speed from a status response, returning None if data looks corrupted.
 
-    :param motor: Motor instance (for its status_parser)
-    :param status: Raw status bytes
-    :return: Speed in ERPM, or None if data is corrupted
+    Args:
+        motor: Motor instance (for its status_parser).
+        status: Raw status bytes.
+
+    Returns:
+        Speed in ERPM, or None if data is corrupted.
+
     """
     motor.status_parser.payload_offset = 0
     motor.status_parser.parse_temperatures(status)
@@ -86,7 +97,8 @@ class TestHardwareConnection:
     @pytest.mark.flaky(reruns=3, reruns_delay=1)
     def test_motor_communication(self, motor: CubeMarsAK606v3) -> None:
         """Motor responds to status queries."""
-        assert motor.check_communication()
+        result = motor.check_communication()
+        assert result is True, "Motor communication check should return True"
         assert motor.communicating
 
     @pytest.mark.flaky(reruns=3, reruns_delay=1)
@@ -94,7 +106,7 @@ class TestHardwareConnection:
         """Status response has expected minimum length."""
         status = get_status_with_retry(motor)
         assert status is not None
-        assert len(status) >= 85
+        assert len(status) >= FRAME_BYTES.min_status_response_length
 
 
 # -- Velocity Control --
@@ -193,13 +205,13 @@ class TestExosuitSafety:
     @pytest.mark.flaky(reruns=3, reruns_delay=1)
     def test_tendon_pull_release_stop(self, motor: CubeMarsAK606v3) -> None:
         """Tendon control: pull, release, stop all work."""
-        motor.control_exosuit_tendon(action="pull", velocity_erpm=8000)
+        motor.control_exosuit_tendon(action=TendonAction.PULL, velocity_erpm=8000)
         time.sleep(0.3)
 
-        motor.control_exosuit_tendon(action="release", velocity_erpm=6000)
+        motor.control_exosuit_tendon(action=TendonAction.RELEASE, velocity_erpm=6000)
         time.sleep(0.3)
 
-        motor.control_exosuit_tendon(action="stop")
+        motor.control_exosuit_tendon(action=TendonAction.STOP)
         time.sleep(0.2)
 
         assert motor.get_status() is not None
@@ -208,7 +220,8 @@ class TestExosuitSafety:
     def test_tendon_invalid_action(self, motor: CubeMarsAK606v3) -> None:
         """Invalid tendon action raises ValueError."""
         with pytest.raises(ValueError, match="Invalid action"):
-            motor.control_exosuit_tendon(action="invalid")
+            invalid_action = 999  # type: ignore[assignment]
+            motor.control_exosuit_tendon(action=invalid_action)  # type: ignore[arg-type]
 
 
 # -- Position Control --
