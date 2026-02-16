@@ -158,6 +158,18 @@ class ConversionFactors:
     byte_mask: int = 0xFF  # Mask for extracting single byte
 
 
+@dataclass(frozen=True)
+class HardwareTestDefaults:
+    """Hardware test configuration defaults."""
+
+    max_status_retries: int = 8  # Maximum attempts for status query
+    retry_delay: float = 0.12  # Delay between retry attempts in seconds
+    position_tolerance_degrees: float = 5.0  # Tolerance for position verification
+    velocity_tolerance: float = 0.3  # 30% tolerance for velocity verification
+    position_corruption_threshold: float = 1e4  # Positions beyond this are corrupted
+    speed_corruption_threshold: int = int(1e6)  # Speeds beyond this are corrupted
+
+
 # Instantiate frozen dataclasses for easy access
 MOTOR_DEFAULTS = MotorDefaults()
 FRAME_BYTES = FrameBytes()
@@ -166,6 +178,7 @@ SCALE_FACTORS = ScaleFactors()
 PAYLOAD_SIZES = PayloadSizes()
 MOTOR_LIMITS = MotorLimits()
 CONVERSION_FACTORS = ConversionFactors()
+HARDWARE_TEST_DEFAULTS = HardwareTestDefaults()
 
 
 # Tendon action control

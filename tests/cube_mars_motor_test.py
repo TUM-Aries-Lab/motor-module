@@ -78,6 +78,9 @@ def test_check_communication_with_response(test_port, mock_response):
     with patch("motor_python.cube_mars_motor.serial.Serial") as mock_serial:
         mock_instance = MagicMock()
         mock_instance.in_waiting = 10
+        # Protocol frame: AA (start) | 05 (length) | 45 (CMD_GET_STATUS) | 00 00 00 00 (4-byte payload) | 12 34 (CRC16) | BB (end)
+        # Total: 1 + 1 + 5 (cmd + payload) + 2 + 1 = 10 bytes
+        # CRC is calculated over: length + cmd + payload bytes
         mock_instance.read.return_value = b"\xaa\x05\x45\x00\x00\x00\x00\x12\x34\xbb"
         mock_serial.return_value = mock_instance
         motor = CubeMarsAK606v3(port=test_port)

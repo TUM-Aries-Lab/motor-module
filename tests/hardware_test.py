@@ -10,7 +10,13 @@ from collections.abc import Generator
 import pytest
 
 from motor_python.cube_mars_motor import CubeMarsAK606v3
-from motor_python.definitions import FRAME_BYTES, TendonAction
+from motor_python.definitions import (
+    FRAME_BYTES,
+    HARDWARE_TEST_DEFAULTS,
+    MOTOR_LIMITS,
+    PAYLOAD_SIZES,
+    TendonAction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +24,9 @@ pytestmark = pytest.mark.hardware
 
 
 def get_status_with_retry(
-    motor: CubeMarsAK606v3, max_retries: int = 8, delay: float = 0.12
+    motor: CubeMarsAK606v3,
+    max_retries: int = HARDWARE_TEST_DEFAULTS.max_status_retries,
+    delay: float = HARDWARE_TEST_DEFAULTS.retry_delay,
 ) -> bytes:
     """Get motor status with retry logic for unreliable communication.
 
@@ -61,9 +69,49 @@ def parse_speed_from_status(motor: CubeMarsAK606v3, status: bytes) -> int | None
     motor.status_parser.parse_temperatures(status)
     motor.status_parser.parse_currents(status)
     dsv = motor.status_parser.parse_duty_speed_voltage(status)
-    if dsv is None or abs(dsv.speed_erpm) >= 1_000_000:
+    if (
+        dsv is None
+        or abs(dsv.speed_erpm) >= HARDWARE_TEST_DEFAULTS.speed_corruption_threshold
+    ):
+        logger.warning(
+            "Speed data corruption detected: speed=%s (threshold=%d)",
+            dsv.speed_erpm if dsv else None,
+            HARDWARE_TEST_DEFAULTS.speed_corruption_threshold,
+        )
         return None  # Corrupted data
     return dsv.speed_erpm
+
+
+def parse_position_from_status(motor: CubeMarsAK606v3, status: bytes) -> float | None:
+    """Parse position from a status response, returning None if data looks corrupted.
+
+    Args:
+        motor: Motor instance (for its status_parser).
+        status: Raw status bytes.
+
+    Returns:
+        Position in degrees, or None if data is corrupted.
+
+    """
+    motor.status_parser.payload_offset = 0
+    motor.status_parser.parse_temperatures(status)
+    motor.status_parser.parse_currents(status)
+    motor.status_parser.parse_duty_speed_voltage(status)
+    # Skip reserved bytes
+    motor.status_parser._skip_bytes(PAYLOAD_SIZES.reserved)
+    status_pos = motor.status_parser.parse_status_position(status)
+    if (
+        status_pos is None
+        or abs(status_pos.position_degrees)
+        >= HARDWARE_TEST_DEFAULTS.position_corruption_threshold
+    ):
+        logger.warning(
+            "Position data corruption detected: position=%s deg (threshold=%d)",
+            status_pos.position_degrees if status_pos else None,
+            HARDWARE_TEST_DEFAULTS.position_corruption_threshold,
+        )
+        return None  # Corrupted data
+    return status_pos.position_degrees
 
 
 @pytest.fixture
@@ -105,8 +153,10 @@ class TestHardwareConnection:
     def test_get_status(self, motor: CubeMarsAK606v3) -> None:
         """Status response has expected minimum length."""
         status = get_status_with_retry(motor)
-        assert status is not None
-        assert len(status) >= FRAME_BYTES.min_status_response_length
+        assert status is not None, "Status should not be None"
+        assert len(status) >= FRAME_BYTES.min_status_response_length, (
+            f"Status length {len(status)} should be >= {FRAME_BYTES.min_status_response_length}"
+        )
 
 
 # -- Velocity Control --
@@ -125,8 +175,11 @@ class TestVelocityControl:
 
             speed = parse_speed_from_status(motor, get_status_with_retry(motor))
             if speed is not None:
-                assert abs(speed - target) < target * 0.3, (
-                    f"Speed {speed} ERPM not within 30% of target {target} ERPM"
+                assert (
+                    abs(speed - target)
+                    < target * HARDWARE_TEST_DEFAULTS.velocity_tolerance
+                ), (
+                    f"Speed {speed} ERPM not within {HARDWARE_TEST_DEFAULTS.velocity_tolerance * 100}% of target {target} ERPM"
                 )
         finally:
             motor.stop()
@@ -145,8 +198,16 @@ class TestVelocityControl:
     def test_velocity_clamping(self, motor: CubeMarsAK606v3) -> None:
         """Values beyond +-100000 ERPM are clamped, not rejected."""
         try:
-            motor.set_velocity(velocity_erpm=150000)  # Clamped to 100000
+            # Request velocity beyond max limit
+            requested_velocity = MOTOR_LIMITS.max_velocity_electrical_rpm + 50000
+            motor.set_velocity(velocity_erpm=requested_velocity)
             time.sleep(0.2)
+            # Verify velocity was clamped to max, not set to the requested value
+            speed = parse_speed_from_status(motor, get_status_with_retry(motor))
+            if speed is not None:
+                assert abs(speed) <= MOTOR_LIMITS.max_velocity_electrical_rpm, (
+                    f"Speed {speed} should be clamped to max {MOTOR_LIMITS.max_velocity_electrical_rpm}"
+                )
         finally:
             motor.stop()
 
@@ -173,8 +234,11 @@ class TestVelocityControl:
 
             speed = parse_speed_from_status(motor, get_status_with_retry(motor))
             if speed is not None:
-                assert abs(speed - target) < target * 0.3, (
-                    f"Speed {speed} ERPM not within 30% of target {target} ERPM"
+                assert (
+                    abs(speed - target)
+                    < target * HARDWARE_TEST_DEFAULTS.velocity_tolerance
+                ), (
+                    f"Speed {speed} ERPM not within {HARDWARE_TEST_DEFAULTS.velocity_tolerance * 100}% of target {target} ERPM"
                 )
         finally:
             motor.stop()
@@ -234,10 +298,20 @@ class TestPositionControl:
     def test_set_position(self, motor: CubeMarsAK606v3) -> None:
         """Set position command is accepted by motor."""
         try:
-            motor.set_position(position_degrees=90.0)
+            target_position = 90.0
+            motor.set_position(position_degrees=target_position)
             time.sleep(0.15)
+            # Verify motor reached the position
             status = get_status_with_retry(motor)
-            assert status is not None
+            assert status is not None, "Status should not be None"
+            actual_position = parse_position_from_status(motor, status)
+            if actual_position is not None:
+                assert (
+                    abs(actual_position - target_position)
+                    <= HARDWARE_TEST_DEFAULTS.position_tolerance_degrees
+                ), (
+                    f"Position {actual_position} deg not within {HARDWARE_TEST_DEFAULTS.position_tolerance_degrees} deg of target {target_position} deg"
+                )
         finally:
             motor.stop()
 
@@ -251,10 +325,12 @@ class TestPositionControl:
 
     @pytest.mark.flaky(reruns=3, reruns_delay=1)
     def test_get_position(self, motor: CubeMarsAK606v3) -> None:
-        """get_position returns a response from motor."""
+        """get_position returns a valid response from motor."""
         response = motor.get_position()
-        # Response may be empty if motor doesn't reply in time, but should be bytes
-        assert isinstance(response, bytes)
+        assert isinstance(response, bytes), "Response should be bytes"
+        assert len(response) >= FRAME_BYTES.min_response_length, (
+            f"Position response length {len(response)} should be >= {FRAME_BYTES.min_response_length}"
+        )
 
     @pytest.mark.flaky(reruns=3, reruns_delay=1)
     def test_position_clamped(self, motor: CubeMarsAK606v3) -> None:

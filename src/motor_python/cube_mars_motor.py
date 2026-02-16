@@ -209,7 +209,7 @@ class CubeMarsAK606v3:
         :param response: Raw response bytes from motor.
         :return: True if response was valid, False otherwise
         """
-        if len(response) < 10:  # Minimum valid response length
+        if len(response) < FRAME_BYTES.min_response_length:
             return False
 
         # Check for valid frame structure (AA ... BB)
