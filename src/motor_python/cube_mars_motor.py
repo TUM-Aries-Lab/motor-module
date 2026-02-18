@@ -15,6 +15,7 @@ from motor_python.definitions import (
     FRAME_BYTES,
     MOTOR_DEFAULTS,
     MOTOR_LIMITS,
+    PAYLOAD_SIZES,
     SCALE_FACTORS,
     TendonAction,
 )
@@ -26,7 +27,7 @@ class MotorCommand(IntEnum):
 
     CMD_GET_STATUS = 0x45  # Get all motor parameters
     CMD_SET_CURRENT = 0x47  # Set current in amps (0A = release motor)
-    CMD_SET_SPEED = 0x49  # Set velocity (primary exosuit control)
+    CMD_SET_VELOCITY = 0x49  # Set velocity (primary exosuit control, can be negative)
     CMD_SET_POSITION = 0x4A  # Set target position in degrees
     CMD_GET_POSITION = 0x4C  # Get current position (updates every 10ms)
     CMD_POSITION_ECHO = 0x57  # Position command echo response
@@ -239,6 +240,7 @@ class CubeMarsAK606v3:
                     MotorCommand.CMD_GET_POSITION,
                     MotorCommand.CMD_POSITION_ECHO,
                 }:
+                    # Position is a 4-byte float in big-endian format
                     if len(payload) >= 4:
                         position = struct.unpack(">f", payload[0:4])[0]
                         logger.info(f"  Position: {position:.2f} deg")
@@ -253,27 +255,11 @@ class CubeMarsAK606v3:
     def set_position(self, position_degrees: float) -> None:
         """Set motor position in degrees.
 
-        Limited to +/-360 degrees (one full rotation) for exosuit joint safety.
+        No artificial limits - motor can rotate continuously for spool-based cable systems.
 
-        :param position_degrees: Target position in degrees (-360.0 to 360.0)
+        :param position_degrees: Target position in degrees (unlimited range)
         :return: None
-        :raises ValueError: If position exceeds safe limits
         """
-        if (
-            position_degrees > MOTOR_LIMITS.max_position_degrees
-            or position_degrees < MOTOR_LIMITS.min_position_degrees
-        ):
-            logger.warning(
-                f"Position {position_degrees:.2f} deg exceeds limits "
-                f"[{MOTOR_LIMITS.min_position_degrees:.2f} deg, "
-                f"{MOTOR_LIMITS.max_position_degrees:.2f} deg]. "
-                f"Clamping to safe range."
-            )
-        position_degrees = np.clip(
-            position_degrees,
-            MOTOR_LIMITS.min_position_degrees,
-            MOTOR_LIMITS.max_position_degrees,
-        )
         value = int(position_degrees * SCALE_FACTORS.position)
         payload = struct.pack(">i", value)
         frame = self._build_frame(MotorCommand.CMD_SET_POSITION, payload)
@@ -306,9 +292,24 @@ class CubeMarsAK606v3:
         if motor_speed_erpm == 0:
             return 0.0
 
+        # Get current position to calculate actual distance to travel
+        current_position = 0.0  # Default if we can't get current position
+        status = self.get_status()
+        if status and len(status) >= FRAME_BYTES.min_status_response_length:
+            self.status_parser.payload_offset = 0
+            self.status_parser.parse_temperatures(status)
+            self.status_parser.parse_currents(status)
+            self.status_parser.parse_duty_speed_voltage(status)
+            self.status_parser._skip_bytes(PAYLOAD_SIZES.reserved)
+            status_pos = self.status_parser.parse_status_position(status)
+            if status_pos is not None:
+                current_position = status_pos.position_degrees
+
         # ERPM -> degrees/sec = (ERPM / 60) * 360
         degrees_per_second = abs(motor_speed_erpm) / 60.0 * 360.0
-        estimated_time = abs(target_degrees) / degrees_per_second
+        # Calculate distance from current position to target
+        distance = abs(target_degrees - current_position)
+        estimated_time = distance / degrees_per_second
         return estimated_time
 
     def move_to_position_with_speed(
@@ -322,7 +323,7 @@ class CubeMarsAK606v3:
         Uses velocity to move the motor toward the target, then switches to
         position hold once the estimated travel time elapses.
 
-        :param target_degrees: Target position in degrees (-360 to 360).
+        :param target_degrees: Target position in degrees (unlimited range).
         :param motor_speed_erpm: Motor speed in ERPM (absolute, direction auto).
         :param step_delay: Delay between steps in seconds.
         :return: None
@@ -382,6 +383,7 @@ class CubeMarsAK606v3:
             return
 
         # Block dangerously low speeds unless explicitly allowed
+        # abs(velocity) must be 0 or >= 5000 ERPM (speeds 1-4999 cause oscillations)
         if not allow_low_speed:
             if 0 < abs(velocity_erpm_int) < MOTOR_LIMITS.min_safe_velocity_erpm:
                 raise ValueError(
@@ -406,7 +408,7 @@ class CubeMarsAK606v3:
         self._soft_start(direction)
 
         payload = struct.pack(">i", velocity_erpm)
-        frame = self._build_frame(MotorCommand.CMD_SET_SPEED, payload)
+        frame = self._build_frame(MotorCommand.CMD_SET_VELOCITY, payload)
         self._send_frame(frame)
 
     def get_status(self) -> bytes:

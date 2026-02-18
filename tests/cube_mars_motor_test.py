@@ -187,17 +187,19 @@ def test_set_position_within_limits(test_port):
         motor.set_position(position_degrees=180.0)
 
 
-def test_set_position_clamped(test_port):
-    """Position exceeding +/-360 degrees is clamped to safe range."""
+def test_set_position_large_value(test_port):
+    """Position values are sent without clamping for spool cable systems."""
     with patch("motor_python.cube_mars_motor.serial.Serial") as mock_serial:
         mock_instance = MagicMock()
         mock_instance.in_waiting = 0
         mock_serial.return_value = mock_instance
         motor = CubeMarsAK606v3(port=test_port)
-        # Set position beyond limit - should be clamped to max_position_degrees
+        # Set position beyond old limit - should be sent without clamping
         motor.set_position(position_degrees=500.0)
-        # Verify command was sent (motor accepts the clamped value)
-        assert mock_instance.write.called, "set_position should clamp and send command"
+        # Verify command was sent with actual value (not clamped to 360)
+        assert mock_instance.write.called, (
+            "set_position should send command without clamping"
+        )
 
 
 def test_set_position_negative(test_port):

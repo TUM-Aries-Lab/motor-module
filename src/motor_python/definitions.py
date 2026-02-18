@@ -67,7 +67,9 @@ class FrameBytes:
     end: int = 0xBB
     min_response_length: int = 10  # Minimum valid response frame length
     min_frame_with_payload: int = 6  # Minimum frame length that includes payload
-    expected_status_response_length: int = 90  # Full status response (cmd 0x45)
+    expected_status_response_length: int = (
+        90  # Full status response (MotorCommand.CMD_GET_STATUS)
+    )
     min_status_response_length: int = 85  # Minimum acceptable status response
     separator_length: int = 50  # Length of separator line in logs
     start_index: int = 0  # Index of start byte in frame
@@ -132,15 +134,12 @@ class MotorLimits:
     """Motor velocity and position control limits.
 
     Low speeds (< 5000 ERPM) with high firmware acceleration settings cause
-    current oscillations and noise. Position is limited to +/-360 degrees
-    (one full rotation each direction) for exosuit joint safety.
+    current oscillations and noise.
     """
 
     max_velocity_electrical_rpm: int = 100000
     min_velocity_electrical_rpm: int = -100000
-    min_safe_velocity_erpm: int = 5000  # Below this, firmware accel causes oscillations
-    max_position_degrees: float = 360.0  # Maximum position: 1 full rotation
-    min_position_degrees: float = -360.0  # Minimum position: -1 full rotation
+    min_safe_velocity_erpm: int = 5000  # Minimum safe magnitude (|v| >= 5000 or v == 0)
     max_movement_time: float = 5.0  # Maximum movement time cap in seconds
     soft_start_current_ma: int = 3000  # Gentle current (mA) to pre-spin past noisy zone
     soft_start_duration: float = 0.15  # Seconds to hold pre-spin current
@@ -163,11 +162,19 @@ class HardwareTestDefaults:
     """Hardware test configuration defaults."""
 
     max_status_retries: int = 8  # Maximum attempts for status query
-    retry_delay: float = 0.12  # Delay between retry attempts in seconds
-    position_tolerance_degrees: float = 5.0  # Tolerance for position verification
-    velocity_tolerance: float = 0.3  # 30% tolerance for velocity verification
-    position_corruption_threshold: float = 1e4  # Positions beyond this are corrupted
-    speed_corruption_threshold: int = int(1e6)  # Speeds beyond this are corrupted
+    retry_delay: float = 0.12  # Delay between retry attempts (seconds)
+    position_tolerance_degrees: float = (
+        5.0  # Tolerance for position verification (degrees)
+    )
+    velocity_tolerance: float = (
+        0.3  # 30% tolerance for velocity verification (fraction, 0.3 = 30%)
+    )
+    position_corruption_threshold: float = (
+        1e4  # Positions beyond this are corrupted (degrees)
+    )
+    speed_corruption_threshold: int = int(
+        1e6
+    )  # Speeds beyond this are corrupted (ERPM, int matches protocol)
 
 
 # Instantiate frozen dataclasses for easy access
