@@ -71,12 +71,12 @@ def parse_speed_from_status(motor: CubeMarsAK606v3, status: bytes) -> int | None
     dsv = motor.status_parser.parse_duty_speed_voltage(status)
     if (
         dsv is None
-        or abs(dsv.speed_erpm) >= HARDWARE_TEST_DEFAULTS.speed_corruption_threshold
+        or abs(dsv.speed_erpm) >= HARDWARE_TEST_DEFAULTS.speed_corruption_threshold_erpm
     ):
         logger.warning(
             "Speed data corruption detected: speed=%s (threshold=%d)",
             dsv.speed_erpm if dsv else None,
-            HARDWARE_TEST_DEFAULTS.speed_corruption_threshold,
+            HARDWARE_TEST_DEFAULTS.speed_corruption_threshold_erpm,
         )
         return None  # Corrupted data
     return dsv.speed_erpm
@@ -103,12 +103,12 @@ def parse_position_from_status(motor: CubeMarsAK606v3, status: bytes) -> float |
     if (
         status_pos is None
         or abs(status_pos.position_degrees)
-        >= HARDWARE_TEST_DEFAULTS.position_corruption_threshold
+        >= HARDWARE_TEST_DEFAULTS.position_corruption_threshold_degrees
     ):
         logger.warning(
             "Position data corruption detected: position=%s deg (threshold=%d)",
             status_pos.position_degrees if status_pos else None,
-            HARDWARE_TEST_DEFAULTS.position_corruption_threshold,
+            HARDWARE_TEST_DEFAULTS.position_corruption_threshold_degrees,
         )
         return None  # Corrupted data
     return status_pos.position_degrees

@@ -169,12 +169,12 @@ class HardwareTestDefaults:
     velocity_tolerance: float = (
         0.3  # 30% tolerance for velocity verification (fraction, 0.3 = 30%)
     )
-    position_corruption_threshold: float = (
-        1e4  # Positions beyond this are corrupted (degrees)
+    position_corruption_threshold_degrees: float = (
+        1e4  # Positions beyond this are corrupted
     )
-    speed_corruption_threshold: int = int(
-        1e6
-    )  # Speeds beyond this are corrupted (ERPM, int matches protocol)
+    speed_corruption_threshold_erpm: int = int(
+        1e6  # Speeds beyond this are corrupted (int matches UART protocol)
+    )
 
 
 # Instantiate frozen dataclasses for easy access
