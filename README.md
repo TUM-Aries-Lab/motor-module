@@ -39,12 +39,19 @@ motor.control_exosuit_tendon(action="release", velocity_erpm=8000)
 motor.control_exosuit_tendon(action="stop")
 ```
 
+## Publishing
+
+It's super easy to publish your own packages on PyPi. To build and publish this package run:
+1. Update the version number in pyproject.toml and motor_python/__init__.py
+2. Commit your changes and add a git tag "<new.version.number>"
+3. Push the tag `git push --tag`
+
 ## API
 
 | Method | Description |
 |--------|-------------|
 | `set_velocity(velocity_erpm, allow_low_speed=False)` | Set speed in ERPM |
-| `set_position(position_degrees)` | Set target position in degrees (+/-360) |
+| `set_position(position_degrees)` | Set target position in degrees (unlimited for spool cable system) |
 | `get_position()` | Read current position from motor |
 | `move_to_position_with_speed(target_degrees, motor_speed_erpm)` | Move to position via velocity then hold |
 | `control_exosuit_tendon(action, velocity_erpm)` | Helper for pull / release / stop |
@@ -66,11 +73,11 @@ motor.set_velocity(velocity_erpm=100, allow_low_speed=True)  # Bypass
 motor.set_velocity(velocity_erpm=0)                   # Stop always allowed
 ```
 
-## Position Limits
+## Position Control
 
-**Range: -360.0 to 360.0 degrees** (one full rotation each direction).
+**Range: Unlimited** - Motor can rotate continuously for spool-based cable systems.
 
-Values outside this range are clamped with a warning.
+No artificial position limits. Suitable for applications requiring multiple rotations to wind cable.
 
 ## Run
 
