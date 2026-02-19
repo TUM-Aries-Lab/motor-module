@@ -1,6 +1,6 @@
 [project]
 name = "motor_python"
-version = "0.0.6"
+version = "0.0.7"
 description = "CubeMars motor module for Aries exosuits."
 readme = "README.md"
 authors = [{ name = "Tsmorz", email = "tony.smoragiewicz@tum.de"},{ name = "Hannes", email = "hannes.nguyen@tum.de" }]
@@ -19,6 +19,7 @@ dev = [
   "mypy>=1.11",
   "pytest>=8.3",
   "pytest-cov>=6.0",
+  "pytest-rerunfailures>=15.0",
   "pre-commit>=4.1.0",
   "coveralls>=4.0.1",
   "pyright>=1.1.407",
@@ -51,6 +52,13 @@ combine-as-imports = true
 quote-style = "double"
 indent-style = "space"
 line-ending = "lf"
+
+[tool.pytest.ini_options]
+markers = [
+    "hardware: tests that require actual motor hardware (deselect with '-m \"not hardware\"')",
+]
+testpaths = ["tests"]
+pythonpath = ["src"]
 
 [build-system]
 requires = ["hatchling"]
