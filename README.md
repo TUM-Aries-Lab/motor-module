@@ -4,6 +4,10 @@
 
 Velocity and position motor control for exosuit tendon systems (CubeMars AK60-6).
 
+**Communication Interfaces:**
+- **UART:** Serial communication via RS-485 or TTL (default)
+- **CAN:** CAN bus communication with SN65HVD230 transceiver (Jetson Orin Nano)
+
 Current and duty cycle modes are removed -- they cause oscillations when combined
 with the firmware's high acceleration trap parameters.
 
@@ -14,6 +18,8 @@ uv install motor_python
 ```
 
 ## Quick Start
+
+### UART Communication (Default)
 
 ```python
 from motor_python.cube_mars_motor import CubeMarsAK606v3
@@ -38,6 +44,25 @@ motor.control_exosuit_tendon(action="pull", velocity_erpm=10000)
 motor.control_exosuit_tendon(action="release", velocity_erpm=8000)
 motor.control_exosuit_tendon(action="stop")
 ```
+
+### CAN Bus Communication (Jetson Orin Nano)
+
+```python
+from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+
+# Initialize with motor CAN ID (configured in CubeMars software)
+motor = CubeMarsAK606v3CAN(motor_can_id=0x03, interface="can0", bitrate=1000000)
+
+# Same API as UART version
+motor.set_velocity(velocity_erpm=10000)
+motor.stop()
+
+# Multi-motor support (each motor has unique CAN ID)
+motor_left = CubeMarsAK606v3CAN(motor_can_id=0x03)
+motor_right = CubeMarsAK606v3CAN(motor_can_id=0x04)
+```
+
+**CAN Setup:** See [docs/CAN_SETUP_GUIDE.md](docs/CAN_SETUP_GUIDE.md) for complete hardware wiring and Jetson configuration instructions.
 
 ## API
 
@@ -92,16 +117,19 @@ Hardware tests are skipped automatically if the motor is not available.
 ```
 src/motor_python/
     __init__.py
-    __main__.py           # Entry point (make app)
-    cube_mars_motor.py    # Motor controller class
-    definitions.py        # Constants and limits
-    examples.py           # Demo functions
+    __main__.py                # Entry point (make app)
+    cube_mars_motor.py         # UART motor controller class
+    cube_mars_motor_can.py     # CAN motor controller class
+    definitions.py             # Constants and limits
+    examples.py                # Demo functions
     motor_status_parser.py
     utils.py
 tests/
     conftest.py
-    cube_mars_motor_test.py   # Unit tests (mocked serial)
-    hardware_test.py          # Integration tests (real motor)
+    cube_mars_motor_test.py        # Unit tests (mocked serial)
+    hardware_test.py               # Integration tests (real motor)
     motor_status_parser_test.py
     utils_test.py
+docs/
+    CAN_SETUP_GUIDE.md             # CAN hardware setup for Jetson
 ```

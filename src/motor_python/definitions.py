@@ -60,6 +60,35 @@ class MotorDefaults:
 
 
 @dataclass(frozen=True)
+class CANDefaults:
+    """CAN bus communication default settings for Jetson Orin Nano.
+
+    Hardware setup uses SN65HVD230 CAN transceiver:
+    - Jetson CAN_TX -> SN65HVD230 D (pin 1)
+    - Jetson CAN_RX -> SN65HVD230 R (pin 4)
+    - SN65HVD230 CANH (pin 7) -> Motor CANH
+    - SN65HVD230 CANL (pin 6) -> Motor CANL
+    - Common GND connection
+    - 3.3V power to SN65HVD230 Vcc (pin 3)
+    - 120Ω termination resistor across CANH/CANL
+
+    Motor CAN configuration (from CubeMars software):
+    - CAN Bitrate: 1 Mbps
+    - CAN ID: 3 (default, configurable per motor)
+    - Periodic Feedback: 50Hz
+    """
+
+    interface: str = "can0"  # SocketCAN interface name (can0 or can1 on Jetson)
+    bitrate: int = 1000000  # CAN bus bitrate in bits/sec (1 Mbps per motor config)
+    motor_can_id: int = 0x03  # Default motor CAN ID (matches motor config ID: 3)
+    controller_can_id: int = 0x00  # Controller/master CAN ID
+    receive_timeout: float = 0.5  # Timeout for receiving CAN messages (seconds)
+    connection_stabilization_delay: float = 0.05  # Delay after CAN bus init
+    max_retries: int = 3  # Max transmission retries on error
+    feedback_rate_hz: int = 50  # Motor periodic feedback rate (from motor config)
+
+
+@dataclass(frozen=True)
 class FrameBytes:
     """Motor protocol frame bytes."""
 
@@ -179,6 +208,7 @@ class HardwareTestDefaults:
 
 # Instantiate frozen dataclasses for easy access
 MOTOR_DEFAULTS = MotorDefaults()
+CAN_DEFAULTS = CANDefaults()
 FRAME_BYTES = FrameBytes()
 CRC_CONSTANTS = CRCConstants()
 SCALE_FACTORS = ScaleFactors()
