@@ -29,28 +29,26 @@ echo "Step 2: Bringing down can0 interface..."
 ip link set can0 down 2>/dev/null || echo "  - Interface already down"
 echo "  ✓ Interface down"
 
-# Configure bitrate (1 Mbps to match motor configuration)
+# Configure bitrate and bring up interface with error recovery
+# CRITICAL: 'berr-reporting on restart-ms 100' is required so the interface
+# auto-recovers from BUS-OFF state (caused by unACK'd TX frames) instead of
+# locking up permanently.  Without this, any TX error (e.g. UART cable still
+# plugged in) puts the interface into ERROR-PASSIVE/BUS-OFF with no recovery.
 echo ""
-echo "Step 3: Configuring CAN bitrate to 1 Mbps..."
-ip link set can0 type can bitrate 1000000
-echo "  ✓ Bitrate configured"
-
-# Bring up interface
-echo ""
-echo "Step 4: Bringing up can0 interface..."
-ip link set can0 up
-echo "  ✓ Interface up"
+echo "Step 3: Bringing up can0 at 1 Mbps with error recovery..."
+ip link set can0 up type can bitrate 1000000 berr-reporting on restart-ms 100
+echo "  ✓ Interface up (bitrate 1 Mbps, auto-restart after BUS-OFF in 100 ms)"
 
 # Verify configuration
 echo ""
-echo "Step 5: Verifying configuration..."
+echo "Step 4: Verifying configuration..."
 echo "------------------------------------------------"
 ip -details link show can0
 echo "------------------------------------------------"
 
-# Check state
-STATE=$(ip -details link show can0 | grep -o "state [A-Z-]*" | awk '{print $2}')
-BITRATE=$(ip -details link show can0 | grep -o "bitrate [0-9]*" | awk '{print $2}')
+# Check state — use 'ip link' (not details) to get the single-line UP/DOWN state
+STATE=$(ip link show can0 | awk 'NR==1 && /UP/ {print "UP"}')
+BITRATE=$(ip -details link show can0 | awk '/bitrate/ {print $2; exit}')
 
 echo ""
 if [ "$STATE" = "UP" ] && [ "$BITRATE" = "1000000" ]; then

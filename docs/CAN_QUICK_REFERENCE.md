@@ -19,8 +19,9 @@ Pin 20 (GND)     → Pin 2 (GND)
 ## Enable CAN Interface (One-Time Setup)
 
 ```bash
-sudo ip link set can0 type can bitrate 1000000
-sudo ip link set can0 up
+# CRITICAL: berr-reporting + restart-ms 100 prevents the interface from locking
+# up in ERROR-PASSIVE/BUS-OFF state when TX frames go unACK'd.
+sudo ip link set can0 up type can bitrate 1000000 berr-reporting on restart-ms 100
 ```
 
 ## Verify CAN is Working

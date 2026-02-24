@@ -13,6 +13,17 @@ test-hardware:
 	uv run pytest --cov=src --cov-report=term-missing --no-cov-on-fail --cov-report=xml --cov-fail-under=73
 	rm -f .coverage
 
+test-hardware-can:  ## Run only CAN hardware tests (requires motor on can0)
+	uv run pytest tests/hardware_can_test.py -v --cov=src --cov-report=term-missing --no-cov-on-fail
+	rm -f .coverage
+
+test-hardware-uart:  ## Run only UART hardware tests (requires serial motor)
+	uv run pytest tests/hardware_test.py -v --cov=src --cov-report=term-missing --no-cov-on-fail
+	rm -f .coverage
+
+setup-can:  ## Configure can0 interface (requires sudo)
+	sudo bash setup_can.sh
+
 lint:
 	uv run ruff format src/ tests/
 	uv run ruff check --fix src/ tests/

@@ -25,11 +25,9 @@ Configure motor using CubeMars software (Windows):
 Enable the CAN interface on the Jetson:
 
 ```bash
-# Configure CAN interface
-sudo ip link set can0 type can bitrate 1000000
-
-# Bring up the interface
-sudo ip link set can0 up
+# Configure and bring up CAN interface with error recovery
+# CRITICAL: berr-reporting + restart-ms 100 enables auto-recovery from BUS-OFF
+sudo ip link set can0 up type can bitrate 1000000 berr-reporting on restart-ms 100
 
 # Verify it's running
 ip -details link show can0
