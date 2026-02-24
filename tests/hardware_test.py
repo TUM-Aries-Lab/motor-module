@@ -65,10 +65,11 @@ def parse_speed_from_status(motor: CubeMarsAK606v3, status: bytes) -> int | None
         Speed in ERPM, or None if data is corrupted.
 
     """
+    payload = status[FRAME_BYTES.payload_start_index : -FRAME_BYTES.crc_and_end_length]
     motor.status_parser.payload_offset = 0
-    motor.status_parser.parse_temperatures(status)
-    motor.status_parser.parse_currents(status)
-    dsv = motor.status_parser.parse_duty_speed_voltage(status)
+    motor.status_parser.parse_temperatures(payload)
+    motor.status_parser.parse_currents(payload)
+    dsv = motor.status_parser.parse_duty_speed_voltage(payload)
     if (
         dsv is None
         or abs(dsv.speed_erpm) >= HARDWARE_TEST_DEFAULTS.speed_corruption_threshold_erpm
@@ -93,13 +94,14 @@ def parse_position_from_status(motor: CubeMarsAK606v3, status: bytes) -> float |
         Position in degrees, or None if data is corrupted.
 
     """
+    payload = status[FRAME_BYTES.payload_start_index : -FRAME_BYTES.crc_and_end_length]
     motor.status_parser.payload_offset = 0
-    motor.status_parser.parse_temperatures(status)
-    motor.status_parser.parse_currents(status)
-    motor.status_parser.parse_duty_speed_voltage(status)
+    motor.status_parser.parse_temperatures(payload)
+    motor.status_parser.parse_currents(payload)
+    motor.status_parser.parse_duty_speed_voltage(payload)
     # Skip reserved bytes
     motor.status_parser._skip_bytes(PAYLOAD_SIZES.reserved)
-    status_pos = motor.status_parser.parse_status_position(status)
+    status_pos = motor.status_parser.parse_status_position(payload)
     if (
         status_pos is None
         or abs(status_pos.position_degrees)
@@ -299,8 +301,12 @@ class TestPositionControl:
         """Set position command is accepted by motor."""
         try:
             target_position = 90.0
+            # Home to 0° first so accumulated absolute angle is near zero,
+            # then move to target from a known baseline.
+            motor.set_position(position_degrees=0.0)
+            time.sleep(1.0)
             motor.set_position(position_degrees=target_position)
-            time.sleep(0.15)
+            time.sleep(1.5)
             # Verify motor reached the position
             status = get_status_with_retry(motor)
             assert status is not None, "Status should not be None"

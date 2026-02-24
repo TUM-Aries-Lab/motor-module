@@ -133,6 +133,36 @@ class CubeMarsAK606v3:
         # Command byte is at index 2
         return frame[2] if len(frame) > 2 else 0
 
+    def _extract_frame(self, data: bytes) -> bytes:
+        """Find the first valid frame in a raw serial buffer.
+
+        The motor pushes periodic status frames continuously; reading
+        in_waiting bytes can return multiple concatenated frames.  This method
+        scans for 0xAA, uses DataLength to compute the end index, and confirms
+        0xBB at that position.
+
+        Frame layout: AA | DataLength | CMD | Payload | CRC_H | CRC_L | BB
+        Total bytes : 1  +     1      +        DataLength     +    2  +  1
+                    = DataLength + 5
+
+        :param data: Raw bytes from the serial buffer.
+        :return: First self-consistent frame, or b"" if none found.
+        """
+        for i in range(len(data) - 1):
+            if data[i] != FRAME_BYTES.start:
+                continue
+            data_length = data[i + 1]
+            end_idx = i + data_length + 4  # AA(1)+len(1)+data_length+CRC(2)+BB(1) - 1
+            if end_idx >= len(data):
+                continue
+            if data[end_idx] != FRAME_BYTES.end:
+                continue
+            frame = data[i : end_idx + 1]
+            if len(frame) >= FRAME_BYTES.min_response_length:
+                logger.debug(f"Frame extracted at offset {i}: {len(frame)} bytes")
+                return frame
+        return b""
+
     def _send_frame(self, frame: bytes) -> bytes:
         """Send frame to motor over UART and read response.
 
@@ -143,6 +173,7 @@ class CubeMarsAK606v3:
             logger.debug("Motor not connected - skipping message send")
             return b""
 
+        self.serial.reset_input_buffer()
         self.serial.write(frame)
         logger.debug(f"TX: {' '.join(f'{b:02X}' for b in frame)}")
 
@@ -155,27 +186,30 @@ class CubeMarsAK606v3:
         logger.debug(f"Bytes waiting in buffer: {bytes_waiting}")
 
         if bytes_waiting > 0:
-            response = self.serial.read(bytes_waiting)
-            if response:
-                logger.debug(f"RX: {' '.join(f'{b:02X}' for b in response)}")
-                # Check if response is valid
-                is_valid = self._parse_motor_response(response)
-                if is_valid:
-                    # Reset failure counters on successful communication
-                    self._consecutive_no_response = 0
-                    self._consecutive_invalid_response = 0
-                    self.communicating = True
+            raw = self.serial.read(bytes_waiting)
+            if raw:
+                logger.debug(
+                    f"RX raw ({len(raw)} bytes): {' '.join(f'{b:02X}' for b in raw)}"
+                )
+                response = self._extract_frame(raw)
+                if response:
+                    logger.debug(f"RX frame: {' '.join(f'{b:02X}' for b in response)}")
+                    is_valid = self._parse_motor_response(response)
+                    if is_valid:
+                        self._consecutive_no_response = 0
+                        self._consecutive_invalid_response = 0
+                        self.communicating = True
+                    else:
+                        self._consecutive_invalid_response += 1
+                        if self._consecutive_invalid_response >= self._max_no_response:
+                            logger.warning(
+                                f"Motor sending invalid responses after {self._consecutive_invalid_response} attempts - "
+                                "hardware may be powered off or cables disconnected"
+                            )
+                            self.communicating = False
+                        response = b""
                 else:
-                    # Track consecutive invalid responses
-                    self._consecutive_invalid_response += 1
-                    if self._consecutive_invalid_response >= self._max_no_response:
-                        logger.warning(
-                            f"Motor sending invalid responses after {self._consecutive_invalid_response} attempts - "
-                            "hardware may be powered off or cables disconnected"
-                        )
-                        self.communicating = False
-                    # Clear response since it's invalid
-                    response = b""
+                    logger.debug(f"No valid frame found in {len(raw)}-byte buffer")
         else:
             logger.debug("No response from motor")
             # Track consecutive failures for status queries
@@ -266,16 +300,23 @@ class CubeMarsAK606v3:
         self._send_frame(frame)
 
     def get_position(self) -> bytes:
-        """Get current motor position via CMD_GET_POSITION.
+        """Get current motor position.
 
-        Returns current position every 10ms.
-        Lightweight query for position feedback only.
+        Tries CMD_GET_POSITION (0x4C) first.  If the firmware does not
+        implement it (no response after retries), falls back to
+        CMD_GET_STATUS which always responds and contains the position field.
 
-        :return: Raw response bytes from motor containing position
+        :return: Raw response bytes from motor containing position data.
         """
         frame = self._build_frame(MotorCommand.CMD_GET_POSITION, b"")
-        response = self._send_frame(frame)
-        return response
+        for attempt in range(MOTOR_DEFAULTS.max_communication_attempts):
+            response = self._send_frame(frame)
+            if response and len(response) >= FRAME_BYTES.min_response_length:
+                return response
+            if attempt < MOTOR_DEFAULTS.max_communication_attempts - 1:
+                time.sleep(MOTOR_DEFAULTS.communication_retry_delay)
+        logger.debug("CMD_GET_POSITION timed out; falling back to CMD_GET_STATUS")
+        return self.get_status()
 
     def _estimate_movement_time(
         self, target_degrees: float, motor_speed_erpm: int
