@@ -27,7 +27,7 @@ class CANMotorFeedback:
     position_degrees: float  # Motor position in degrees (-3200° to 3200°)
     speed_erpm: int  # Electrical speed in RPM (-320000 to 320000)
     current_amps: float  # Motor current in amps (-60 to 60 A)
-    temperature_celsius: int  # Driver board temperature (-20 to 127deg C)
+    temperature_celsius: int  # Driver board temperature in °C (-20 to 127)
     error_code: int  # Error code (0=no fault, 1-7=various faults)
 
 
@@ -264,7 +264,7 @@ class CubeMarsAK606v3CAN:
         current_int = struct.unpack(">h", msg.data[4:6])[0]
         current_amps = current_int * 0.01
 
-        # Temperature: int8 direct deg C
+        # Temperature: int8 direct °C
         temperature_celsius = struct.unpack("b", bytes([msg.data[6]]))[0]
 
         # Error code: uint8
@@ -281,7 +281,7 @@ class CubeMarsAK606v3CAN:
         logger.debug(
             f"RX Feedback 0x{msg.arbitration_id:04X}: "
             f"Pos={position_degrees:.1f}°  Speed={speed_erpm} ERPM  "
-            f"Cur={current_amps:.2f}A  Tmp={temperature_celsius}deg C  Err={error_code}"
+            f"Cur={current_amps:.2f} A  Tmp={temperature_celsius} °C  Err={error_code}"
         )
         return feedback
 
@@ -330,7 +330,7 @@ class CubeMarsAK606v3CAN:
         - Data[0-1]: Position int16 x 0.1 = degrees
         - Data[2-3]: Speed    int16 x 10  = ERPM
         - Data[4-5]: Current  int16 x 0.01 = Amps
-        - Data[6]:   Temperature int8 = deg C
+        - Data[6]:   Temperature int8 = °C
         - Data[7]:   Error code uint8
 
         :param timeout: Fallback bus recv timeout (seconds).
@@ -658,8 +658,8 @@ class CubeMarsAK606v3CAN:
 
         self._start_refresh(CANControlMode.POSITION_VELOCITY, data)
         logger.info(
-            f"Set position: {position_degrees:.2f}° at {velocity_int} ERPM, "
-            f"accel {accel_int} ERPM/s"
+            f"Set position: {position_degrees:.2f}° at {velocity_erpm} ERPM, "
+            f"accel {accel_erpm_per_sec} ERPM/s"
         )
 
     def get_status(self) -> CANMotorFeedback | None:
@@ -677,7 +677,7 @@ class CubeMarsAK606v3CAN:
             logger.info(f"  Position: {feedback.position_degrees:.2f}°")
             logger.info(f"  Speed: {feedback.speed_erpm} ERPM")
             logger.info(f"  Current: {feedback.current_amps:.2f} A")
-            logger.info(f"  Temperature: {feedback.temperature_celsius}deg C")
+            logger.info(f"  Temperature: {feedback.temperature_celsius} °C")
             logger.info(f"  Error Code: {feedback.error_code}")
             logger.info("=" * 50)
         return feedback
