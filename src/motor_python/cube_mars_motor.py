@@ -19,7 +19,6 @@ from motor_python.definitions import (
     SCALE_FACTORS,
     TendonAction,
 )
-from motor_python.motor_base import AbstractMotorController
 from motor_python.motor_status_parser import MotorStatusParser
 
 
@@ -34,7 +33,7 @@ class MotorCommand(IntEnum):
     CMD_POSITION_ECHO = 0x57  # Position command echo response
 
 
-class CubeMarsAK606v3(AbstractMotorController):
+class CubeMarsAK606v3:
     """AK60-6 Motor Controller for CubeMars V3 UART Protocol."""
 
     def __init__(
@@ -253,30 +252,6 @@ class CubeMarsAK606v3(AbstractMotorController):
         logger.info("=" * 50)
         return True
 
-    def enable_motor(self) -> None:
-        """Activate the motor for control commands.
-
-        The UART protocol has no explicit enable command — the motor
-        accepts velocity/position commands as soon as the serial port is
-        open.  This method is a no-op provided for interface compatibility
-        with the CAN backend.
-
-        :return: None
-        """
-        logger.info("UART interface: motor is always ready, enable() is a no-op")
-
-    def disable_motor(self) -> None:
-        """Deactivate the motor.
-
-        The UART protocol has no power-off frame.  This method stops the
-        motor by zeroing current (same as stop()) for interface
-        compatibility with the CAN backend.
-
-        :return: None
-        """
-        logger.info("UART interface: disable() → zeroing current (same as stop())")
-        self.stop()
-
     def set_position(self, position_degrees: float) -> None:
         """Set motor position in degrees.
 
@@ -290,92 +265,17 @@ class CubeMarsAK606v3(AbstractMotorController):
         frame = self._build_frame(MotorCommand.CMD_SET_POSITION, payload)
         self._send_frame(frame)
 
-    def get_position(self) -> float | None:
-        """Get current motor position in degrees via CMD_GET_POSITION.
+    def get_position(self) -> bytes:
+        """Get current motor position via CMD_GET_POSITION.
 
-        Sends the position query command and parses the 4-byte big-endian
-        float from the response payload.
+        Returns current position every 10ms.
+        Lightweight query for position feedback only.
 
-        :return: Current position in degrees, or None if no valid response.
+        :return: Raw response bytes from motor containing position
         """
         frame = self._build_frame(MotorCommand.CMD_GET_POSITION, b"")
         response = self._send_frame(frame)
-        # Response: AA | DataLength | CMD | Payload(4 bytes float) | CRC_H | CRC_L | BB
-        # Payload starts at byte 3 and ends 3 bytes before the end.
-        if response and len(response) >= 7:
-            payload = response[3:-3]
-            if len(payload) >= 4:
-                try:
-                    position = struct.unpack(">f", payload[0:4])[0]
-                    return position
-                except struct.error:
-                    pass
-        return None
-
-    def set_current(self, current_amps: float) -> None:
-        """Set motor phase current in amps.
-
-        Sends CMD_SET_CURRENT — direct torque control, bypassing the
-        velocity PID.  Useful for soft-start and holding loads.
-
-        :param current_amps: Target current in amps (-60 to 60 A).
-        :return: None
-        """
-        current_amps = float(np.clip(current_amps, -60.0, 60.0))
-        # UART protocol expects milliamps as int32
-        current_ma = int(current_amps * 1000)
-        payload = struct.pack(">i", current_ma)
-        frame = self._build_frame(MotorCommand.CMD_SET_CURRENT, payload)
-        self._send_frame(frame)
-        logger.info(f"Set current: {current_amps:.2f} A")
-
-    def set_duty_cycle(self, duty: float) -> None:  # noqa: ARG002
-        """Not supported by the UART protocol.
-
-        The CubeMars V3 UART command set does not include a raw duty-cycle
-        command.  Use set_velocity() or set_current() instead.
-
-        :param duty: (ignored)
-        :raises NotImplementedError: Always.
-        """
-        raise NotImplementedError(
-            "set_duty_cycle() is not available on the UART interface. "
-            "Use set_velocity() or set_current() instead."
-        )
-
-    def set_origin(self, permanent: bool = False) -> None:  # noqa: ARG002
-        """Not supported by the UART protocol.
-
-        The CubeMars V3 UART command set does not include a set-origin
-        command.  Use the CAN backend (CubeMarsAK606v3CAN) if you need
-        this feature.
-
-        :param permanent: (ignored)
-        :raises NotImplementedError: Always.
-        """
-        raise NotImplementedError(
-            "set_origin() is not available on the UART interface. "
-            "Use the CAN backend (CubeMarsAK606v3CAN) instead."
-        )
-
-    def set_position_velocity_accel(
-        self,
-        position_degrees: float,  # noqa: ARG002
-        velocity_erpm: int,  # noqa: ARG002
-        accel_erpm_per_sec: int = 0,  # noqa: ARG002
-    ) -> None:
-        """Not supported by the UART protocol.
-
-        The CubeMars V3 UART command set does not have a combined
-        position + velocity + acceleration command.  Use the CAN backend
-        (CubeMarsAK606v3CAN) for trapezoidal motion profiles.
-
-        :raises NotImplementedError: Always.
-        """
-        raise NotImplementedError(
-            "set_position_velocity_accel() is not available on the UART interface. "
-            "Use the CAN backend (CubeMarsAK606v3CAN) instead."
-        )
+        return response
 
     def _estimate_movement_time(
         self, target_degrees: float, motor_speed_erpm: int

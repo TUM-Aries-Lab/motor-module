@@ -15,7 +15,6 @@ from motor_python.definitions import (
     MOTOR_LIMITS,
     TendonAction,
 )
-from motor_python.motor_base import AbstractMotorController
 
 
 @dataclass
@@ -49,7 +48,7 @@ class CANControlMode:
     MIT_MODE = 0x08  # MIT control mode (Force mode with KP, KD)
 
 
-class CubeMarsAK606v3CAN(AbstractMotorController):
+class CubeMarsAK606v3CAN:
     """AK60-6 Motor Controller using native CAN bus protocol.
 
     Uses SocketCAN interface on Jetson Orin Nano with SN65HVD230 CAN transceiver.
