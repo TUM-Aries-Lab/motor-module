@@ -712,6 +712,39 @@ class CubeMarsAK606v3CAN:
             logger.info("=" * 50)
         return feedback
 
+    def get_temperature(self) -> int | None:
+        """Return the motor/driver board temperature in °C, or None if unavailable."""
+        fb = self._last_feedback or self._receive_feedback(timeout=0.5)
+        return fb.temperature_celsius if fb else None
+
+    def get_current(self) -> float | None:
+        """Return the phase current draw in amps, or None if unavailable."""
+        fb = self._last_feedback or self._receive_feedback(timeout=0.5)
+        return fb.current_amps if fb else None
+
+    def get_speed(self) -> int | None:
+        """Return the current speed in electrical RPM, or None if unavailable."""
+        fb = self._last_feedback or self._receive_feedback(timeout=0.5)
+        return fb.speed_erpm if fb else None
+
+    def get_motor_data(self) -> dict | None:
+        """Return all motor telemetry as a dictionary.
+
+        Keys: position_degrees, speed_erpm, current_amps,
+              temperature_celsius, error_code.
+        Returns None if the motor does not respond.
+        """
+        fb = self._last_feedback or self._receive_feedback(timeout=0.5)
+        if fb is None:
+            return None
+        return {
+            "position_degrees": fb.position_degrees,
+            "speed_erpm": fb.speed_erpm,
+            "current_amps": fb.current_amps,
+            "temperature_celsius": fb.temperature_celsius,
+            "error_code": fb.error_code,
+        }
+
     def check_communication(self) -> bool:
         """Check whether the motor is alive and responding over CAN.
 
