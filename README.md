@@ -16,9 +16,26 @@ uv install motor_python
 
 ## CAN Setup (Jetson Orin Nano)
 
+### One-time install (run once, then never again)
+
 ```bash
-sudo ./setup_can.sh        # brings up can0 at 1 Mbps, txqueuelen 1000
+sudo cp can0.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable can0.service
+sudo systemctl start can0.service
 ```
+
+After this, `can0` comes up automatically at every boot at 1 Mbps with BUS-OFF
+auto-recovery. No more `sudo ./setup_can.sh` before every run.
+
+```bash
+# Just run your script directly:
+python motion_capture_test.py
+python can_demo.py
+```
+
+To check status: `systemctl status can0.service`
+If you ever need to reset manually: `sudo systemctl restart can0.service`
 
 See [docs/CAN_SETUP_GUIDE.md](docs/CAN_SETUP_GUIDE.md) for hardware wiring details.
 
@@ -107,7 +124,9 @@ make test-hardware   # All tests (unit + hardware, requires motor connected)
 ```
 spin_test.py                       # CAN smoke test (duty cycle fwd/rev)
 motion_capture_test.py             # Arm sweep with PID, CSV + plot output
-setup_can.sh                       # Bring up can0 on Jetson
+can_demo.py                        # Exercises all CubeMarsAK606v3CAN methods
+setup_can.sh                       # Manual CAN setup (use can0.service instead)
+can0.service                       # Systemd service — auto-starts can0 at boot
 src/motor_python/
     cube_mars_motor.py             # UART motor controller class
     cube_mars_motor_can.py         # CAN motor controller class
