@@ -177,12 +177,80 @@ def basic_can_example() -> None:
         logger.success("CAN motor control example completed successfully!")
 
 
-def multi_motor_can_example() -> None:
-    """Control multiple motors on the same CAN bus (standalone)."""
-    logger.info("Starting multi-motor CAN example")
+def run_dual_motor_demo_can(
+    motor_left: CubeMarsAK606v3CAN,
+    motor_right: CubeMarsAK606v3CAN,
+) -> None:
+    """Run a synchronized two-motor exosuit demo.
 
-    motor_left = CubeMarsAK606v3CAN(motor_can_id=0x03, interface="can0")
-    motor_right = CubeMarsAK606v3CAN(motor_can_id=0x04, interface="can0")
+    Both motors must already be enabled before calling this function.
+    The left motor uses CAN ID 0x03 and the right motor uses CAN ID 0x04
+    by convention, but any two distinct IDs work.
+
+    Sequence:
+      1. Synchronized pull  — both tendons pulled at the same time
+      2. Synchronized release — both tendons released at the same time
+      3. Left pull / right release — cross pattern
+      4. Right pull / left release — cross pattern
+      5. Full stop
+
+    :param motor_left: CAN motor instance for the left actuator.
+    :param motor_right: CAN motor instance for the right actuator.
+    :return: None
+    """
+    try:
+        logger.info("=== Dual-motor demo: synchronized PULL ===")
+        motor_left.control_exosuit_tendon(TendonAction.PULL, velocity_erpm=10000)
+        motor_right.control_exosuit_tendon(TendonAction.PULL, velocity_erpm=10000)
+        time.sleep(1.5)
+        motor_left.get_status()
+        motor_right.get_status()
+
+        logger.info("=== Dual-motor demo: synchronized RELEASE ===")
+        motor_left.control_exosuit_tendon(TendonAction.RELEASE, velocity_erpm=8000)
+        motor_right.control_exosuit_tendon(TendonAction.RELEASE, velocity_erpm=8000)
+        time.sleep(1.5)
+
+        logger.info("=== Dual-motor demo: left PULL / right RELEASE ===")
+        motor_left.control_exosuit_tendon(TendonAction.PULL, velocity_erpm=10000)
+        motor_right.control_exosuit_tendon(TendonAction.RELEASE, velocity_erpm=8000)
+        time.sleep(1.5)
+
+        logger.info("=== Dual-motor demo: right PULL / left RELEASE ===")
+        motor_left.control_exosuit_tendon(TendonAction.RELEASE, velocity_erpm=8000)
+        motor_right.control_exosuit_tendon(TendonAction.PULL, velocity_erpm=10000)
+        time.sleep(1.5)
+
+        logger.info("=== Dual-motor demo: STOP both ===")
+        motor_left.control_exosuit_tendon(TendonAction.STOP)
+        motor_right.control_exosuit_tendon(TendonAction.STOP)
+
+    except KeyboardInterrupt:
+        logger.info("Dual-motor demo interrupted by user")
+        motor_left.stop()
+        motor_right.stop()
+
+
+def multi_motor_can_example(
+    left_can_id: int = 0x03,
+    right_can_id: int = 0x04,
+) -> None:
+    """Control two motors on the same CAN bus (standalone).
+
+    Both motors share the can0 interface. Each listens only to its own
+    feedback ID (0x2900 | motor_can_id) so they do not interfere.
+
+    :param left_can_id: CAN ID of the left motor (default: 0x03).
+    :param right_can_id: CAN ID of the right motor (default: 0x04).
+    :return: None
+    """
+    logger.info(
+        f"Starting dual-motor CAN example "
+        f"(left=0x{left_can_id:02X}, right=0x{right_can_id:02X})"
+    )
+
+    motor_left = CubeMarsAK606v3CAN(motor_can_id=left_can_id, interface="can0")
+    motor_right = CubeMarsAK606v3CAN(motor_can_id=right_can_id, interface="can0")
 
     try:
         motor_left.enable_motor()
@@ -191,26 +259,22 @@ def multi_motor_can_example() -> None:
         left_ok = motor_left.check_communication()
         right_ok = motor_right.check_communication()
 
-        if not left_ok or not right_ok:
+        if not left_ok:
             logger.error(
-                f"Motor status - Left: {'OK' if left_ok else 'FAIL'}, "
-                f"Right: {'OK' if right_ok else 'FAIL'}"
+                f"Left motor (0x{left_can_id:02X}) not responding — "
+                "check power, wiring, and CAN ID"
             )
+        if not right_ok:
+            logger.error(
+                f"Right motor (0x{right_can_id:02X}) not responding — "
+                "check power, wiring, and CAN ID"
+            )
+        if not left_ok or not right_ok:
             return
 
-        logger.info("Synchronized pull...")
-        motor_left.set_velocity(velocity_erpm=10000)
-        motor_right.set_velocity(velocity_erpm=10000)
-        time.sleep(2)
-
-        logger.info("Synchronized release...")
-        motor_left.set_velocity(velocity_erpm=-8000)
-        motor_right.set_velocity(velocity_erpm=-8000)
-        time.sleep(2)
-
-        motor_left.stop()
-        motor_right.stop()
-        logger.success("Multi-motor example completed!")
+        logger.info("Both motors online — starting synchronized demo...")
+        run_dual_motor_demo_can(motor_left, motor_right)
+        logger.success("Dual-motor example completed!")
 
     finally:
         motor_left.close()
