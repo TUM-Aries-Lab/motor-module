@@ -132,11 +132,19 @@ class CubeMarsAK606v3CAN:
         :return: None
         """
         try:
-            # Initialize SocketCAN interface
+            # Only accept extended-ID feedback frames from this motor.
+            # An unknown device on the bus (0x0088) floods at ~30 kHz with
+            # standard 11-bit frames; without this filter it fills the socket
+            # receive buffer and starves every bus.recv() call.
+            feedback_id = 0x2900 | self.motor_can_id
+            can_filters = [
+                {"can_id": feedback_id, "can_mask": 0x1FFFFFFF, "extended": True}
+            ]
             self.bus = can.interface.Bus(
                 channel=self.interface,
                 interface="socketcan",
                 bitrate=self.bitrate,
+                can_filters=can_filters,
             )
             time.sleep(CAN_DEFAULTS.connection_stabilization_delay)
             self.connected = True
