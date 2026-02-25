@@ -30,6 +30,7 @@ class MotorCommand(IntEnum):
     CMD_SET_VELOCITY = 0x49  # Set velocity (primary exosuit control, can be negative)
     CMD_SET_POSITION = 0x4A  # Set target position in degrees
     CMD_GET_POSITION = 0x4C  # Get current position (updates every 10ms)
+    CMD_SET_ORIGIN = 0x40  # Set current position as origin (zero point)
     CMD_POSITION_ECHO = 0x57  # Position command echo response
 
 
@@ -297,6 +298,19 @@ class CubeMarsAK606v3:
         value = int(position_degrees * SCALE_FACTORS.position)
         payload = struct.pack(">i", value)
         frame = self._build_frame(MotorCommand.CMD_SET_POSITION, payload)
+        self._send_frame(frame)
+
+    def set_origin(self, permanent: bool = False) -> None:
+        """Set the current rotor position as the origin (zero point).
+
+        After this call the motor treats its current position as 0 degrees.
+        Use permanent=False (default) so the origin resets on power loss.
+
+        :param permanent: If True, saves the new origin to flash (survives power cycle).
+        :return: None
+        """
+        payload = bytes([1 if permanent else 0])
+        frame = self._build_frame(MotorCommand.CMD_SET_ORIGIN, payload)
         self._send_frame(frame)
 
     def get_position(self) -> bytes:
