@@ -138,7 +138,20 @@ def move_and_sample(
     csv_interval = 1.0 / SAMPLE_HZ
     settled_at  = None
     deadline    = time.monotonic() + HOLD_TIME
-    vel         = 0
+
+    # Flush any stale rx frames left over from the previous waypoint's stop
+    while bus.recv(timeout=0.0) is not None:
+        pass
+
+    # Prime: send a real command and wait for the motor's reply to confirm
+    # it is still alive before entering the tight control loop.
+    tx(bus, MODE_VELOCITY, vel_cmd(0))
+    fb0 = get_feedback(bus, timeout=0.5)
+    if fb0 is None:
+        print("  ERROR: motor not responding at waypoint start — skipping")
+        return
+    pos  = fb0[0]
+    vel  = int(max(-MOVE_SPEED_ERPM, min(MOVE_SPEED_ERPM, KP * (abs_target - pos))))
 
     while True:
         now = time.monotonic()
@@ -189,7 +202,8 @@ def move_and_sample(
             print(f"\n  ⚠  Waypoint timeout after {HOLD_TIME:.0f}s", end="")
             break
 
-    stop_motor(bus)
+    # Do NOT stop the motor here — let the P-controller hold position at 0 err
+    # and let the next waypoint's command take over seamlessly.
     print()
 
 
@@ -253,7 +267,9 @@ def main() -> None:
                 move_and_sample(bus, 0.0, "abort-return-home", writer, t0, home_offset)
 
             finally:
+                # Only stop + disable at the very end of the full sequence
                 stop_motor(bus)
+                time.sleep(0.05)
                 tx(bus, MODE_CURRENT, DISABLE)
 
     finally:
