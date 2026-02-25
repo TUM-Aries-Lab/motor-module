@@ -57,20 +57,29 @@ class CANMotorFeedback:
 
 
 class CANControlMode:
-    """CAN extended ID control modes per official CubeMars documentation.
+    """CAN extended ID control modes — CubeMars AK60-6 spec section 4.4.1.
 
-    The control mode is encoded in the upper bytes of the 29-bit extended CAN ID.
-    Format: 00 00 0M XX where M is mode and XX is motor ID.
+    Extended arb_id format: (mode << 8) | motor_id
+    E.g. for motor_id=0x03: duty=0x0003, velocity=0x0303, position=0x0403
+
+    Verified against spec table (motor ID 0x68 examples):
+      Duty cycle  0x0068 — data: int32(duty × 100 000)
+      Current     0x0168 — data: int32(amps × 1 000)
+      Brk current 0x0268 — data: int32(amps × 1 000)  (same payload as current)
+      Velocity    0x0368 — data: int32(ERPM direct)
+      Position    0x0468 — data: int32(deg × 10 000)
+      Pos-Vel     0x0668 — data: int32 pos + int16(ERPM/10) + int16(acc/10)
+      MIT         0x0868 — bit-packed (pos/vel/kp/kd/torque), see MIT protocol
     """
 
-    DUTY_CYCLE = 0x00  # Duty cycle control mode (square wave voltage)
-    CURRENT_LOOP = 0x01  # Current control (IQ current, torque mode)
-    CURRENT_BRAKE = 0x02  # Brake current mode (hold position with current)
-    VELOCITY_LOOP = 0x03  # Velocity control (ERPM with max acceleration)
-    POSITION_LOOP = 0x04  # Position control (degrees with max speed/accel)
-    SET_ORIGIN = 0x05  # Set origin position mode (temporary or permanent)
-    POSITION_VELOCITY = 0x06  # Position + velocity + acceleration control
-    MIT_MODE = 0x08  # MIT control mode (Force mode with KP, KD)
+    DUTY_CYCLE    = 0x00  # Duty cycle control  — PWM voltage fraction
+    CURRENT_LOOP  = 0x01  # IQ current control  — direct torque
+    CURRENT_BRAKE = 0x02  # Brake current mode  — hold with current
+    VELOCITY_LOOP = 0x03  # Velocity loop        — ERPM setpoint
+    POSITION_LOOP = 0x04  # Position loop        — degree setpoint
+    SET_ORIGIN    = 0x05  # Set origin          — define new zero
+    POSITION_VELOCITY = 0x06  # Pos + vel + acc profile
+    MIT_MODE      = 0x08  # MIT actuator protocol (bit-packed)
 
 
 class CubeMarsAK606v3CAN:
@@ -627,6 +636,29 @@ class CubeMarsAK606v3CAN:
 
         self._start_refresh(CANControlMode.CURRENT_LOOP, data)
         logger.info(f"Set current: {current_amps:.2f} A")
+
+    def set_brake_current(self, current_amps: float) -> None:
+        """Hold the motor shaft in place using brake current (mode 0x02).
+
+        Unlike set_current() (which drives rotation), brake current actively
+        resists motion — useful for holding a joint against gravity or external
+        loads without a position loop.
+
+        Payload encoding is identical to set_current() (int32, amps × 1000),
+        but uses CURRENT_BRAKE mode (arb_id = 0x0200 | motor_id).
+
+        Spec example for motor 0x68:
+          4A brake  → arb_id 0x00000268, data 0x00000FA0
+          -4A brake → arb_id 0x00000268, data 0xFFFFF060
+
+        :param current_amps: Braking current in amps (-60 to 60 A).
+        :return: None
+        """
+        current_amps = float(np.clip(current_amps, -60.0, 60.0))
+        current_int = int(current_amps * 1000.0)
+        data = struct.pack(">i", current_int)
+        self._start_refresh(CANControlMode.CURRENT_BRAKE, data)
+        logger.info(f"Set brake current: {current_amps:.2f} A")
 
     def set_duty_cycle(self, duty: float) -> None:
         """Apply a raw PWM voltage to the motor windings.

@@ -132,8 +132,16 @@ def main() -> None:
                    note="ACK-ONLY — no rotation expected")
         motor.stop()
 
-        # ── 9. control_exosuit_tendon ──────────────────────────────────────
-        section("9. control_exosuit_tendon()")
+        # ── 9. set_brake_current ───────────────────────────────────────────
+        section("9. set_brake_current()  [holds shaft against load]")
+        print("  Applying 2A brake current for 1s ...")
+        motor.set_brake_current(2.0)
+        time.sleep(1.0)
+        motor.stop()
+        result("set_brake_current()", "sent ✓")
+
+        # ── 10. control_exosuit_tendon ─────────────────────────────────────
+        section("10. control_exosuit_tendon()")
         print("  pull → release → stop (duty-based) ...")
         motor.control_exosuit_tendon(action="pull",    velocity_erpm=5000)
         time.sleep(0.4)
@@ -142,8 +150,8 @@ def main() -> None:
         motor.control_exosuit_tendon(action="stop")
         result("control_exosuit_tendon()", "pull / release / stop ✓")
 
-        # ── 10. stop ───────────────────────────────────────────────────────
-        section("10. stop()")
+        # ── 11. stop ───────────────────────────────────────────────────────
+        section("11. stop()")
         motor.stop()
         time.sleep(0.2)
         fb_stop = motor.get_status()
@@ -152,13 +160,13 @@ def main() -> None:
                    passed=abs(fb_stop.speed_erpm) < 500)
         result("stop()", "sent ✓")
 
-        # ── 11. Error code table ────────────────────────────────────────────
-        section("11. CAN_ERROR_CODES reference table")
+        # ── 12. Error code table ────────────────────────────────────────────
+        section("12. CAN_ERROR_CODES reference table")
         for code, desc in CAN_ERROR_CODES.items():
             print(f"  {code}: {desc}")
 
-        # ── 12. disable_motor ──────────────────────────────────────────────
-        section("12. disable_motor()")
+        # ── 13. disable_motor ──────────────────────────────────────────────
+        section("13. disable_motor()")
         motor.disable_motor()
         result("disable_motor()", "sent ✓")
 
