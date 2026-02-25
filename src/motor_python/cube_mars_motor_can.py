@@ -565,8 +565,12 @@ class CubeMarsAK606v3CAN:
 
         # Soft-start: pre-spin with current to bypass the noisy low-speed zone
         # (0-5000 ERPM region causes oscillations under velocity PID).
+        # Skip if already running in velocity mode — avoids thrashing CURRENT
+        # → VELOCITY → CURRENT on every P-controller iteration.
         direction = 1 if velocity_erpm > 0 else -1
-        self._soft_start(direction)
+        already_in_velocity = self._refresh_mode == CANControlMode.VELOCITY_LOOP
+        if not already_in_velocity:
+            self._soft_start(direction)
 
         # Pack as int32 directly (no scaling needed based on examples)
         # Example from doc: 5000 ERPM = 0x00001388
