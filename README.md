@@ -2,92 +2,113 @@
 [![Coverage Status](https://coveralls.io/repos/github/TUM-Aries-Lab/motor-module/badge.svg?branch=main)](https://coveralls.io/github/TUM-Aries-Lab/motor-module?branch=main)
 ![Docker Image CI](https://github.com/TUM-Aries-Lab/motor-module/actions/workflows/ci.yml/badge.svg)
 
+Velocity and position motor control for exosuit tendon systems (CubeMars AK60-6).
 
+Current and duty cycle modes are removed -- they cause oscillations when combined
+with the firmware's high acceleration trap parameters.
 
 ## Install
-To install the library run:
 
 ```bash
 uv install motor_python
 ```
 
-OR
+## Quick Start
 
-```bash
-uv install git+https://github.com/TUM-Aries-Lab/motor_python.git@<specific-tag>  
+```python
+from motor_python.cube_mars_motor import CubeMarsAK606v3
+
+motor = CubeMarsAK606v3()
+
+# Velocity control
+motor.set_velocity(velocity_erpm=10000)   # Pull tendon
+motor.set_velocity(velocity_erpm=-8000)   # Release tendon
+motor.stop()                              # Stop (releases windings)
+
+# Position control (hip controller calculates target from IMU angle)
+motor.set_position(position_degrees=90.0)   # Go to 90 degrees
+motor.set_position(position_degrees=0.0)    # Return to home
+motor.get_position()                        # Read current position
+
+# Combined: move to position at a given speed
+motor.move_to_position_with_speed(target_degrees=180.0, motor_speed_erpm=6000)
+
+# Tendon helper
+motor.control_exosuit_tendon(action="pull", velocity_erpm=10000)
+motor.control_exosuit_tendon(action="release", velocity_erpm=8000)
+motor.control_exosuit_tendon(action="stop")
 ```
 
 ## Publishing
-It's super easy to publish your own packages on PyPI. To build and publish this package run:
-1. Update the version number in pyproject.toml and imu_module/__init__.py
+
+It's super easy to publish your own packages on PyPi. To build and publish this package run:
+1. Update the version number in pyproject.toml and motor_python/__init__.py
 2. Commit your changes and add a git tag "<new.version.number>"
 3. Push the tag `git push --tag`
 
-The package can then be found at: https://pypi.org/project/motor_python
+## API
 
-## Module Usage
+| Method | Description |
+|--------|-------------|
+| `set_velocity(velocity_erpm, allow_low_speed=False)` | Set speed in ERPM |
+| `set_position(position_degrees)` | Set target position in degrees (unlimited for spool cable system) |
+| `get_position()` | Read current position from motor |
+| `move_to_position_with_speed(target_degrees, motor_speed_erpm)` | Move to position via velocity then hold |
+| `control_exosuit_tendon(action, velocity_erpm)` | Helper for pull / release / stop |
+| `stop()` | Stop the motor (current = 0, releases windings) |
+| `get_status()` | Query all motor parameters |
+| `check_communication()` | Verify motor is responding |
+
+## Velocity Safety
+
+**Minimum safe velocity: 5000 ERPM** (enforced by default).
+
+Below 5000 ERPM the firmware acceleration settings cause current oscillations,
+audible noise, and motor instability.
+
 ```python
-"""Basic docstring for my module."""
-
-from loguru import logger
-
-from motor_python.cube_mars_motor import CubeMarsAK606v3
-
-def main() -> None:
-    """Run a simple demonstration."""
-    motor = CubeMarsAK606v3()
-    motor.get_status()
-    motor.set_position(position_degrees=0.0)
-
-if __name__ == "__main__":
-    main()
+motor.set_velocity(velocity_erpm=10000)              # OK
+motor.set_velocity(velocity_erpm=100)                 # Raises ValueError
+motor.set_velocity(velocity_erpm=100, allow_low_speed=True)  # Bypass
+motor.set_velocity(velocity_erpm=0)                   # Stop always allowed
 ```
 
-## Program Usage
+## Position Control
+
+**Range: Unlimited** - Motor can rotate continuously for spool-based cable systems.
+
+No artificial position limits. Suitable for applications requiring multiple rotations to wind cable.
+
+## Run
+
 ```bash
 uv run python -m motor_python
 ```
 
-## Structure
-<!-- TREE-START -->
+## Testing
+
+```bash
+make test            # Unit tests only (no hardware, uses mocks)
+make test-hardware   # All tests (unit + hardware, requires motor connected)
 ```
-├── Test Rig CAD files
-│   ├── Foot.3mf
-│   ├── Jetson_Mount.3mf
-│   ├── Leg_with_2_IMU's.3mf
-│   ├── Motor_Case.3mf
-│   ├── Rod_Adapter_Jetson.3mf
-│   ├── Rod_Adapter_Motor.3mf
-│   └── Spool_V2.3mf
-├── docs
-│   ├── AK60-6 Manual.pdf
-│   └── Jetson-Orin-Nano-DevKit.pdf
-├── src
-│   └── motor_python
-│       ├── __init__.py
-│       ├── __main__.py
-│       ├── cube_mars_motor.py
-│       ├── definitions.py
-│       ├── examples.py
-│       ├── motor_status_parser.py
-│       └── utils.py
-├── tests
-│   ├── __init__.py
-│   ├── conftest.py
-│   ├── cube_mars_motor_test.py
-│   ├── motor_status_parser_test.py
-│   └── utils_test.py
-├── .dockerignore
-├── .gitignore
-├── .pre-commit-config.yaml
-├── .python-version
-├── CONTRIBUTING.md
-├── Dockerfile
-├── LICENSE
-├── Makefile
-├── README.md
-├── pyproject.toml
-├── repo_tree.py
-└── uv.lock
+
+Hardware tests are skipped automatically if the motor is not available.
+
+## Project Structure
+
 ```
-<!-- TREE-END -->
+src/motor_python/
+    __init__.py
+    __main__.py           # Entry point (make app)
+    cube_mars_motor.py    # Motor controller class
+    definitions.py        # Constants and limits
+    examples.py           # Demo functions
+    motor_status_parser.py
+    utils.py
+tests/
+    conftest.py
+    cube_mars_motor_test.py   # Unit tests (mocked serial)
+    hardware_test.py          # Integration tests (real motor)
+    motor_status_parser_test.py
+    utils_test.py
+```
