@@ -43,20 +43,59 @@
 \begin{document}
 
 \maketitle
+
+\begin{abstract}
+This document describes the CAN Bus communication system developed for the
+CubeMars AK60-6 brushless motor used in the lower-limb exosuit project.
+The motor is controlled at 1\,Mbit/s over a CAN Bus from an NVIDIA Jetson
+Orin AGX computer.  The document explains why CAN was selected over the
+initially explored UART interface, covers the hardware and software
+configuration required to bring the system to an operational state, and
+documents the mechanisms built to achieve reliable and precisely controlled
+motor motion.  All technical concepts are introduced from first principles,
+making the document accessible to a reader with no prior knowledge of
+embedded-systems communication or motor control.
+\end{abstract}
+
+\newpage
 \tableofcontents
 \newpage
 
 % ═══════════════════════════════════════════════════════════════════════════
 \section{Introduction}
 
-This chapter describes how the exosuit communicates with the AK60-6 motor
-manufactured by CubeMars. The focus is on the communication interface
-chosen, the reasoning behind that choice, and the mechanisms developed
-to make the motor respond reliably to movement commands.
+This document describes how the exosuit communicates with the CubeMars
+AK60-6 brushless motor.  The focus is on the communication interface
+chosen, the reasoning behind that choice, and the software mechanisms
+developed to keep the motor responding reliably and precisely to movement
+commands.  These mechanisms address challenges that are not unique to this
+motor but are common whenever an embedded computer must send continuous
+commands to an actuator over a shared digital network.
 
-The explanation is written to be accessible to a reader who is not familiar
-with low-level hardware communication. Technical terms are introduced and
-explained when they first appear.
+All technical terms are introduced and explained when they first appear.
+No prior knowledge of embedded-systems communication or motor control is
+assumed.
+
+Section~\ref{sec:motivation} compares the two communication interfaces
+the motor supports and explains why CAN was chosen.
+Section~\ref{sec:hardware} describes the hardware configuration required
+on the Jetson Orin.
+Section~\ref{sec:protocol} explains how commands are structured and
+transmitted.
+Section~\ref{sec:feedback} describes the status data the motor
+continuously broadcasts in return.
+Section~\ref{sec:watchdog} covers the firmware watchdog timer and the
+continuous command refresh mechanism built around it.
+Sections~\ref{sec:softstart} and~\ref{sec:position} document two
+higher-level motion strategies that were designed and evaluated.
+Section~\ref{sec:telemetry} presents the real-time telemetry interface
+and fault-detection system.
+Section~\ref{sec:motion} describes the software PID position controller
+used to validate multi-loop arm-sweep trajectories.
+Section~\ref{sec:service} explains how the CAN interface initialises
+automatically at every system boot.
+A full parameter reference closes the document in
+Section~\ref{sec:summary}.
 
 % ═══════════════════════════════════════════════════════════════════════════
 \section{Choosing the Right Communication Interface}
@@ -290,6 +329,25 @@ RPM was actually commanding 100\,000 electrical RPM --- ten times the
 intended value. The correction was straightforward: apply the division by
 ten before constructing the message.
 
+\subsection{Brake Current Mode}
+
+In addition to the five motion instruction types listed in
+Table~\ref{tab:modes}, the motor supports a sixth mode called
+\emph{brake current}.  Unlike regular current control, which applies a
+torque in a chosen direction so that the motor accelerates or decelerates,
+brake current uses regenerative braking: the motor windings are short-circuited
+in a controlled manner that converts kinetic energy into heat, forcing the
+shaft to slow down rapidly.
+
+The payload encoding is identical to regular current control --- the desired
+braking force in Amperes multiplied by 1\,000 and stored as a 32-bit
+big-endian integer.  The only difference is in the instruction type byte of
+the address, which is set to a distinct value (0x02 instead of 0x01) so
+the motor firmware applies the braking action rather than a
+proportional torque.  This mode is useful in exosuit applications where
+the leg must be actively slowed down under load rather than simply left
+to coast.
+
 % ═══════════════════════════════════════════════════════════════════════════
 \section{How the Motor Reports Its State}
 \label{sec:feedback}
@@ -400,58 +458,75 @@ Figure~\ref{fig:refresh} illustrates how this mechanism works.
 
 \begin{figure}[H]
   \centering
-  \begin{tikzpicture}[node distance=0.9cm and 2.2cm]
+  \begin{tikzpicture}[
+      node distance = 1.2cm and 3.6cm,
+      lblock/.style  = {rectangle, rounded corners, draw=black, fill=blue!8,
+                        text width=4.8cm, minimum height=1cm,
+                        align=center, font=\small},
+      rblock/.style  = {rectangle, rounded corners, draw=black, fill=green!10,
+                        text width=5.2cm, minimum height=1cm,
+                        align=center, font=\small},
+      diam/.style    = {diamond, draw=black, fill=orange!15,
+                        text width=2.8cm, align=center,
+                        font=\small, inner sep=1pt},
+      snode/.style   = {rectangle, rounded corners=8pt, draw=black, fill=gray!20,
+                        text width=4.8cm, minimum height=1cm,
+                        align=center, font=\small\bfseries},
+      arr/.style     = {-{Stealth[length=2mm]}, thick},
+      lbl/.style     = {font=\footnotesize},
+    ]
 
-    % ── Left column: main program ─────────────────────────────────
-    \node[startend] (start)
-      {Programmer issues a\\ control instruction};
-
-    \node[block, below=of start] (store)
-      {The instruction and its value are\\ stored internally};
-
-    \node[decision, below=of store] (running)
-      {Is the background\\process already\\running?};
-
-    \node[block, right=2.8cm of running] (launch)
-      {Start the background process};
-
-    \node[block, below=2.4cm of running] (ready)
+    %── LEFT COLUMN: main program ──────────────────────────────────────────
+    \node[snode]                     (start)
+      {Programmer issues a control instruction};
+    \node[lblock, below=of start]    (store)
+      {The instruction and its value are stored internally};
+    \node[diam,   below=1.4cm of store] (chk)
+      {Background process already running?};
+    \node[lblock, below=2.0cm of chk]   (ready)
       {Background process confirmed active};
+    \node[lblock, below=of ready]    (main)
+      {Main program continues with other tasks};
 
-    \node[block, below=of ready] (main)
-      {Main program continues\\ with other tasks};
+    %── RIGHT COLUMN: background process ──────────────────────────────────
+    \node[rblock, right=of chk]          (launch)
+      {Start the background process};
+    \node[rblock, right=of ready]         (loop)
+      {Every 20\,ms: retransmit the stored instruction over the CAN bus};
+    \node[diam,   below=1.4cm of loop]   (stop)
+      {Stop command received?};
+    \node[snode,  text width=5.2cm, below=1.4cm of stop] (end)
+      {Terminate background process,\\send zero-current command};
 
-    % ── Right column: background loop ─────────────────────────────
-    \node[block, right=2.8cm of ready, fill=green!10,
-          text width=6cm] (loop)
-      {Every 20\,ms: retransmit the stored\\ instruction over the CAN bus};
+    %── ARROWS: main program ──────────────────────────────────────────────
+    \draw[arr] (start) -- (store);
+    \draw[arr] (store) -- (chk);
+    \draw[arr] (chk)   -- node[lbl, left]{Yes} (ready);
+    \draw[arr] (ready) -- (main);
 
-    \node[decision, below=1.2cm of loop] (stop)
-      {Has a stop\\ command been\\ received?};
+    %── ARROWS: start background process if not running ───────────────────
+    \draw[arr] (chk.east)     -- node[lbl, above]{No} (launch.west);
+    \draw[arr] (launch.south) -- (loop.north);  % flows straight down
 
-    \node[startend, below=1.2cm of stop] (end)
-      {Terminate background process,\\ send zero-current command};
+    %── ARROW: background process signals active to main program ──────────
+    \draw[arr] (loop.west) -- (ready.east);     % clean horizontal, no crossings
 
-    % ── Arrows ────────────────────────────────────────────────────
-    \draw[arrow] (start)   -- (store);
-    \draw[arrow] (store)   -- (running);
-    \draw[arrow] (running) -- node[notelabel, above]{No} (launch);
-    \draw[arrow] (launch)  |- (ready);
-    \draw[arrow] (running) -- node[notelabel, left]{Yes} (ready);
-    \draw[arrow] (ready)   -- (main);
-    \draw[arrow] (ready.east) -- (loop.west);
-    \draw[arrow] (loop)    -- (stop);
-    \draw[arrow] (stop.east) to[bend left=50]
-                 node[notelabel, right]{No --- repeat} (loop.east);
-    \draw[arrow] (stop)    -- node[notelabel, right]{Yes} (end);
+    %── ARROWS: background loop ───────────────────────────────────────────
+    \draw[arr] (loop.south)  -- (stop.north);
+    \draw[arr] (stop.east)   -- ++(0.9,0)
+                             |- node[lbl, right, pos=0.25]{No\,---\,repeat}
+                             (loop.east);
+    \draw[arr] (stop.south)  -- node[lbl, right]{Yes} (end.north);
 
   \end{tikzpicture}
-  \caption{The continuous command refresh mechanism. When an instruction
-           is issued (left column), a background process is started or updated
-           (right column) that retransmits the instruction every 20\,ms.
-           This keeps the motor's watchdog satisfied indefinitely. When stop
-           is commanded, the background process is terminated and a
-           zero-current command signals the motor to release.}
+  \caption{The continuous command refresh mechanism.  The left column shows
+           the main program: it stores the instruction, checks whether the
+           background process is already running, and then continues with
+           other tasks.  The right column shows the background process, which
+           retransmits the stored instruction every 20\,ms, keeping the
+           motor's watchdog satisfied indefinitely.  When a stop command is
+           issued, the background process terminates and a zero-current
+           command releases the motor.}
   \label{fig:refresh}
 \end{figure}
 
@@ -618,6 +693,25 @@ Switching to position hold at the end of the move ensures that the motor
 resists any external disturbance --- such as a load on the tendon --- and
 actively maintains the target position.
 
+\subsection{Note on Firmware Behaviour}
+
+The two-phase strategy described above was the originally designed approach
+for position moves.  During subsequent validation testing it was discovered
+that, on the specific firmware version installed on the evaluation unit,
+velocity mode and position mode commands produce a valid CAN acknowledgement
+from the motor but do \emph{not} result in shaft rotation.  The root cause
+is not definitively established but is believed to be a firmware
+configuration issue specific to the evaluation hardware.
+
+As a result, this two-phase strategy could not be deployed in practice.
+The working position control approach developed as a replacement is
+described in Section~\ref{sec:motion}: a discrete PID controller running
+entirely on the Jetson, using duty-cycle commands and the motor's 50\,Hz
+position feedback to servo the arm to any target angle in software.
+The present section is retained as it documents the originally intended
+design and remains applicable if the firmware is updated or a production
+unit with different firmware is used.
+
 % ═══════════════════════════════════════════════════════════════════════════
 \section{Motor Telemetry --- Real-Time State Monitoring}
 \label{sec:telemetry}
@@ -630,6 +724,12 @@ background refresh thread. Four convenience methods expose this data
 to application code without blocking the caller:
 
 \begin{description}[leftmargin=4.8cm, style=nextline]
+  \item[\texttt{get\_position()}]
+    Returns the current shaft angle in degrees relative to the position
+    recorded at start-up, as a floating-point number.  This is the primary
+    feedback quantity used by the PID position controller described in
+    Section~\ref{sec:motion}.
+
   \item[\texttt{get\_temperature()}]
     Returns the motor driver temperature in degrees Celsius as an integer,
     or \texttt{None} if no feedback has been received yet.
@@ -822,7 +922,21 @@ per-waypoint mean error, maximum error, mean velocity, and peak velocity
 across all five loops.  A two-panel PNG figure is also saved automatically
 alongside the CSV file: the upper panel shows commanded and actual angle
 over time; the lower panel shows computed angular velocity over time.
+\subsection{Comprehensive API Demonstration}
 
+A companion script, \texttt{can\_demo.py}, exercises every public method of
+the motor control class in a single sequential run.  The thirteen sections
+it covers are: communication check; motor enable; status query; individual
+telemetry reads (temperature, current, speed); the combined
+\texttt{get\_motor\_data} call; position query; forward and reverse
+duty-cycle motion with live ERPM readback; velocity command (acknowledged
+but non-functional on this firmware); brake current; tendon actuation;
+emergency stop; and the complete error-code reference table.
+
+Running \texttt{python can\_demo.py} after the CAN interface has been
+brought up provides a fast end-to-end confirmation that the hardware is
+reachable, the CAN filter is working correctly, and all software paths are
+exercisable.
 % ═══════════════════════════════════════════════════════════════════════════
 \section{Automatic CAN Interface Initialisation at Boot}
 \label{sec:service}
