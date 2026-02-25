@@ -92,13 +92,18 @@ def move_and_sample(
     )
 
     # Sample feedback for HOLD_TIME seconds after commanding the move.
-    # The first few samples capture the motion; later samples show the hold.
+    # The refresh thread (started by set_position_velocity_accel) owns bus.recv()
+    # and keeps motor._last_feedback up to date at ~50 Hz.  We read that shared
+    # field here at SAMPLE_HZ — no bus.recv() competition.
+    last_logged_ts: float = -1.0
     deadline = time.monotonic() + HOLD_TIME
     while time.monotonic() < deadline:
-        fb = motor._receive_feedback(timeout=SAMPLE_INTERVAL)
+        time.sleep(SAMPLE_INTERVAL)
         elapsed = time.monotonic() - t0
+        fb = motor._last_feedback
 
-        if fb is not None:
+        if fb is not None and elapsed != last_logged_ts:
+            last_logged_ts = elapsed
             writer.writerow(
                 {
                     "time_s":        f"{elapsed:.3f}",
@@ -119,9 +124,6 @@ def move_and_sample(
                 f"cur={fb.current_amps:+5.2f} A",
                 end="\r",
             )
-        else:
-            # No feedback this cycle — still honour the sample rate
-            time.sleep(SAMPLE_INTERVAL)
 
     print()  # newline after the \r progress line
 
@@ -185,7 +187,32 @@ def main() -> None:
             # Zero the encoder at the current physical position (arm down = 0°)
             print("  Setting current position as home (0°)...")
             motor.set_origin(permanent=False)
-            time.sleep(0.2)
+            time.sleep(0.3)
+
+            # ── Verify the motor actually accepted the set_origin command ──
+            # If the UART cable is still connected, the motor ignores all CAN
+            # control commands but continues to broadcast 50 Hz feedback.
+            # After a successful set_origin the motor should report ~0°.
+            origin_check = motor._receive_feedback(timeout=0.5)
+            if origin_check is None:
+                print(
+                    "ERROR: No feedback after set_origin.\n"
+                    "  Run: sudo ./setup_can.sh  (resets CAN bus error state)"
+                )
+                return
+            if abs(origin_check.position_degrees) > 5.0:
+                print(
+                    f"ERROR: Position is {origin_check.position_degrees:.1f}° after set_origin"
+                    " — expected ~0°.\n"
+                    "  The motor is broadcasting feedback but ignoring control commands.\n"
+                    "  Most likely cause: UART cable is still connected.\n"
+                    "  Fix:\n"
+                    "    1. Disconnect the UART cable from the motor.\n"
+                    "    2. sudo ./setup_can.sh   (resets CAN bus state)\n"
+                    "    3. Re-run this script."
+                )
+                return
+            print(f"  Origin set — motor now at {origin_check.position_degrees:.2f}° ✓")
 
             print("\n  Starting sequence — press Ctrl+C to abort safely\n")
             t0 = time.monotonic()
