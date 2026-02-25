@@ -116,25 +116,34 @@ def move_and_sample(
     label: str,
     writer: csv.DictWriter,
     t0: float,
+    home_offset: float = 0.0,
 ) -> None:
-    """Drive to target_degrees using velocity + P-controller and log feedback."""
+    """Drive to (target_degrees + home_offset) using velocity P-controller.
+
+    home_offset is the motor's absolute position when the script started,
+    so target_degrees is always relative to the physical home position.
+    """
+    abs_target = target_degrees + home_offset
     print(f"\n  ▶  Moving to {target_degrees:+.1f}°  —  {label}")
 
     last_csv_t  = -1.0
     csv_interval = 1.0 / SAMPLE_HZ
     settled_at  = None
     deadline    = time.monotonic() + HOLD_TIME
+    vel         = 0
 
     while True:
         now = time.monotonic()
 
-        # Send a keep-alive / command frame, then immediately read the reply —
-        # same single-threaded send→recv pattern as spin_test.py.
-        fb = get_feedback(bus, timeout=0.02)
+        # ── Send command first, then read the motor's reply ─────────────────
+        # (Motor only transmits a status frame in response to a command —
+        #  same send→recv pattern as spin_test.py)
+        tx(bus, MODE_VELOCITY, vel_cmd(vel))
+        fb = get_feedback(bus, timeout=0.05)
 
         if fb is not None:
             pos, spd, cur, tmp, err_code = fb
-            error = target_degrees - pos
+            error = abs_target - pos
             vel   = int(max(-MOVE_SPEED_ERPM, min(MOVE_SPEED_ERPM, KP * error)))
 
             if abs(error) < TOLERANCE:
@@ -144,18 +153,13 @@ def move_and_sample(
             else:
                 settled_at = None
 
-            # Send velocity command; motor replies with another status frame
-            # (that recv will be captured on the NEXT loop iteration — good enough
-            #  at 50 Hz; we don't need to double-recv here).
-            tx(bus, MODE_VELOCITY, vel_cmd(vel))
-
             elapsed = now - t0
             if elapsed - last_csv_t >= csv_interval:
                 last_csv_t = elapsed
                 writer.writerow({
                     "time_s":        f"{elapsed:.3f}",
                     "commanded_deg": f"{target_degrees:.1f}",
-                    "actual_deg":    f"{pos:.2f}",
+                    "actual_deg":    f"{pos - home_offset:.2f}",
                     "speed_erpm":    spd,
                     "current_amps":  f"{cur:.3f}",
                     "temp_c":        tmp,
@@ -165,18 +169,16 @@ def move_and_sample(
             print(
                 f"    t={elapsed:6.2f}s  "
                 f"cmd={target_degrees:+6.1f}°  "
-                f"pos={pos:+7.2f}°  "
+                f"pos={pos - home_offset:+7.2f}°  "
                 f"err={error:+6.1f}°  "
                 f"vel={vel:+6d}",
                 end="\r",
             )
-        else:
-            # No feedback — still send a keep-alive command so motor doesn't time out
-            tx(bus, MODE_VELOCITY, vel_cmd(0))
 
         if settled_at is not None and (now - settled_at) >= HOLD_AFTER:
             break
         if now >= deadline:
+            print(f"\n  ⚠  Waypoint timeout after {HOLD_TIME:.0f}s", end="")
             break
 
     stop_motor(bus)
@@ -219,24 +221,28 @@ def main() -> None:
             tx(bus, MODE_CURRENT, ENABLE)
             time.sleep(0.15)
 
-            # Verify motor is alive
+            # Verify motor is alive and capture the home position.
+            # set_origin (0x05) does not work on this firmware, so we record
+            # the current absolute encoder position and treat it as 0°.
             tx(bus, MODE_VELOCITY, vel_cmd(0))
             fb = get_feedback(bus, timeout=0.5)
             if fb is None:
                 print("ERROR: Motor not responding.  Check wiring and CAN ID.")
                 return
-            print(f"  Motor alive — pos={fb[0]:.1f}°  temp={fb[3]}°C ✓")
+            home_offset = fb[0]
+            print(f"  Motor alive — abs_pos={home_offset:.1f}°  temp={fb[3]}°C ✓")
+            print(f"  Home offset recorded: all waypoints relative to {home_offset:.1f}°")
 
             print("\n  Starting sequence — press Ctrl+C to abort safely\n")
             t0 = time.monotonic()
 
             try:
                 for target_deg, label in WAYPOINTS:
-                    move_and_sample(bus, target_deg, label, writer, t0)
+                    move_and_sample(bus, target_deg, label, writer, t0, home_offset)
 
             except KeyboardInterrupt:
                 print("\n\n  Aborted — returning to home (0°)...")
-                move_and_sample(bus, 0.0, "abort-return-home", writer, t0)
+                move_and_sample(bus, 0.0, "abort-return-home", writer, t0, home_offset)
 
             finally:
                 stop_motor(bus)
