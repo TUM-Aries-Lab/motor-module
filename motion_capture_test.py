@@ -4,6 +4,9 @@ Moves an arm attached to the motor through a defined angle sequence while
 logging motor feedback at 20 Hz to a CSV file.  The CSV can be compared
 against the motion capture / IMU data to verify angle and velocity accuracy.
 
+Uses raw python-can (same approach as spin_test.py) — sends the command in
+the main thread and reads feedback immediately after each send.
+
 Arm sequence (motor zero = arm hanging straight down):
   0°  → 90°   smooth rise to horizontal          (parallel to ground)
   90° → 120°  gentle 30° lift above horizontal
@@ -19,35 +22,41 @@ Output CSV is saved to data/logs/mocap_<timestamp>.csv
 """
 
 import csv
-import sys
+import struct
 import time
 from datetime import datetime
 from pathlib import Path
 
-# Allow running from the project root without installing the package
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+import can
 
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+# ---------------------------------------------------------------------------
+# Hardware config
+# ---------------------------------------------------------------------------
+
+MOTOR_ID  = 0x03
+INTERFACE = "can0"
+
+# CAN arbitration IDs (extended 29-bit): (mode << 8) | motor_id
+_ID_ENABLE       = MOTOR_ID                    # 0x03  — enable/disable sent direct
+_ID_SET_ORIGIN   = (0x05 << 8) | MOTOR_ID     # 0x0503
+_ID_POS_VEL_ACCEL = (0x06 << 8) | MOTOR_ID   # 0x0603
+_ID_FEEDBACK     = 0x2903                      # motor broadcast ID
+
+ENABLE_DATA  = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC])
+DISABLE_DATA = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD])
+# Set-origin byte: 0x01 = temporary (until power cycle)
+ORIGIN_DATA  = bytes([0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
 
 # ---------------------------------------------------------------------------
 # Motion parameters — adjust to taste
 # ---------------------------------------------------------------------------
 
-# Speed for all moves.  Slow enough for smooth IMU readings, fast enough
-# to be useful.  5 000 ERPM ≈ comfortable human joint speed for this setup.
-MOVE_SPEED_ERPM = 5_000
-
-# Acceleration limit — low value = soft ramp-in/ramp-out (gentler on IMU)
-ACCEL_ERPM_PER_SEC = 3_000
-
-# How long to hold each waypoint before moving to the next one (seconds)
-HOLD_TIME = 2.0
-
-# Feedback sampling rate during moves (Hz)
-SAMPLE_HZ = 20
-SAMPLE_INTERVAL = 1.0 / SAMPLE_HZ
-
-# Output directory (same folder the existing log files use)
+MOVE_SPEED_ERPM    = 5_000    # max travel speed (ERPM)
+ACCEL_ERPM_PER_SEC = 3_000   # acceleration ramp (ERPM/s)
+HOLD_TIME          = 2.0     # seconds to hold each waypoint
+SEND_HZ            = 50      # command repeat rate
+SEND_INTERVAL      = 1.0 / SEND_HZ
+SAMPLE_HZ          = 20      # CSV log rate
 LOG_DIR = Path(__file__).parent / "data" / "logs"
 
 # ---------------------------------------------------------------------------
@@ -62,70 +71,82 @@ WAYPOINTS = [
     (  0.0, "return home"),
 ]
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _tx(bus: can.BusABC, arb_id: int, data: bytes) -> None:
+    bus.send(can.Message(arbitration_id=arb_id, data=data, is_extended_id=True))
+
+
+def _get_feedback(bus: can.BusABC):
+    """Read one frame; return (pos_deg, spd_erpm, cur_a, tmp_c, err) or None."""
+    msg = bus.recv(timeout=0.02)
+    if msg and msg.arbitration_id == _ID_FEEDBACK and len(msg.data) == 8:
+        d = msg.data
+        pos = struct.unpack(">h", d[0:2])[0] * 0.1
+        spd = struct.unpack(">h", d[2:4])[0] * 10
+        cur = struct.unpack(">h", d[4:6])[0] * 0.01
+        tmp = struct.unpack("b", bytes([d[6]]))[0]
+        err = d[7]
+        return pos, spd, cur, tmp, err
+    return None
+
+
+def _make_pos_cmd(position_deg: float, velocity_erpm: int, accel_erpm_per_sec: int) -> bytes:
+    """Pack a Position+Velocity+Accel command (mode 0x06) payload."""
+    pos_int  = int(max(-32_000_000, min(32_000_000, position_deg * 10_000)))
+    vel_int  = int(max(-32767, min(32767, velocity_erpm // 10)))
+    acc_int  = int(max(-32767, min(32767, accel_erpm_per_sec // 10)))
+    return struct.pack(">ihh", pos_int, vel_int, acc_int)
+
+
 def move_and_sample(
-    motor: CubeMarsAK606v3CAN,
+    bus: can.BusABC,
     target_degrees: float,
     label: str,
     writer: csv.DictWriter,
     t0: float,
 ) -> None:
-    """Command a smooth move to target_degrees and log feedback until settled.
-
-    :param motor: CAN motor instance (already enabled).
-    :param target_degrees: Target angle in degrees.
-    :param label: Human-readable label for this waypoint.
-    :param writer: CSV writer to write feedback rows to.
-    :param t0: Script start time (for relative timestamp column).
-    """
+    """Send position command at 50 Hz for HOLD_TIME seconds and log feedback."""
     print(f"\n  ▶  Moving to {target_degrees:+.1f}°  —  {label}")
+    cmd = _make_pos_cmd(target_degrees, MOVE_SPEED_ERPM, ACCEL_ERPM_PER_SEC)
 
-    # Command the move with controlled speed and gentle acceleration
-    motor.set_position_velocity_accel(
-        position_degrees=target_degrees,
-        velocity_erpm=MOVE_SPEED_ERPM,
-        accel_erpm_per_sec=ACCEL_ERPM_PER_SEC,
-    )
-
-    # Sample feedback for HOLD_TIME seconds after commanding the move.
-    # The refresh thread (started by set_position_velocity_accel) owns bus.recv()
-    # and keeps motor._last_feedback up to date at ~50 Hz.  We read that shared
-    # field here at SAMPLE_HZ — no bus.recv() competition.
-    last_logged_ts: float = -1.0
+    last_csv_t = -1.0
+    csv_interval = 1.0 / SAMPLE_HZ
     deadline = time.monotonic() + HOLD_TIME
-    while time.monotonic() < deadline:
-        time.sleep(SAMPLE_INTERVAL)
-        elapsed = time.monotonic() - t0
-        fb = motor._last_feedback
 
-        if fb is not None and elapsed != last_logged_ts:
-            last_logged_ts = elapsed
-            writer.writerow(
-                {
+    while time.monotonic() < deadline:
+        _tx(bus, _ID_POS_VEL_ACCEL, cmd)
+        fb = _get_feedback(bus)
+        elapsed = time.monotonic() - t0
+
+        if fb is not None:
+            pos, spd, cur, tmp, err = fb
+            if elapsed - last_csv_t >= csv_interval:
+                last_csv_t = elapsed
+                writer.writerow({
                     "time_s":        f"{elapsed:.3f}",
                     "commanded_deg": f"{target_degrees:.1f}",
-                    "actual_deg":    f"{fb.position_degrees:.2f}",
-                    "speed_erpm":    fb.speed_erpm,
-                    "current_amps":  f"{fb.current_amps:.3f}",
-                    "temp_c":        fb.temperature_celsius,
-                    "error_code":    fb.error_code,
+                    "actual_deg":    f"{pos:.2f}",
+                    "speed_erpm":    spd,
+                    "current_amps":  f"{cur:.3f}",
+                    "temp_c":        tmp,
+                    "error_code":    err,
                     "label":         label,
-                }
-            )
+                })
             print(
                 f"    t={elapsed:6.2f}s  "
                 f"cmd={target_degrees:+6.1f}°  "
-                f"pos={fb.position_degrees:+7.2f}°  "
-                f"spd={fb.speed_erpm:+7d} ERPM  "
-                f"cur={fb.current_amps:+5.2f} A",
+                f"pos={pos:+7.2f}°  "
+                f"spd={spd:+7d} ERPM  "
+                f"cur={cur:+5.2f} A",
                 end="\r",
             )
+        else:
+            time.sleep(SEND_INTERVAL)
 
-    print()  # newline after the \r progress line
+    print()
 
 
 # ---------------------------------------------------------------------------
@@ -133,22 +154,12 @@ def move_and_sample(
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    """Run the full motion capture validation sequence."""
-    # Create output file
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     csv_path = LOG_DIR / f"mocap_{timestamp}.csv"
 
-    fieldnames = [
-        "time_s",
-        "commanded_deg",
-        "actual_deg",
-        "speed_erpm",
-        "current_amps",
-        "temp_c",
-        "error_code",
-        "label",
-    ]
+    fieldnames = ["time_s", "commanded_deg", "actual_deg",
+                  "speed_erpm", "current_amps", "temp_c", "error_code", "label"]
 
     print("=" * 60)
     print("  Motion Capture Validation — Arm Sweep")
@@ -160,78 +171,68 @@ def main() -> None:
     print(f"  Sample   : {SAMPLE_HZ} Hz")
     print("=" * 60)
 
+    try:
+        bus = can.interface.Bus(channel=INTERFACE, interface="socketcan")
+    except Exception as e:
+        print(f"ERROR: Cannot open {INTERFACE}: {e}\n  Run: sudo ./setup_can.sh")
+        return
+
     with open(csv_path, "w", newline="") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
 
-        with CubeMarsAK606v3CAN() as motor:
-            if not motor.connected:
-                print(
-                    "ERROR: CAN bus not available.\n"
-                    "  Run: sudo ip link set can0 up type can bitrate 1000000"
-                )
-                return
-
+        try:
+            # ── Enable ──────────────────────────────────────────────────────
             print("\n  Enabling motor...")
-            motor.enable_motor()
-            time.sleep(0.3)
+            _tx(bus, _ID_ENABLE, ENABLE_DATA)
+            time.sleep(0.15)
 
-            if not motor.check_communication():
+            # Confirm motor is alive
+            fb = _get_feedback(bus)
+            if fb is None:
                 print(
-                    "ERROR: Motor not responding.\n"
-                    "  Check power, CANH/CANL wiring, and CAN ID.\n"
-                    "  Make sure the UART cable is disconnected."
+                    "ERROR: No feedback after enable.\n"
+                    "  Check power, CANH/CANL wiring, CAN ID, and CAN bus state.\n"
+                    "  Run: sudo ./setup_can.sh"
                 )
                 return
+            print(f"  Motor alive — pos={fb[0]:.1f}°  temp={fb[3]}°C ✓")
 
-            # Zero the encoder at the current physical position (arm down = 0°)
+            # ── Set origin ──────────────────────────────────────────────────
             print("  Setting current position as home (0°)...")
-            motor.set_origin(permanent=False)
-            time.sleep(0.3)
+            _tx(bus, _ID_SET_ORIGIN, ORIGIN_DATA)
+            time.sleep(0.3)   # let motor process; next feedback will show 0°
 
-            # ── Verify the motor actually accepted the set_origin command ──
-            # If the UART cable is still connected, the motor ignores all CAN
-            # control commands but continues to broadcast 50 Hz feedback.
-            # After a successful set_origin the motor should report ~0°.
-            origin_check = motor._receive_feedback(timeout=0.5)
-            if origin_check is None:
-                print(
-                    "ERROR: No feedback after set_origin.\n"
-                    "  Run: sudo ./setup_can.sh  (resets CAN bus error state)"
-                )
-                return
-            if abs(origin_check.position_degrees) > 5.0:
-                print(
-                    f"ERROR: Position is {origin_check.position_degrees:.1f}° after set_origin"
-                    " — expected ~0°.\n"
-                    "  The motor is broadcasting feedback but ignoring control commands.\n"
-                    "  Most likely cause: UART cable is still connected.\n"
-                    "  Fix:\n"
-                    "    1. Disconnect the UART cable from the motor.\n"
-                    "    2. sudo ./setup_can.sh   (resets CAN bus state)\n"
-                    "    3. Re-run this script."
-                )
-                return
-            print(f"  Origin set — motor now at {origin_check.position_degrees:.2f}° ✓")
+            # Read fresh position after origin is applied
+            _tx(bus, _ID_POS_VEL_ACCEL,
+                _make_pos_cmd(0.0, MOVE_SPEED_ERPM, ACCEL_ERPM_PER_SEC))
+            fb = _get_feedback(bus)
+            if fb is not None:
+                print(f"  Origin set — motor now reports {fb[0]:.2f}° ✓")
+            else:
+                print("  (origin set — no confirmation feedback)")
 
+            # ── Sweep ───────────────────────────────────────────────────────
             print("\n  Starting sequence — press Ctrl+C to abort safely\n")
             t0 = time.monotonic()
 
-            try:
-                for target_deg, label in WAYPOINTS:
-                    move_and_sample(motor, target_deg, label, writer, t0)
+            for target_deg, label in WAYPOINTS:
+                move_and_sample(bus, target_deg, label, writer, t0)
 
-            except KeyboardInterrupt:
-                print("\n\n  Aborted by user — returning to home (0°)...")
-                motor.set_position_velocity_accel(
-                    position_degrees=0.0,
-                    velocity_erpm=MOVE_SPEED_ERPM,
-                    accel_erpm_per_sec=ACCEL_ERPM_PER_SEC,
-                )
-                time.sleep(HOLD_TIME)
+        except KeyboardInterrupt:
+            print("\n\n  Aborted — returning to home (0°)...")
+            cmd = _make_pos_cmd(0.0, MOVE_SPEED_ERPM, ACCEL_ERPM_PER_SEC)
+            deadline = time.monotonic() + HOLD_TIME
+            while time.monotonic() < deadline:
+                _tx(bus, _ID_POS_VEL_ACCEL, cmd)
+                _get_feedback(bus)
 
-            finally:
-                motor.stop()
+        finally:
+            # Zero current then disable
+            _tx(bus, _ID_ENABLE, ENABLE_DATA)   # re-enable in case of error
+            time.sleep(0.05)
+            _tx(bus, _ID_ENABLE, DISABLE_DATA)
+            bus.shutdown()
 
     print("\n" + "=" * 60)
     print(f"  Done.  Data saved to:\n  {csv_path}")
