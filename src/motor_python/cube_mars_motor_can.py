@@ -17,18 +17,43 @@ from motor_python.definitions import (
 )
 
 
+# Error code descriptions from CubeMars CAN protocol spec (section 4.3.1)
+CAN_ERROR_CODES: dict[int, str] = {
+    0: "No fault",
+    1: "Motor over-temperature",
+    2: "Over-current",
+    3: "Over-voltage",
+    4: "Under-voltage",
+    5: "Encoder fault",
+    6: "MOSFET over-temperature",
+    7: "Motor lock-up",
+}
+
+
 @dataclass
 class CANMotorFeedback:
-    """Motor feedback data from CAN upload message (8 bytes).
+    """Motor feedback data from the CAN upload message (8 bytes, section 4.3.1).
 
-    Real-time motor state transmitted periodically at configured rate (1-500 Hz).
+    The motor transmits this frame periodically at the configured rate (1–500 Hz).
+    Byte layout (big-endian):
+
+      [0][1] — Position  : int16, raw -32000..32000 → -3200°..3200°  (× 0.1)
+      [2][3] — Speed     : int16, raw -32000..32000 → -320000..320000 ERPM (× 10)
+      [4][5] — Current   : int16, raw -6000..6000   → -60..60 A  (× 0.01)
+      [6]    — Temp      : int8,  raw -20..127       → -20..127 °C (driver board)
+      [7]    — Error     : uint8, 0 = no fault, see CAN_ERROR_CODES
     """
 
-    position_degrees: float  # Motor position in degrees (-3200° to 3200°)
-    speed_erpm: int  # Electrical speed in RPM (-320000 to 320000)
-    current_amps: float  # Motor current in amps (-60 to 60 A)
-    temperature_celsius: int  # Driver board temperature in °C (-20 to 127)
-    error_code: int  # Error code (0=no fault, 1-7=various faults)
+    position_degrees: float   # Motor position in degrees   (-3200° to +3200°)
+    speed_erpm: int           # Electrical speed in ERPM    (-320000 to +320000)
+    current_amps: float       # Phase current in amps        (-60 to +60 A)
+    temperature_celsius: int  # Driver board temperature     (-20 to +127 °C)
+    error_code: int           # Fault code (0 = OK), see CAN_ERROR_CODES
+
+    @property
+    def error_description(self) -> str:
+        """Human-readable error description from the CubeMars spec."""
+        return CAN_ERROR_CODES.get(self.error_code, f"Unknown error ({self.error_code})")
 
 
 class CANControlMode:
@@ -261,22 +286,22 @@ class CubeMarsAK606v3CAN:
             logger.warning(f"Received short CAN message: {len(msg.data)} bytes")
             return None
 
-        # Position: int16 x 0.1 = degrees
+        # Position: int16, range -32000..32000 → -3200°..3200° (scale × 0.1)
         pos_int = struct.unpack(">h", msg.data[0:2])[0]
         position_degrees = pos_int * 0.1
 
-        # Speed: int16 x 10 = ERPM
+        # Speed: int16, range -32000..32000 → -320000..320000 ERPM (scale × 10)
         speed_int = struct.unpack(">h", msg.data[2:4])[0]
         speed_erpm = speed_int * 10
 
-        # Current: int16 x 0.01 = Amps
+        # Current: int16, range -6000..6000 → -60..60 A (scale × 0.01)
         current_int = struct.unpack(">h", msg.data[4:6])[0]
         current_amps = current_int * 0.01
 
-        # Temperature: int8 direct °C
+        # Temperature: int8, range -20..127 → -20..127 °C (driver board, direct)
         temperature_celsius = struct.unpack("b", bytes([msg.data[6]]))[0]
 
-        # Error code: uint8
+        # Error code: uint8 (0=OK, 1-7 see CAN_ERROR_CODES)
         error_code = msg.data[7]
 
         feedback = CANMotorFeedback(
@@ -708,7 +733,7 @@ class CubeMarsAK606v3CAN:
             logger.info(f"  Speed: {feedback.speed_erpm} ERPM")
             logger.info(f"  Current: {feedback.current_amps:.2f} A")
             logger.info(f"  Temperature: {feedback.temperature_celsius} °C")
-            logger.info(f"  Error Code: {feedback.error_code}")
+            logger.info(f"  Error Code: {feedback.error_code} — {feedback.error_description}")
             logger.info("=" * 50)
         return feedback
 
@@ -743,6 +768,7 @@ class CubeMarsAK606v3CAN:
             "current_amps": fb.current_amps,
             "temperature_celsius": fb.temperature_celsius,
             "error_code": fb.error_code,
+            "error_description": fb.error_description,
         }
 
     def check_communication(self) -> bool:
