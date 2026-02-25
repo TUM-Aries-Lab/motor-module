@@ -152,10 +152,10 @@ class CubeMarsAK606v3CAN:
             self.connected = False
 
     def enable_motor(self) -> None:
-        """Enable the motor for Servo mode control.
+        """Power on the motor and enter Servo mode.
 
-        Sends power-on command 0xFFFFFFFFFFFFFFFC to motor ID.
-        Must be called before sending control commands.
+        Must be called once after connecting before any control command
+        (set_velocity, set_position, etc.) will have any effect.
         """
         if not self.connected or self.bus is None:
             logger.warning("Cannot enable motor - CAN bus not connected")
@@ -174,9 +174,10 @@ class CubeMarsAK606v3CAN:
             logger.error(f"Failed to enable motor: {e}")
 
     def disable_motor(self) -> None:
-        """Disable the motor (power off).
+        """Power off the motor.
 
-        Sends power-off command 0xFFFFFFFFFFFFFFFD to motor ID.
+        The motor will coast to a stop and reject any further control
+        commands until enable_motor() is called again.
         """
         if not self.connected or self.bus is None:
             logger.warning("Cannot disable motor - CAN bus not connected")
@@ -473,13 +474,14 @@ class CubeMarsAK606v3CAN:
         return distance / degrees_per_second
 
     def set_position(self, position_degrees: float) -> None:
-        """Set motor target position in degrees using CAN Position Loop mode.
+        """Move the motor to a target angle and hold it there.
 
-        Sends position command via CAN extended ID 0x00000468 (mode 04, motor ID in example 68).
-        Position is sent as int32 value (degrees * 10000).
-        Example: 600° = 6000000 = 0x005B8D80
+        The motor moves at its firmware-default speed and holds the
+        position against any external load.  For a controlled-speed move
+        use set_position_velocity_accel() or move_to_position_with_speed().
 
-        :param position_degrees: Target position in degrees (-3200° to 3200°).
+        :param position_degrees: Target angle in degrees (-3200° to 3200°).
+            Values outside this range are clamped automatically.
         :return: None
         """
         # Clamp to CAN protocol feedback limits
@@ -496,9 +498,13 @@ class CubeMarsAK606v3CAN:
         logger.info(f"Set position: {position_degrees:.2f}°")
 
     def get_position(self) -> float | None:
-        """Get current motor position from periodic feedback.
+        """Return the current motor angle in degrees.
 
-        :return: Current position in degrees, or None if no recent feedback.
+        Reads from the most recent CAN feedback frame.  Returns the last
+        known position if no new frame arrives within 0.2 s.
+
+        :return: Current angle in degrees, or None if the motor has never
+            responded (e.g. not yet enabled or cable disconnected).
         """
         # Listen for feedback message
         feedback = self._receive_feedback(timeout=0.2)
@@ -509,19 +515,22 @@ class CubeMarsAK606v3CAN:
         return None
 
     def set_velocity(self, velocity_erpm: int, allow_low_speed: bool = False) -> None:
-        """Set motor velocity in electrical RPM using CAN Velocity Loop mode.
+        """Spin the motor continuously at the given speed.
 
-        Sends velocity command via CAN extended ID 0x00000368 (mode 03).
-        Velocity is sent as int32 value (ERPM directly).
-        Example: 5000 ERPM = 0x00001388, -5000 ERPM = 0xFFFFEC78
+        Positive values spin forward (tendon pull direction), negative values
+        spin in reverse (tendon release direction).  The motor keeps spinning
+        until stop() or another command is issued.
 
-        Low speeds (<5000 ERPM) with high firmware acceleration cause current
-        oscillations and audible noise. Use medium-to-high speeds for exosuit.
+        Safe operating range is ±5 000–100 000 ERPM.  Speeds between 1 and
+        4 999 ERPM cause current oscillations and audible noise due to the
+        firmware's velocity PID — they are blocked by default.
+        Passing velocity_erpm=0 is equivalent to calling stop().
 
-        :param velocity_erpm: Target velocity in ERPM (safe range: 5000-100000)
-        :param allow_low_speed: Bypass the 5000 ERPM safety floor (default: False)
+        :param velocity_erpm: Target speed in electrical RPM.  Negative = reverse.
+            Typical exosuit values: 8 000–15 000 ERPM.
+        :param allow_low_speed: Set True to bypass the 5 000 ERPM safety floor.
         :return: None
-        :raises ValueError: If velocity below safe threshold and allow_low_speed=False
+        :raises ValueError: If 1 ≤ abs(velocity_erpm) < 5 000 and allow_low_speed=False.
         """
         velocity_erpm_int = int(velocity_erpm)
 
@@ -559,13 +568,14 @@ class CubeMarsAK606v3CAN:
         logger.info(f"Set velocity: {velocity_erpm} ERPM")
 
     def set_current(self, current_amps: float) -> None:
-        """Set motor current in amps using CAN Current Loop mode.
+        """Command a specific motor torque via direct current control.
 
-        Sends current command via CAN extended ID 0x00000168 (mode 01).
-        Current is sent as int32 value (amps * 1000).
-        Example: -4.4 A (IQ) = -4400 = 0xFFFFEED8 (from doc example)
+        Bypasses the velocity PID — the motor accelerates or holds a load
+        purely by the requested phase current.  Positive = forward torque,
+        negative = reverse torque.  Useful for compliant or gentle motion.
 
-        :param current_amps: Target current in amps (-60 to 60 A).
+        :param current_amps: Target phase current in amps (-60 to 60 A).
+            Values outside this range are clamped automatically.
         :return: None
         """
         # Clamp to protocol limits
@@ -582,13 +592,14 @@ class CubeMarsAK606v3CAN:
         logger.info(f"Set current: {current_amps:.2f} A")
 
     def set_duty_cycle(self, duty: float) -> None:
-        """Set motor duty cycle (square-wave voltage) using CAN Duty Cycle mode.
+        """Apply a raw PWM voltage to the motor windings.
 
-        Sends duty command via CAN extended ID 0x00000003 (mode 00).
-        Duty is encoded as int32 (duty * 100000).
-        Example: 0.5 (50%) = 50000 = 0x0000C350, -1.0 = -100000 = 0xFFFE7960
+        No speed or current feedback loop — output is a fixed fraction of
+        the supply voltage.  Useful for open-loop testing; prefer
+        set_velocity() or set_current() for exosuit control.
 
-        :param duty: Duty cycle fraction from -1.0 (full reverse) to 1.0 (full forward).
+        :param duty: Fraction of supply voltage from -1.0 (full reverse)
+            to 1.0 (full forward).  Values outside this range are clamped.
         :return: None
         """
         duty = float(np.clip(duty, -1.0, 1.0))
@@ -603,13 +614,15 @@ class CubeMarsAK606v3CAN:
         logger.info(f"Set duty cycle: {duty:.4f} ({duty * 100:.1f}%)")
 
     def set_origin(self, permanent: bool = False) -> None:
-        """Set current motor position as the new zero origin.
+        """Define the current motor angle as the new zero reference (home position).
 
-        Sends set-origin command via CAN extended ID 0x00000503 (mode 05).
-        Data byte 0: 0x01 = temporary (lost on power cycle), 0x02 = permanent (EEPROM).
+        After this call, get_position() will return 0.0 for the current
+        physical position.  Use permanent=True to save it to the motor's
+        internal memory so it survives power cycles.
 
-        :param permanent: If True, saves origin to EEPROM (survives power cycle).
-                          If False, origin is temporary until next power-on.
+        :param permanent: If True, the new origin is saved to EEPROM and
+            survives power-off.  If False (default), it resets on next
+            power cycle.
         :return: None
         """
         origin_byte = 0x02 if permanent else 0x01
@@ -629,19 +642,19 @@ class CubeMarsAK606v3CAN:
         velocity_erpm: int,
         accel_erpm_per_sec: int = 0,
     ) -> None:
-        """Set motor position with velocity and acceleration limits (trapezoidal profile).
+        """Move to a target angle with controlled speed and acceleration.
 
-        Sends command via CAN extended ID 0x00000603 (mode 06).
-        Payload encoding (8 bytes, big-endian):
-          - Bytes 0-3: int32 position (degrees * 10000)
-          - Bytes 4-5: int16 velocity limit (ERPM, 0 = no limit / use firmware default)
-          - Bytes 6-7: int16 acceleration limit (ERPM/s, 0 = no limit)
+        Produces a smooth trapezoidal motion profile: the motor accelerates
+        up to velocity_erpm, travels at that speed, then decelerates into
+        the target angle and holds it.  This is the preferred command for
+        precise, smooth exosuit joint movements.
 
-        Example: 90° at 10000 ERPM → position_int=900000, vel_int=10000, accel_int=0
-
-        :param position_degrees: Target position in degrees (-3200° to 3200°).
-        :param velocity_erpm: Maximum velocity during move in ERPM (0 = firmware default).
-        :param accel_erpm_per_sec: Maximum acceleration in ERPM/s (0 = firmware default).
+        :param position_degrees: Target angle in degrees (-3200° to 3200°).
+        :param velocity_erpm: Maximum travel speed in ERPM.  0 = firmware
+            default (usually very fast — always set a value).
+            Typical exosuit value: 8 000–15 000 ERPM.
+        :param accel_erpm_per_sec: Maximum acceleration in ERPM/s.  0 =
+            firmware default.  Lower values give smoother, gentler motion.
         :return: None
         """
         position_degrees = float(np.clip(position_degrees, -3200.0, 3200.0))
@@ -663,12 +676,17 @@ class CubeMarsAK606v3CAN:
         )
 
     def get_status(self) -> CANMotorFeedback | None:
-        """Get motor status from periodic feedback.
+        """Read and log the full motor state.
 
-        In CAN mode, the motor automatically sends feedback at configured rate.
-        This method listens for the next feedback message.
+        Returns a CANMotorFeedback dataclass with:
+          - position_degrees    — current angle in degrees
+          - speed_erpm          — current speed in electrical RPM
+          - current_amps        — phase current draw in amps
+          - temperature_celsius — driver board temperature
+          - error_code          — 0 = no fault (see FaultCode in definitions.py)
 
-        :return: CANMotorFeedback object with current motor state, or None.
+        :return: CANMotorFeedback dataclass, or None if the motor does not
+            respond within 0.5 s.
         """
         feedback = self._receive_feedback(timeout=0.5)
         if feedback:
@@ -683,9 +701,14 @@ class CubeMarsAK606v3CAN:
         return feedback
 
     def check_communication(self) -> bool:
-        """Verify motor is responding by listening for feedback messages.
+        """Check whether the motor is alive and responding over CAN.
 
-        :return: True if motor responds, False otherwise
+        Sends no command — just listens for a feedback frame.  Call this
+        after enable_motor() to confirm the motor is ready before sending
+        control commands.
+
+        :return: True if at least one feedback frame is received, False if
+            the motor is silent (check power, wiring, and CAN ID).
         """
         if not self.connected:
             return False
@@ -710,11 +733,18 @@ class CubeMarsAK606v3CAN:
         motor_speed_erpm: int,
         step_delay: float = MOTOR_DEFAULTS.step_delay,
     ) -> None:
-        """Reach a target position using velocity control then hold with position.
+        """Drive to a target angle at a given speed, then hold it.
 
-        :param target_degrees: Target position in degrees.
-        :param motor_speed_erpm: Motor speed in ERPM (absolute, direction auto).
-        :param step_delay: Delay between steps in seconds (ignored in CAN mode).
+        The motor first spins at motor_speed_erpm toward the target
+        (direction is determined automatically from the current position),
+        waits for the estimated travel time, then switches to position-hold.
+        For a single-command trapezoidal profile, prefer
+        set_position_velocity_accel() instead.
+
+        :param target_degrees: Target angle in degrees.
+        :param motor_speed_erpm: Travel speed in ERPM (absolute value —
+            direction is chosen automatically).  Min safe value: 5 000 ERPM.
+        :param step_delay: Unused in CAN mode (kept for API compatibility).
         :return: None
         """
         # Determine direction from current position
@@ -741,12 +771,23 @@ class CubeMarsAK606v3CAN:
         action: TendonAction,
         velocity_erpm: int = MOTOR_LIMITS.default_tendon_velocity_erpm,
     ) -> None:
-        """Control exosuit tendon using safe velocity commands.
+        """High-level tendon command — the primary function for the hip controller.
 
-        :param action: TendonAction enum (PULL, RELEASE, or STOP)
-        :param velocity_erpm: Velocity in ERPM (default: 10000, min: 5000)
+        Translates a simple PULL / RELEASE / STOP intent into the correct
+        motor velocity command.  This hides all ERPM direction logic.
+
+        Example::
+
+            motor.control_exosuit_tendon(TendonAction.PULL)    # lift / assist
+            motor.control_exosuit_tendon(TendonAction.RELEASE) # lower / relax
+            motor.control_exosuit_tendon(TendonAction.STOP)    # hold still
+
+        :param action: TendonAction.PULL, TendonAction.RELEASE, or
+            TendonAction.STOP (import from motor_python.definitions).
+        :param velocity_erpm: Speed for PULL and RELEASE in ERPM.
+            Default is 10 000 ERPM.  Minimum safe value is 5 000 ERPM.
         :return: None
-        :raises ValueError: If action is invalid
+        :raises ValueError: If action is not a valid TendonAction.
         """
         if action == TendonAction.PULL:
             logger.info(f"Pulling tendon at {velocity_erpm} ERPM")
@@ -763,7 +804,10 @@ class CubeMarsAK606v3CAN:
             )
 
     def stop(self) -> None:
-        """Stop the motor by halting the refresh thread and zeroing current.
+        """Stop the motor immediately and release the windings.
+
+        Sets current to zero — the rotor coasts to a mechanical stop with
+        no active braking.  Safe to call at any time.
 
         :return: None
         """
@@ -776,7 +820,10 @@ class CubeMarsAK606v3CAN:
         logger.info("Motor stopped (current=0, windings released)")
 
     def close(self) -> None:
-        """Close CAN bus connection to motor.
+        """Stop the motor and release the CAN bus connection.
+
+        Called automatically when using the motor as a context manager
+        (``with Motor() as motor:``).  Safe to call manually otherwise.
 
         :return: None
         """
