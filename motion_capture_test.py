@@ -172,7 +172,13 @@ def main() -> None:
     print("=" * 60)
 
     try:
-        bus = can.interface.Bus(channel=INTERFACE, interface="socketcan")
+        bus = can.interface.Bus(
+            channel=INTERFACE,
+            interface="socketcan",
+            # Only pass motor feedback frames — blocks the 0x0088 noise device
+            # that floods the receive queue at ~30 kHz and swamps bus.recv().
+            can_filters=[{"can_id": _ID_FEEDBACK, "can_mask": 0x1FFFFFFF, "extended": True}],
+        )
     except Exception as e:
         print(f"ERROR: Cannot open {INTERFACE}: {e}\n  Run: sudo ./setup_can.sh")
         return
