@@ -81,9 +81,17 @@ WAYPOINTS = [
 # ---------------------------------------------------------------------------
 
 def tx(bus: can.BusABC, mode: int, data: bytes) -> None:
-    """Send an extended-ID CAN frame with the given mode and motor ID."""
+    """Send an extended-ID CAN frame, retrying once if the TX buffer is full."""
     arb_id = (mode << 8) | MOTOR_ID
-    bus.send(can.Message(arbitration_id=arb_id, data=data, is_extended_id=True))
+    msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=True)
+    for attempt in range(3):
+        try:
+            bus.send(msg)
+            return
+        except can.CanOperationError:
+            # Kernel TX queue full (ENOBUFS) — wait for it to drain
+            time.sleep(0.02 * (attempt + 1))
+    # Third failure: swallow silently rather than crash the control loop
 
 
 def get_feedback(bus: can.BusABC, timeout: float = 0.02):

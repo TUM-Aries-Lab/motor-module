@@ -37,7 +37,9 @@ echo "  ✓ Interface down"
 echo ""
 echo "Step 3: Bringing up can0 at 1 Mbps with error recovery..."
 ip link set can0 up type can bitrate 1000000 berr-reporting on restart-ms 100
-echo "  ✓ Interface up (bitrate 1 Mbps, auto-restart after BUS-OFF in 100 ms)"
+# Increase TX queue depth (default 10 is too small for 50 Hz control loops)
+ip link set can0 txqueuelen 1000
+echo "  ✓ Interface up (bitrate 1 Mbps, txqueuelen 1000, auto-restart after BUS-OFF in 100 ms)"
 
 # Verify configuration
 echo ""
