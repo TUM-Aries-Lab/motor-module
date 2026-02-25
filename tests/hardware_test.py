@@ -298,13 +298,25 @@ class TestPositionControl:
 
     @pytest.mark.flaky(reruns=3, reruns_delay=1)
     def test_set_position(self, motor: CubeMarsAK606v3) -> None:
-        """Set position command is accepted by motor."""
+        """Set position command moves motor by a small relative amount."""
         try:
-            target_position = 90.0
-            # Home to 0° first so accumulated absolute angle is near zero,
-            # then move to target from a known baseline.
-            motor.set_position(position_degrees=0.0)
-            time.sleep(1.0)
+            # Read current absolute position first so we can do a small
+            # relative move (+45°) regardless of accumulated angle from
+            # prior velocity tests.  Commanding absolute 0° from a large
+            # accumulated angle causes violent back-spin that faults the motor.
+            start_status = get_status_with_retry(motor)
+            start_position = parse_position_from_status(motor, start_status)
+            if start_position is None:
+                pytest.skip("Could not read start position")
+            target_position = start_position + 45.0
+            # CMD_SET_POSITION encodes degrees as int32 micro-degrees (x1e6).
+            # int32 max ≈ ±2147°; skip rather than crash if out of range.
+            _MAX_POS = 2147.0
+            if not (-_MAX_POS <= target_position <= _MAX_POS):
+                pytest.skip(
+                    f"Accumulated position {target_position:.1f}° exceeds int32 "
+                    "protocol range (±2147°); reset motor power to clear encoder."
+                )
             motor.set_position(position_degrees=target_position)
             time.sleep(1.5)
             # Verify motor reached the position
