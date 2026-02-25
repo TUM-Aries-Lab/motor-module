@@ -619,6 +619,266 @@ resists any external disturbance --- such as a load on the tendon --- and
 actively maintains the target position.
 
 % ═══════════════════════════════════════════════════════════════════════════
+\section{Motor Telemetry --- Real-Time State Monitoring}
+\label{sec:telemetry}
+
+\subsection{Accessing Feedback Data Programmatically}
+
+The motor's 50\,Hz status broadcasts (described in
+Section~\ref{sec:feedback}) are received and stored internally by the
+background refresh thread. Four convenience methods expose this data
+to application code without blocking the caller:
+
+\begin{description}[leftmargin=4.8cm, style=nextline]
+  \item[\texttt{get\_temperature()}]
+    Returns the motor driver temperature in degrees Celsius as an integer,
+    or \texttt{None} if no feedback has been received yet.
+
+  \item[\texttt{get\_current()}]
+    Returns the winding current in Amperes as a floating-point number,
+    reflecting the torque currently being produced.
+
+  \item[\texttt{get\_speed()}]
+    Returns the shaft rotational speed in electrical RPM as an integer.
+    A negative value indicates reverse rotation.
+
+  \item[\texttt{get\_motor\_data()}]
+    Returns all five telemetry fields simultaneously as a Python
+    dictionary: position (degrees), speed (electrical RPM), current
+    (Amperes), temperature (degrees Celsius), error code, and a
+    human-readable description of any active error.
+\end{description}
+
+All four methods read from the value cached by the most recent feedback
+message (``instant read'').  If the background thread has not yet received
+its first message --- for example, immediately after enabling the motor ---
+they fall back to a direct, blocking receive with a 50\,millisecond
+timeout.
+
+\subsection{Fault Detection and Error Codes}
+
+The motor firmware encodes any detected fault condition in the error-code
+byte of every status message.  Eight fault conditions are defined by the
+manufacturer's specification and are listed in Table~\ref{tab:errors}.
+
+\begin{table}[H]
+  \centering
+  \caption{Motor fault codes as defined in the CubeMars CAN specification, section~4.3.1}
+  \label{tab:errors}
+  \begin{tabular}{p{1.5cm} p{10cm}}
+    \toprule
+    Code & Description \\
+    \midrule
+    0 & No fault --- normal operation \\
+    1 & Over-temperature fault: motor or driver temperature exceeds safe limit \\
+    2 & Over-current fault: winding current exceeds the protection threshold \\
+    3 & Over-voltage fault: supply voltage exceeds the allowed maximum \\
+    4 & Under-voltage fault: supply voltage is below the minimum required for operation \\
+    5 & Encoder fault: position sensor has reported an error or lost signal \\
+    6 & Hardware protection triggered: generalised hardware fault \\
+    7 & Reserved for future use \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The \texttt{CANMotorFeedback} data class exposes an \texttt{error\_description}
+property that converts the raw code into the corresponding text from
+Table~\ref{tab:errors}.  Each call to \texttt{get\_status()} logs this
+description alongside the numeric code, so fault conditions are immediately
+visible in the application console without consulting the specification.
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Motion Validation with Software PID Position Control}
+\label{sec:motion}
+
+\subsection{Why Duty-Cycle Mode is Used for Position Control}
+
+Testing confirmed that velocity mode (instruction type 0x03), position mode
+(instruction type 0x04), and position-with-velocity mode (instruction
+type 0x06) all produce a valid acknowledgement from the motor but do
+\emph{not} result in shaft rotation on this firmware version.  The
+motor's built-in position and velocity controllers are therefore
+inaccessible at the hardware level.
+
+The only mode confirmed to produce sustained, controllable rotation is
+duty-cycle mode.  For this reason, position control is implemented entirely
+in software, running on the Jetson, using the motor's 50\,Hz position
+feedback and a discrete PID controller that outputs a duty-cycle value each
+tick.
+
+\subsection{The PID Controller}
+
+The controller runs at 50\,Hz (one tick every 20\,milliseconds).  Its
+output duty-cycle value $u(t)$ is computed from three terms:
+
+\begin{description}[leftmargin=3.8cm, style=nextline]
+  \item[Proportional]
+    A correction proportional to the angular error between the target and
+    the measured position:
+    \begin{equation}
+      u_P = K_P \cdot e(t), \qquad e(t) = \theta_{\text{target}} - \theta_{\text{actual}}
+    \end{equation}
+    With $K_P = 0.004\,\text{duty}/\text{deg}$, a 40$^\circ$ error produces
+    a 16\,\% duty cycle --- enough to move the arm briskly without
+    mechanical shock.
+
+  \item[Integral]
+    An accumulation of past error that builds up over time to overcome
+    static friction, which would otherwise prevent the arm from reaching
+    the exact target:
+    \begin{equation}
+      u_I = K_I \sum e(t)\,\Delta t, \qquad K_I = 0.0008
+    \end{equation}
+    The integral is clamped to $\pm\,0.08$ duty units to prevent wind-up.
+    It is also reset to zero each time the arm settles within the
+    tolerance band.
+
+  \item[Derivative]
+    A term proportional to the measured angular velocity, which damps
+    oscillations as the arm approaches the target:
+    \begin{equation}
+      u_D = -K_D\,\dot{\theta}_{\text{actual}}, \qquad K_D = 0.0003
+    \end{equation}
+    The velocity $\dot{\theta}_{\text{actual}}$ is computed numerically
+    from successive position readings: $\Delta\theta / \Delta t$.
+\end{description}
+
+The combined output $u = u_P + u_I + u_D$ is clamped to
+$[-0.15,\,+0.15]$ (15\,\% of supply voltage in either direction).
+A dead zone of $\pm 2^\circ$ around the target produces zero output,
+preventing continuous small oscillations once the arm is close enough.
+A minimum duty threshold of 0.015 is also applied whenever the error
+exceeds the tolerance band, ensuring the motor always overcomes static
+friction.  The waypoint is considered reached once the arm has remained
+within 2° of the target for at least 1.5 consecutive seconds.
+
+\subsection{Safety Clamp: Keeping the Arm Within Safe Bounds}
+
+The physical test rig is designed for single-sided operation: the arm must
+remain on the right-hand side at all times and must never be driven below
+the vertical hang position.  Two hard limits enforce this in software,
+applied after the PID calculation at every tick:
+
+\begin{description}[leftmargin=3.5cm, style=nextline]
+  \item[Lower limit]
+    $0^\circ$ (arm hanging straight down).  If the arm is at or below this
+    boundary, any negative duty command (which would drive it further) is
+    forced to zero regardless of the PID output.
+
+  \item[Upper limit]
+    $130^\circ$ (above horizontal).  If the arm is at or above this
+    boundary, any positive duty command is forced to zero.
+\end{description}
+
+These limits act as independent gates: either can zero the motor command
+regardless of what the PID calculates.
+
+\subsection{Waypoint Sequence and Multi-Loop Sweep}
+
+The arm follows a sequence of five angular waypoints that covers the
+physiologically relevant range of motion for an exosuit arm:
+
+\begin{enumerate}
+  \item $0^\circ$ --- home position, arm hanging straight down
+  \item $90^\circ$ --- arm horizontal, parallel to the ground
+  \item $120^\circ$ --- 30° above horizontal
+  \item $80^\circ$ --- 40° drop from the peak position
+  \item $0^\circ$ --- return to home
+\end{enumerate}
+
+The complete sequence is executed five consecutive times.  Having multiple
+passes of the same trajectory allows motion-capture or IMU data to be
+averaged across loops, improving the statistical reliability of any
+angle-accuracy or latency measurements.
+
+\subsection{Data Logging and Post-Run Analysis}
+
+At 20\,Hz throughout the run, the following fields are written to a CSV
+file in the \texttt{data/logs/} directory, with the timestamp embedded in
+the file name:
+
+\begin{center}
+  \begin{tabular}{ll}
+    \toprule
+    Column & Content \\
+    \midrule
+    \texttt{time\_s}          & Elapsed time from script start (seconds) \\
+    \texttt{commanded\_deg}   & Target waypoint angle (degrees) \\
+    \texttt{actual\_deg}      & Motor position relative to home (degrees) \\
+    \texttt{velocity\_deg\_s} & Computed angular velocity ($\Delta\theta / \Delta t$, deg/s) \\
+    \texttt{speed\_erpm}      & Shaft speed from motor feedback (electrical RPM) \\
+    \texttt{current\_amps}    & Winding current from motor feedback (Amperes) \\
+    \texttt{temp\_c}          & Driver temperature from motor feedback ($^\circ$C) \\
+    \texttt{error\_code}      & Motor fault code from motor feedback \\
+    \texttt{duty}             & Duty cycle output from the PID controller \\
+    \texttt{loop}             & Loop number (1--5) \\
+    \texttt{label}            & Human-readable waypoint description \\
+    \bottomrule
+  \end{tabular}
+\end{center}
+
+After the run completes, a summary table is printed to the console showing
+per-waypoint mean error, maximum error, mean velocity, and peak velocity
+across all five loops.  A two-panel PNG figure is also saved automatically
+alongside the CSV file: the upper panel shows commanded and actual angle
+over time; the lower panel shows computed angular velocity over time.
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Automatic CAN Interface Initialisation at Boot}
+\label{sec:service}
+
+\subsection{The Problem: Manual Setup Before Every Session}
+
+Bringing the CAN interface to an operational state requires three privileged
+system commands: loading kernel modules for the CAN subsystem and the
+Jetson Orin hardware driver, configuring the \texttt{can0} network link at
+1\,Mbit/s with error reporting and bus-off recovery, and setting the
+transmit queue length to 1\,000 frames.  In early development these steps
+were collected into a shell script (\texttt{setup\_can.sh}) that had to be
+invoked manually with administrator privileges before every working session.
+
+This created a friction point in the development workflow: after a reboot
+the system would be in a state where no CAN communication was possible
+until the script was run again, which is unacceptable for an always-on
+wearable device.
+
+\subsection{The Solution: A systemd Service Unit}
+
+A \emph{systemd service unit} (\texttt{can0.service}) was created to
+instruct the operating system to perform the same configuration steps
+automatically at every boot, before any application software starts.
+
+The service is declared as \emph{one-shot with result persistence}: it
+runs its commands exactly once at startup and is then considered active
+indefinitely, rather than expecting a long-running process to remain alive.
+It is also ordered to start after the system's network target is reached,
+ensuring that the network interface layer is available before the CAN
+configuration commands are issued.  If the bus-off recovery timer fires
+during a transient fault the interface self-heals, and systemd continues
+to report the service as active because the one-shot completed
+successfully at boot.
+
+The six commands executed by the service at boot are, in order:
+
+\begin{enumerate}
+  \item Load the \texttt{can} kernel module.
+  \item Load the \texttt{can\_raw} kernel module.
+  \item Load the \texttt{mttcan} kernel module (the Jetson Orin's
+        hardware CAN driver).
+  \item Bring the \texttt{can0} interface down to clear any prior
+        configuration.
+  \item Bring \texttt{can0} up at 1\,Mbit/s, with hardware error
+        reporting enabled and bus-off automatic recovery set to
+        100\,milliseconds.
+  \item Set the transmit queue length to 1\,000 frames.
+\end{enumerate}
+
+Once installed with \texttt{systemctl enable can0.service}, the service
+starts on every subsequent boot without user interaction.  The privileged
+setup step is reduced to a one-time installation activity performed once
+by an administrator.
+
+% ═══════════════════════════════════════════════════════════════════════════
 \section{Summary}
 \label{sec:summary}
 
@@ -627,13 +887,13 @@ communication interface for the AK60-6 motor, motivated by a physical
 incompatibility with UART, the scaling requirements of a multi-motor
 system, and the noise tolerance of differential signalling.
 
-Three non-trivial software mechanisms were developed to make the interface
-work reliably in practice:
+Six software mechanisms were developed to make the interface work reliably
+and usefully in practice:
 
-\begin{description}[leftmargin=4cm, style=nextline]
+\begin{description}[leftmargin=4.5cm, style=nextline]
   \item[Continuous refresh]
     The motor's watchdog timer requires a command to be received at
-    least every 100\,milliseconds. A background process retransmits the
+    least every 100\,milliseconds.  A background process retransmits the
     active command at 50\,Hz (every 20\,ms), providing a five-fold
     safety margin and freeing the main program from managing timing loops
     manually.
@@ -641,7 +901,7 @@ work reliably in practice:
   \item[Soft-start]
     To avoid oscillations in the motor's velocity controller at low
     speeds, every velocity command is preceded by 150\,milliseconds of
-    direct current control. This smoothly carries the motor past the
+    direct current control.  This smoothly carries the motor past the
     problematic zero-to-5\,000 electrical RPM zone before the velocity
     loop is engaged.
 
@@ -649,6 +909,25 @@ work reliably in practice:
     Target angle moves use velocity control for the travel phase, with
     duration estimated from the motor's own position feedback, followed
     by a switch to closed-loop position hold once the target is reached.
+
+  \item[Software PID position control]
+    Because the motor's built-in velocity and position controllers do
+    not produce shaft rotation on this firmware, a discrete PID controller
+    running at 50\,Hz on the Jetson implements position control entirely in
+    software using duty-cycle commands and the motor's 50\,Hz feedback.
+    Hard safety limits clamp motion to a defined angular range.
+
+  \item[Real-time telemetry]
+    Four methods (\texttt{get\_temperature}, \texttt{get\_current},
+    \texttt{get\_speed}, \texttt{get\_motor\_data}) expose the most recent
+    motor feedback to application code as instant, non-blocking reads.
+    The error-code byte is decoded against the eight fault definitions in
+    the manufacturer's specification and logged as human-readable text.
+
+  \item[Boot-time CAN initialisation]
+    A systemd one-shot service unit (\texttt{can0.service}) runs the
+    full bus-setup sequence automatically at every boot, eliminating the
+    requirement for a manual administrator command before each session.
 \end{description}
 
 Table~\ref{tab:summary} provides a concise reference of the key numerical
@@ -678,6 +957,21 @@ parameters of the overall system.
     Feedback position conversion                   & $\times 0.1$ (integer to degrees) \\
     Feedback speed conversion                      & $\times 10$ (integer to electrical RPM) \\
     Feedback current conversion                    & $\times 0.01$ (integer to Amperes) \\
+    \midrule
+    \multicolumn{2}{l}{\textit{PID position controller (Section~\ref{sec:motion})}} \\
+    \midrule
+    PID control rate                               & 50\,Hz (every 20\,ms) \\
+    Proportional gain $K_P$                        & 0.004\,duty/deg \\
+    Integral gain $K_I$                            & 0.0008\,duty/(deg\,$\cdot$\,s) \\
+    Derivative gain $K_D$                          & 0.0003\,duty/(deg/s) \\
+    Maximum duty cycle                             & $\pm$\,0.15 (15\,\% of supply) \\
+    Minimum duty (static friction override)        & 0.015 \\
+    Position tolerance for settled state           & $\pm$\,2° \\
+    Settle hold time before next waypoint          & 1.5\,s \\
+    Safety clamp --- lower limit                   & 0° (arm hanging straight down) \\
+    Safety clamp --- upper limit                   & 130° (above horizontal) \\
+    Sweep loops per validation run                 & 5 \\
+    Data log rate                                  & 20\,Hz \\
     \bottomrule
   \end{tabular}
 \end{table}
