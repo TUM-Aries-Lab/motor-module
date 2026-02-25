@@ -16,6 +16,7 @@ produces real movement.  Those sections are marked [ACK-ONLY].
 import time
 
 from motor_python.cube_mars_motor_can import CAN_ERROR_CODES, CubeMarsAK606v3CAN
+from motor_python.definitions import TendonAction
 
 MOTOR_ID  = 0x03
 INTERFACE = "can0"
@@ -143,11 +144,11 @@ def main() -> None:
         # ── 10. control_exosuit_tendon ─────────────────────────────────────
         section("10. control_exosuit_tendon()")
         print("  pull → release → stop (duty-based) ...")
-        motor.control_exosuit_tendon(action="pull",    velocity_erpm=5000)
+        motor.control_exosuit_tendon(action=TendonAction.PULL,    velocity_erpm=5000)
         time.sleep(0.4)
-        motor.control_exosuit_tendon(action="release", velocity_erpm=5000)
+        motor.control_exosuit_tendon(action=TendonAction.RELEASE, velocity_erpm=5000)
         time.sleep(0.4)
-        motor.control_exosuit_tendon(action="stop")
+        motor.control_exosuit_tendon(action=TendonAction.STOP)
         result("control_exosuit_tendon()", "pull / release / stop ✓")
 
         # ── 11. stop ───────────────────────────────────────────────────────
