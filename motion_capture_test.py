@@ -39,7 +39,7 @@ INTERFACE = "can0"
 # CAN arbitration IDs (extended 29-bit): (mode << 8) | motor_id
 _ID_ENABLE       = MOTOR_ID                    # 0x03  — enable/disable sent direct
 _ID_SET_ORIGIN   = (0x05 << 8) | MOTOR_ID     # 0x0503
-_ID_POS_VEL_ACCEL = (0x06 << 8) | MOTOR_ID   # 0x0603
+_ID_VELOCITY     = (0x03 << 8) | MOTOR_ID     # 0x0303  — velocity control (confirmed working)
 _ID_FEEDBACK     = 0x2903                      # motor broadcast ID
 
 ENABLE_DATA  = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC])
@@ -76,7 +76,10 @@ WAYPOINTS = [
 # ---------------------------------------------------------------------------
 
 def _tx(bus: can.BusABC, arb_id: int, data: bytes) -> None:
-    bus.send(can.Message(arbitration_id=arb_id, data=data, is_extended_id=True))
+    try:
+        bus.send(can.Message(arbitration_id=arb_id, data=data, is_extended_id=True))
+    except can.CanOperationError:
+        time.sleep(0.02)  # back off if TX buffer is full
 
 
 def _get_feedback(bus: can.BusABC):
@@ -93,13 +96,6 @@ def _get_feedback(bus: can.BusABC):
     return None
 
 
-def _make_pos_cmd(position_deg: float, velocity_erpm: int, accel_erpm_per_sec: int) -> bytes:
-    """Pack a Position+Velocity+Accel command (mode 0x06) payload."""
-    pos_int  = int(max(-32_000_000, min(32_000_000, position_deg * 10_000)))
-    vel_int  = int(max(-32767, min(32767, velocity_erpm // 10)))
-    acc_int  = int(max(-32767, min(32767, accel_erpm_per_sec // 10)))
-    return struct.pack(">ihh", pos_int, vel_int, acc_int)
-
 
 def move_and_sample(
     bus: can.BusABC,
@@ -108,21 +104,42 @@ def move_and_sample(
     writer: csv.DictWriter,
     t0: float,
 ) -> None:
-    """Send position command at 50 Hz for HOLD_TIME seconds and log feedback."""
+    """Drive to target_degrees using velocity mode + proportional controller.
+
+    Velocity mode is used because it is confirmed to work on this hardware.
+    A proportional controller converts the angle error into an ERPM command.
+    """
     print(f"\n  ▶  Moving to {target_degrees:+.1f}°  —  {label}")
-    cmd = _make_pos_cmd(target_degrees, MOVE_SPEED_ERPM, ACCEL_ERPM_PER_SEC)
 
-    last_csv_t = -1.0
+    KP          = 150        # ERPM per degree of error
+    TOLERANCE   = 1.5        # degrees — stop commanding once within this band
+    HOLD_AFTER  = 1.5        # seconds to stay at target before next waypoint
+
+    last_csv_t  = -1.0
     csv_interval = 1.0 / SAMPLE_HZ
-    deadline = time.monotonic() + HOLD_TIME
 
-    while time.monotonic() < deadline:
-        _tx(bus, _ID_POS_VEL_ACCEL, cmd)
+    settled_at   = None      # time when we first entered the tolerance band
+    deadline     = time.monotonic() + HOLD_TIME
+
+    while True:
+        now = time.monotonic()
+
+        # Send velocity command proportional to error
         fb = _get_feedback(bus)
-        elapsed = time.monotonic() - t0
-
         if fb is not None:
             pos, spd, cur, tmp, err = fb
+            error = target_degrees - pos
+            vel   = int(max(-MOVE_SPEED_ERPM, min(MOVE_SPEED_ERPM, KP * error)))
+
+            if abs(error) < TOLERANCE:
+                vel = 0
+                if settled_at is None:
+                    settled_at = now
+
+            vel_cmd = struct.pack(">i", vel) + bytes(4)
+            _tx(bus, (0x03 << 8) | MOTOR_ID, vel_cmd)
+
+            elapsed = now - t0
             if elapsed - last_csv_t >= csv_interval:
                 last_csv_t = elapsed
                 writer.writerow({
@@ -136,16 +153,28 @@ def move_and_sample(
                     "label":         label,
                 })
             print(
-                f"    t={elapsed:6.2f}s  "
+                f"    t={now-t0:6.2f}s  "
                 f"cmd={target_degrees:+6.1f}°  "
                 f"pos={pos:+7.2f}°  "
-                f"spd={spd:+7d} ERPM  "
-                f"cur={cur:+5.2f} A",
+                f"err={error:+6.1f}°  "
+                f"vel={vel:+6d}",
                 end="\r",
             )
         else:
+            _tx(bus, (0x03 << 8) | MOTOR_ID, struct.pack(">i", 0) + bytes(4))
             time.sleep(SEND_INTERVAL)
+            continue
 
+        # Exit: either settled long enough OR overall deadline reached
+        if settled_at is not None and (now - settled_at) >= HOLD_AFTER:
+            break
+        if now >= deadline:
+            break
+
+        time.sleep(SEND_INTERVAL)
+
+    # Hold position after reaching waypoint
+    _tx(bus, (0x03 << 8) | MOTOR_ID, struct.pack(">i", 0) + bytes(4))
     print()
 
 
@@ -210,11 +239,9 @@ def main() -> None:
             time.sleep(0.3)   # let motor process; next feedback will show 0°
 
             # Read fresh position after origin is applied
-            _tx(bus, _ID_POS_VEL_ACCEL,
-                _make_pos_cmd(0.0, MOVE_SPEED_ERPM, ACCEL_ERPM_PER_SEC))
             fb = _get_feedback(bus)
             if fb is not None:
-                print(f"  Origin set — motor now reports {fb[0]:.2f}° ✓")
+                print(f"  Origin set — motor now reports {fb[0]:.2f}°")
             else:
                 print("  (origin set — no confirmation feedback)")
 
@@ -227,11 +254,7 @@ def main() -> None:
 
         except KeyboardInterrupt:
             print("\n\n  Aborted — returning to home (0°)...")
-            cmd = _make_pos_cmd(0.0, MOVE_SPEED_ERPM, ACCEL_ERPM_PER_SEC)
-            deadline = time.monotonic() + HOLD_TIME
-            while time.monotonic() < deadline:
-                _tx(bus, _ID_POS_VEL_ACCEL, cmd)
-                _get_feedback(bus)
+            move_and_sample(bus, 0.0, "abort-return-home", writer, t0)
 
         finally:
             # Zero current then disable
