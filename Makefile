@@ -6,8 +6,12 @@ init:  # ENV SETUP
 	@echo "Environment initialized with uv."
 
 test:
-	uv run pytest --cov=src --cov-report=term-missing --no-cov-on-fail --cov-report=xml --cov-fail-under=65
-	rm .coverage
+	uv run pytest -m "not hardware" --cov=src --cov-report=term-missing --no-cov-on-fail --cov-report=xml --cov-fail-under=70
+	rm -f .coverage
+
+test-hardware:
+	uv run pytest --cov=src --cov-report=term-missing --no-cov-on-fail --cov-report=xml --cov-fail-under=73
+	rm -f .coverage
 
 lint:
 	uv run ruff format src/ tests/
@@ -43,7 +47,7 @@ docker:
 	docker run --rm motor_python-smoke
 
 app:
-	./.venv/bin/python -m motor_python
+	uv run python -m motor_python
 
 tree:
 	uv run python repo_tree.py --update-readme

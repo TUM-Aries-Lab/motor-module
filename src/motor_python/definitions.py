@@ -20,8 +20,6 @@ ENCODING: str = "utf-8"
 
 DATE_FORMAT = "%Y-%m-%d_%H-%M-%S"
 
-DUMMY_VARIABLE = "dummy_variable"
-
 
 @dataclass
 class LogLevel:
@@ -69,6 +67,10 @@ class FrameBytes:
     end: int = 0xBB
     min_response_length: int = 10  # Minimum valid response frame length
     min_frame_with_payload: int = 6  # Minimum frame length that includes payload
+    expected_status_response_length: int = (
+        90  # Full status response (MotorCommand.CMD_GET_STATUS)
+    )
+    min_status_response_length: int = 85  # Minimum acceptable status response
     separator_length: int = 50  # Length of separator line in logs
     start_index: int = 0  # Index of start byte in frame
     length_index: int = 1  # Index of length byte in frame
@@ -106,8 +108,6 @@ class ScaleFactors:
     )
     current: float = 100.0  # Current is sent as int32 * 100 (centi-amps)
     duty: float = 1000.0  # Duty cycle is sent as int16 * 1000 (per-mille)
-    duty_command: float = 100000.0  # Duty cycle command is sent as int32 * 100000
-    current_command: float = 1000.0  # Current command is sent as int32 * 1000
     voltage: float = 10.0  # Voltage is sent as int16 * 10 (deci-volts)
     vd_vq: float = 1000.0  # Vd/Vq voltages are sent as int32 * 1000
     position: float = (
@@ -131,17 +131,20 @@ class PayloadSizes:
 
 @dataclass(frozen=True)
 class MotorLimits:
-    """Motor control limits."""
+    """Motor velocity and position control limits.
 
-    max_duty_cycle: float = 0.95  # Maximum duty cycle (95% to prevent saturation)
-    min_duty_cycle: float = -0.95  # Minimum duty cycle
-    max_current_amps: float = 60.0  # Maximum current in amps
-    min_current_amps: float = -60.0  # Minimum current in amps
-    max_velocity_electrical_rpm: int = 100000  # Maximum velocity in Electrical RPM
-    min_velocity_electrical_rpm: int = -100000  # Minimum velocity in Electrical RPM
-    max_position_degrees: float = 2147.483647  # Maximum position based on int32 limit
-    min_position_degrees: float = -2147.483648  # Minimum position based on int32 limit
+    Low speeds (< 5000 ERPM) with high firmware acceleration settings cause
+    current oscillations and noise.
+    """
+
+    max_velocity_electrical_rpm: int = 100000
+    min_velocity_electrical_rpm: int = -100000
+    min_safe_velocity_erpm: int = 5000  # Minimum safe magnitude (|v| >= 5000 or v == 0)
     max_movement_time: float = 5.0  # Maximum movement time cap in seconds
+    soft_start_current_ma: int = 3000  # Gentle current (mA) to pre-spin past noisy zone
+    soft_start_duration: float = 0.15  # Seconds to hold pre-spin current
+    default_tendon_velocity_erpm: int = 10000  # Default velocity for tendon control
+    default_velocity_demo_erpm: int = 8000  # Safe moderate velocity for demo/testing
 
 
 @dataclass(frozen=True)
@@ -154,6 +157,26 @@ class ConversionFactors:
     byte_mask: int = 0xFF  # Mask for extracting single byte
 
 
+@dataclass(frozen=True)
+class HardwareTestDefaults:
+    """Hardware test configuration defaults."""
+
+    max_status_retries: int = 8  # Maximum attempts for status query
+    retry_delay: float = 0.12  # Delay between retry attempts (seconds)
+    position_tolerance_degrees: float = (
+        5.0  # Tolerance for position verification (degrees)
+    )
+    velocity_tolerance: float = (
+        0.3  # 30% tolerance for velocity verification (fraction, 0.3 = 30%)
+    )
+    position_corruption_threshold_degrees: float = (
+        1e4  # Positions beyond this are corrupted
+    )
+    speed_corruption_threshold_erpm: int = int(
+        1e6  # Speeds beyond this are corrupted (int matches UART protocol)
+    )
+
+
 # Instantiate frozen dataclasses for easy access
 MOTOR_DEFAULTS = MotorDefaults()
 FRAME_BYTES = FrameBytes()
@@ -162,6 +185,16 @@ SCALE_FACTORS = ScaleFactors()
 PAYLOAD_SIZES = PayloadSizes()
 MOTOR_LIMITS = MotorLimits()
 CONVERSION_FACTORS = ConversionFactors()
+HARDWARE_TEST_DEFAULTS = HardwareTestDefaults()
+
+
+# Tendon action control
+class TendonAction(IntEnum):
+    """Exosuit tendon control actions."""
+
+    PULL = 0  # Pull tendon (lift/assist)
+    RELEASE = 1  # Release tendon (lower/relax)
+    STOP = 2  # Stop motion
 
 
 # Motor Fault Codes (from CubeMars Manual)
