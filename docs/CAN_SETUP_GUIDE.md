@@ -56,15 +56,58 @@ Pin 2 (GND)       -->   GND (common ground)
 
 ### Termination Resistor
 
-**IMPORTANT:** Install a 120Ω resistor across CANH and CANL at each end of the CAN bus.
+**IMPORTANT:** Both physical ends of the CAN bus cable must have a 120 Ω resistor
+across CANH and CANL.
 
 ```
-     CANH ----[120Ω resistor]---- CANL
+Jetson                                             Motor
+[SN65HVD230]---CANH/CANL cable---[AK60-6]
+    [120Ω]                           [120Ω]
+  (board jumper)               (factory fitted)
 ```
 
-For a single motor setup, place the termination resistor either:
-- At the motor end (across motor CANH/CANL)
-- At the transceiver end (across SN65HVD230 pins 6 and 7)
+#### Why termination is required
+
+CAN signals are electrical waves travelling down the cable. At 1 Mbit/s any
+unterminated cable end reflects the wave back, and the reflection arrives within
+the same bit period, corrupting data. The Kvaser oscilloscope measurements
+demonstrate that even short cables fail reliably at 1 Mbit/s without termination.
+
+The 120 Ω value matches the characteristic impedance of ISO 11898 twisted-pair
+cable. When the terminator and cable have the same impedance the wave is absorbed
+with no reflection. Two 120 Ω terminators in parallel give 60 Ω across the bus,
+which is also the required DC operating point for the transceiver chips.
+
+#### Our hardware — what to check
+
+**AK60-6 motor:** Has a factory-fitted internal 120 Ω terminator.  Nothing to do.
+
+**SN65HVD230 board:** The chip itself has no built-in terminator. Most breakout
+boards include a 120 Ω resistor with one of:
+- A **2-pin jumper header** (labelled `120R`, `TERM`, or `RT`) — close with a
+  jumper cap to enable. No soldering required.
+- A **solder bridge** — short the two pads with a small blob of solder.
+
+Inspect the board and enable the terminator if not already done.
+
+#### Verify with a multimeter (recommended)
+
+Power off everything (motor 24V off, Jetson USB-C unplugged, wait 10 s).
+Then measure resistance across CANH and CANL at the transceiver board with a
+multimeter in Ω mode:
+
+| Reading | Meaning | Action |
+|---|---|---|
+| ~60 Ω | ✅ Both terminators active | None |
+| ~120 Ω | ⚠️ Only motor terminator active | Enable jumper/solder bridge on board |
+| Open / very high | ❌ Neither terminator active | Check motor connector; enable board jumper |
+
+#### Verify with candump
+
+With the motor powered and CAN interface up, run `candump can0`. A clean 50 Hz
+stream of 8-byte messages from ID `0x2903` with no `ERRORFRAME` lines confirms
+termination is adequate. Any `ERRORFRAME` output points to a physical layer problem,
+of which missing termination is the most common cause at 1 Mbit/s.
 
 ## Software Setup
 
