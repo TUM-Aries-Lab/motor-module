@@ -170,3 +170,7 @@ cython_debug/
 *.egg-info
 
 /logs/log_*
+
+# Motion capture logs and plots
+data/logs/
+
