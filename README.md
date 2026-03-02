@@ -109,18 +109,52 @@ motor.set_velocity(velocity_erpm=10000)
 motor.stop()
 ```
 
+## Publishing
+
+It's super easy to publish your own packages on PyPi. To build and publish this package run:
+1. Update the version number in pyproject.toml and motor_python/__init__.py
+2. Commit your changes and add a git tag "<new.version.number>"
+3. Push the tag `git push --tag`
+
 ## API
 
 | Method | Description |
 |--------|-------------|
 | `set_velocity(velocity_erpm, allow_low_speed=False)` | Set speed in ERPM |
-| `set_position(position_degrees)` | Set target position in degrees (±360) |
+| `set_position(position_degrees)` | Set target position in degrees (unlimited for spool cable system) |
 | `get_position()` | Read current position from motor |
 | `move_to_position_with_speed(target_degrees, motor_speed_erpm)` | Move to position via velocity then hold |
 | `control_exosuit_tendon(action, velocity_erpm)` | Helper for pull / release / stop |
 | `stop()` | Stop the motor (current = 0, releases windings) |
 | `get_status()` | Query all motor parameters |
 | `check_communication()` | Verify motor is responding |
+
+## Velocity Safety
+
+**Minimum safe velocity: 5000 ERPM** (enforced by default).
+
+Below 5000 ERPM the firmware acceleration settings cause current oscillations,
+audible noise, and motor instability.
+
+```python
+motor.set_velocity(velocity_erpm=10000)              # OK
+motor.set_velocity(velocity_erpm=100)                 # Raises ValueError
+motor.set_velocity(velocity_erpm=100, allow_low_speed=True)  # Bypass
+motor.set_velocity(velocity_erpm=0)                   # Stop always allowed
+```
+
+## Position Control
+
+**Range: Unlimited** - Motor can rotate continuously for spool-based cable systems.
+
+No artificial position limits. Suitable for applications requiring multiple rotations to wind cable.
+
+## Run
+
+```bash
+uv run python -m motor_python
+```
+
 
 ## Testing
 

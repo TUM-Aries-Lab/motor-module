@@ -65,18 +65,19 @@ def parse_speed_from_status(motor: CubeMarsAK606v3, status: bytes) -> int | None
         Speed in ERPM, or None if data is corrupted.
 
     """
+    payload = status[FRAME_BYTES.payload_start_index : -FRAME_BYTES.crc_and_end_length]
     motor.status_parser.payload_offset = 0
-    motor.status_parser.parse_temperatures(status)
-    motor.status_parser.parse_currents(status)
-    dsv = motor.status_parser.parse_duty_speed_voltage(status)
+    motor.status_parser.parse_temperatures(payload)
+    motor.status_parser.parse_currents(payload)
+    dsv = motor.status_parser.parse_duty_speed_voltage(payload)
     if (
         dsv is None
-        or abs(dsv.speed_erpm) >= HARDWARE_TEST_DEFAULTS.speed_corruption_threshold
+        or abs(dsv.speed_erpm) >= HARDWARE_TEST_DEFAULTS.speed_corruption_threshold_erpm
     ):
         logger.warning(
             "Speed data corruption detected: speed=%s (threshold=%d)",
             dsv.speed_erpm if dsv else None,
-            HARDWARE_TEST_DEFAULTS.speed_corruption_threshold,
+            HARDWARE_TEST_DEFAULTS.speed_corruption_threshold_erpm,
         )
         return None  # Corrupted data
     return dsv.speed_erpm
@@ -93,22 +94,23 @@ def parse_position_from_status(motor: CubeMarsAK606v3, status: bytes) -> float |
         Position in degrees, or None if data is corrupted.
 
     """
+    payload = status[FRAME_BYTES.payload_start_index : -FRAME_BYTES.crc_and_end_length]
     motor.status_parser.payload_offset = 0
-    motor.status_parser.parse_temperatures(status)
-    motor.status_parser.parse_currents(status)
-    motor.status_parser.parse_duty_speed_voltage(status)
+    motor.status_parser.parse_temperatures(payload)
+    motor.status_parser.parse_currents(payload)
+    motor.status_parser.parse_duty_speed_voltage(payload)
     # Skip reserved bytes
     motor.status_parser._skip_bytes(PAYLOAD_SIZES.reserved)
-    status_pos = motor.status_parser.parse_status_position(status)
+    status_pos = motor.status_parser.parse_status_position(payload)
     if (
         status_pos is None
         or abs(status_pos.position_degrees)
-        >= HARDWARE_TEST_DEFAULTS.position_corruption_threshold
+        >= HARDWARE_TEST_DEFAULTS.position_corruption_threshold_degrees
     ):
         logger.warning(
             "Position data corruption detected: position=%s deg (threshold=%d)",
             status_pos.position_degrees if status_pos else None,
-            HARDWARE_TEST_DEFAULTS.position_corruption_threshold,
+            HARDWARE_TEST_DEFAULTS.position_corruption_threshold_degrees,
         )
         return None  # Corrupted data
     return status_pos.position_degrees
@@ -296,11 +298,17 @@ class TestPositionControl:
 
     @pytest.mark.flaky(reruns=3, reruns_delay=1)
     def test_set_position(self, motor: CubeMarsAK606v3) -> None:
-        """Set position command is accepted by motor."""
+        """Set position command moves motor 45 degrees from a fresh zero."""
         try:
-            target_position = 90.0
+            # Set the motor's current position as the temporary origin so that
+            # whatever accumulated angle remains from velocity tests is treated
+            # as 0 deg.  This keeps the set_position payload well within the
+            # int32 protocol range (+-2147 deg) regardless of prior test state.
+            motor.set_origin(permanent=False)
+            time.sleep(0.2)
+            target_position = 45.0
             motor.set_position(position_degrees=target_position)
-            time.sleep(0.15)
+            time.sleep(1.5)
             # Verify motor reached the position
             status = get_status_with_retry(motor)
             assert status is not None, "Status should not be None"
