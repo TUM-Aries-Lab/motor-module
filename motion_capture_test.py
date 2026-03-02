@@ -34,14 +34,6 @@ from pathlib import Path
 
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
 
-try:
-    import matplotlib
-    matplotlib.use("Agg")          # headless — no display needed
-    import matplotlib.pyplot as plt
-    HAS_MPL = True
-except ImportError:
-    HAS_MPL = False
-
 # ---------------------------------------------------------------------------
 # CAN / motor constants
 # ---------------------------------------------------------------------------
@@ -321,16 +313,9 @@ def main() -> None:
 
     # ── Post-run analysis ────────────────────────────────────────
     print_summary(csv_path)
-    if HAS_MPL:
-        plot_path = csv_path.with_suffix(".png")
-        generate_plots(csv_path, plot_path)
-    else:
-        print("  (matplotlib not installed — skipping plot generation)")
 
     print("\n" + "=" * 60)
     print(f"  Done.  Data saved to:\n  {csv_path}")
-    if HAS_MPL:
-        print(f"  Plot saved to:\n  {plot_path}")
     print("=" * 60)
 
 
@@ -393,49 +378,6 @@ def print_summary(csv_path: Path) -> None:
           f"{overall_max_err:>6.2f}°  {'':>8s}  {overall_peak_vel:>7.1f}°/s")
     print(f"  Duration: {duration:.1f}s  |  Samples: {total_samples}")
     print("=" * 72)
-
-
-# ---------------------------------------------------------------------------
-# Plot generation
-# ---------------------------------------------------------------------------
-
-def generate_plots(csv_path: Path, plot_path: Path) -> None:
-    """Create a 2-panel plot: angle tracking + velocity over time."""
-    times, cmd, actual, velocity = [], [], [], []
-    with open(csv_path, newline="") as f:
-        for row in csv.DictReader(f):
-            times.append(float(row["time_s"]))
-            cmd.append(float(row["commanded_deg"]))
-            actual.append(float(row["actual_deg"]))
-            velocity.append(float(row["velocity_deg_s"]))
-
-    if not times:
-        return
-
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
-    fig.suptitle("Motion Capture Validation — Motor Arm Sweep", fontsize=14)
-
-    # ── Panel 1: Angle ──────────────────────────────────────────────────
-    ax1.plot(times, cmd, "--", color="#888888", linewidth=1.2, label="Commanded")
-    ax1.plot(times, actual, "-", color="#2196F3", linewidth=1.0, label="Actual (motor)")
-    ax1.set_ylabel("Angle (°)")
-    ax1.legend(loc="upper right")
-    ax1.grid(True, alpha=0.3)
-    ax1.set_title("Angle Tracking")
-
-    # ── Panel 2: Velocity ───────────────────────────────────────────────
-    ax2.plot(times, velocity, "-", color="#FF5722", linewidth=0.8, label="Motor velocity")
-    ax2.axhline(0, color="#888888", linewidth=0.5)
-    ax2.set_ylabel("Velocity (°/s)")
-    ax2.set_xlabel("Time (s)")
-    ax2.legend(loc="upper right")
-    ax2.grid(True, alpha=0.3)
-    ax2.set_title("Angular Velocity")
-
-    plt.tight_layout()
-    fig.savefig(plot_path, dpi=150)
-    plt.close(fig)
-    print(f"\n  Plot saved → {plot_path}")
 
 
 if __name__ == "__main__":
