@@ -37,9 +37,7 @@ def main(
             f"Starting dual-motor CAN demo "
             f"(left=0x{motor_id_left:02X}, right=0x{motor_id_right:02X})..."
         )
-        multi_motor_can_example(
-            left_can_id=motor_id_left, right_can_id=motor_id_right
-        )
+        multi_motor_can_example(left_can_id=motor_id_left, right_can_id=motor_id_right)
         logger.info("Dual-motor CAN demo complete!")
         return
 

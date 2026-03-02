@@ -1,0 +1,3 @@
+time_s,commanded_deg,actual_deg,speed_erpm,current_amps,temp_c,error_code,label
+0.000,0.0,-36.20,0,0.320,34,0,home — arm hanging straight down
+0.061,0.0,-36.20,0,0.060,34,0,home — arm hanging straight down

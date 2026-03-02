@@ -6,7 +6,7 @@ tests/hardware_can_test.py.
 """
 
 import struct
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -18,7 +18,7 @@ from motor_python.definitions import TendonAction
 # ---------------------------------------------------------------------------
 
 # Velocity values used across tests (same reasoning as UART tests)
-LOW_VELOCITY_ERPM = 100          # Below 5000 ERPM safety floor — should be blocked
+LOW_VELOCITY_ERPM = 100  # Below 5000 ERPM safety floor — should be blocked
 SAFE_PULL_VELOCITY_ERPM = 10000  # Above threshold — normal tendon pull
 SAFE_RELEASE_VELOCITY_ERPM = 8000
 
@@ -26,6 +26,7 @@ SAFE_RELEASE_VELOCITY_ERPM = 8000
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_feedback_msg(
     position_degrees: float = 90.0,
@@ -66,6 +67,7 @@ def _make_feedback_msg(
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def mock_bus():
     """Patch can.interface.Bus so no real CAN socket is opened.
@@ -91,6 +93,7 @@ def motor(mock_bus):
 # Initialization
 # ---------------------------------------------------------------------------
 
+
 class TestInitialization:
     """CAN motor class can be imported and initialised."""
 
@@ -106,6 +109,7 @@ class TestInitialization:
     def test_connection_failure_graceful(self):
         """CAN bus errors are caught and motor marks itself as disconnected."""
         import can
+
         with patch("motor_python.cube_mars_motor_can.can.interface.Bus") as mock_cls:
             mock_cls.side_effect = can.CanError("interface not found")
             m = CubeMarsAK606v3CAN()
@@ -118,14 +122,15 @@ class TestInitialization:
 
     def test_feedback_ids_include_standard_schemes(self, motor):
         """Known CubeMars feedback ID schemes are all in the candidate set."""
-        assert 0x2903 in motor._feedback_ids   # 0x2900 | 0x03
-        assert 0x0083 in motor._feedback_ids   # 0x0080 | 0x03
-        assert 0x03   in motor._feedback_ids   # direct ID fallback
+        assert 0x2903 in motor._feedback_ids  # 0x2900 | 0x03
+        assert 0x0083 in motor._feedback_ids  # 0x0080 | 0x03
+        assert 0x03 in motor._feedback_ids  # direct ID fallback
 
 
 # ---------------------------------------------------------------------------
 # Enable / Disable
 # ---------------------------------------------------------------------------
+
 
 class TestEnableDisable:
     """enable_motor / disable_motor send the correct magic bytes."""
@@ -148,6 +153,7 @@ class TestEnableDisable:
     def test_enable_when_not_connected(self):
         """enable_motor is a no-op and does not raise when disconnected."""
         import can
+
         with patch("motor_python.cube_mars_motor_can.can.interface.Bus") as mock_cls:
             mock_cls.side_effect = can.CanError("no interface")
             m = CubeMarsAK606v3CAN()
@@ -157,6 +163,7 @@ class TestEnableDisable:
 # ---------------------------------------------------------------------------
 # Velocity control
 # ---------------------------------------------------------------------------
+
 
 class TestVelocityControl:
     """set_velocity enforces safety limits and sends correctly-encoded frames."""
@@ -197,6 +204,7 @@ class TestVelocityControl:
 # Position control
 # ---------------------------------------------------------------------------
 
+
 class TestPositionControl:
     """set_position clamps within ±3200° and sends an encoded frame."""
 
@@ -236,6 +244,7 @@ class TestPositionControl:
 # Current and duty-cycle control
 # ---------------------------------------------------------------------------
 
+
 class TestCurrentAndDuty:
     """set_current and set_duty_cycle encode and send frames correctly."""
 
@@ -271,6 +280,7 @@ class TestCurrentAndDuty:
 # Set origin
 # ---------------------------------------------------------------------------
 
+
 class TestSetOrigin:
     """set_origin sends the correct byte for temporary vs permanent."""
 
@@ -291,6 +301,7 @@ class TestSetOrigin:
 # set_position_velocity_accel
 # ---------------------------------------------------------------------------
 
+
 class TestPositionVelocityAccel:
     """set_position_velocity_accel encodes all three fields correctly."""
 
@@ -308,14 +319,15 @@ class TestPositionVelocityAccel:
         )
         sent_data = bytes(mock_bus.send.call_args[0][0].data)
         pos_int, vel_int, accel_int = struct.unpack(">ihh", sent_data)
-        assert pos_int == int(90.0 * 10000)    # 900000
-        assert vel_int == 10000 // 10           # 1000
+        assert pos_int == int(90.0 * 10000)  # 900000
+        assert vel_int == 10000 // 10  # 1000
         assert accel_int == 0
 
 
 # ---------------------------------------------------------------------------
 # Stop / Close
 # ---------------------------------------------------------------------------
+
 
 class TestStopAndClose:
     """stop() and close() release windings and clean up."""
@@ -346,12 +358,14 @@ class TestStopAndClose:
 # Feedback / communication
 # ---------------------------------------------------------------------------
 
+
 class TestFeedbackAndCommunication:
     """Feedback parsing and check_communication behave correctly."""
 
     def test_check_communication_not_connected(self):
         """check_communication returns False when CAN bus is unavailable."""
         import can
+
         with patch("motor_python.cube_mars_motor_can.can.interface.Bus") as mock_cls:
             mock_cls.side_effect = can.CanError("no interface")
             m = CubeMarsAK606v3CAN()
@@ -438,6 +452,7 @@ class TestFeedbackAndCommunication:
 # Tendon control
 # ---------------------------------------------------------------------------
 
+
 class TestTendonControl:
     """control_exosuit_tendon drives the motor in the right direction."""
 
@@ -469,6 +484,7 @@ class TestTendonControl:
 # ---------------------------------------------------------------------------
 # Extended CAN ID encoding
 # ---------------------------------------------------------------------------
+
 
 class TestCANIDEncoding:
     """_build_extended_id constructs the correct 29-bit arbitration ID."""

@@ -1,0 +1,126 @@
+time_s,commanded_deg,actual_deg,speed_erpm,current_amps,temp_c,error_code,label
+0.000,0.0,-36.20,0,0.000,33,0,home — arm hanging straight down
+0.175,0.0,-36.20,0,0.320,34,0,home — arm hanging straight down
+0.347,0.0,-36.20,0,0.370,34,0,home — arm hanging straight down
+0.518,0.0,-36.20,0,0.430,34,0,home — arm hanging straight down
+0.689,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+0.861,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+1.033,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+1.206,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+1.377,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+1.548,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+1.720,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+1.891,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+2.061,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+2.232,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+2.404,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+2.576,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+2.748,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+2.919,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+3.090,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+3.261,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+3.432,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+3.603,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+3.774,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+3.944,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+4.117,0.0,-36.20,0,0.340,34,0,home — arm hanging straight down
+4.422,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+4.595,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+4.766,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+4.937,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+5.108,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+5.280,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+5.451,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+5.623,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+5.795,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+5.966,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+6.137,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+6.308,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+6.479,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+6.650,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+6.821,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+6.992,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+7.163,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+7.334,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+7.505,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+7.676,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+7.847,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+8.018,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+8.189,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+8.360,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+8.531,90.0,-36.20,0,0.340,34,0,arm horizontal (parallel to ground)
+8.833,120.0,-36.20,0,0.340,34,0,30° above horizontal
+9.005,120.0,-36.20,0,0.340,34,0,30° above horizontal
+9.177,120.0,-36.20,0,0.340,34,0,30° above horizontal
+9.348,120.0,-36.20,0,0.340,34,0,30° above horizontal
+9.519,120.0,-36.20,0,0.340,34,0,30° above horizontal
+9.690,120.0,-36.20,0,0.340,34,0,30° above horizontal
+9.861,120.0,-36.20,0,0.340,34,0,30° above horizontal
+10.032,120.0,-36.20,0,0.340,34,0,30° above horizontal
+10.203,120.0,-36.20,0,0.340,34,0,30° above horizontal
+10.374,120.0,-36.20,0,0.340,34,0,30° above horizontal
+10.545,120.0,-36.20,0,0.340,34,0,30° above horizontal
+10.716,120.0,-36.20,0,0.340,34,0,30° above horizontal
+10.887,120.0,-36.20,0,0.340,34,0,30° above horizontal
+11.058,120.0,-36.20,0,0.340,34,0,30° above horizontal
+11.229,120.0,-36.20,0,0.340,34,0,30° above horizontal
+11.400,120.0,-36.20,0,0.340,34,0,30° above horizontal
+11.571,120.0,-36.20,0,0.340,34,0,30° above horizontal
+11.742,120.0,-36.20,0,0.340,34,0,30° above horizontal
+11.913,120.0,-36.20,0,0.340,34,0,30° above horizontal
+12.084,120.0,-36.20,0,0.340,34,0,30° above horizontal
+12.255,120.0,-36.20,0,0.340,34,0,30° above horizontal
+12.426,120.0,-36.20,0,0.340,34,0,30° above horizontal
+12.597,120.0,-36.20,0,0.340,34,0,30° above horizontal
+12.768,120.0,-36.20,0,0.340,34,0,30° above horizontal
+12.940,120.0,-36.20,0,0.340,34,0,30° above horizontal
+13.243,80.0,-36.20,0,0.340,34,0,40° drop from peak
+13.416,80.0,-36.20,0,0.340,34,0,40° drop from peak
+13.587,80.0,-36.20,0,0.340,34,0,40° drop from peak
+13.758,80.0,-36.20,0,0.340,34,0,40° drop from peak
+13.929,80.0,-36.20,0,0.340,34,0,40° drop from peak
+14.100,80.0,-36.20,0,0.340,34,0,40° drop from peak
+14.272,80.0,-36.20,0,0.340,34,0,40° drop from peak
+14.443,80.0,-36.20,0,0.340,34,0,40° drop from peak
+14.614,80.0,-36.20,0,0.340,34,0,40° drop from peak
+14.785,80.0,-36.20,0,0.340,34,0,40° drop from peak
+14.956,80.0,-36.20,0,0.340,34,0,40° drop from peak
+15.127,80.0,-36.20,0,0.340,34,0,40° drop from peak
+15.298,80.0,-36.20,0,0.340,34,0,40° drop from peak
+15.469,80.0,-36.20,0,0.340,34,0,40° drop from peak
+15.640,80.0,-36.20,0,0.340,34,0,40° drop from peak
+15.811,80.0,-36.20,0,0.340,34,0,40° drop from peak
+15.982,80.0,-36.20,0,0.340,34,0,40° drop from peak
+16.153,80.0,-36.20,0,0.340,34,0,40° drop from peak
+16.324,80.0,-36.20,0,0.340,34,0,40° drop from peak
+16.495,80.0,-36.20,0,0.340,34,0,40° drop from peak
+16.666,80.0,-36.20,0,0.340,34,0,40° drop from peak
+16.837,80.0,-36.20,0,0.340,34,0,40° drop from peak
+17.008,80.0,-36.20,0,0.340,34,0,40° drop from peak
+17.179,80.0,-36.20,0,0.340,34,0,40° drop from peak
+17.350,80.0,-36.20,0,0.340,34,0,40° drop from peak
+17.653,0.0,-36.20,0,0.340,34,0,return home
+17.824,0.0,-36.20,0,0.340,34,0,return home
+17.995,0.0,-36.20,0,0.340,34,0,return home
+18.167,0.0,-36.20,0,0.340,34,0,return home
+18.338,0.0,-36.20,0,0.340,34,0,return home
+18.509,0.0,-36.20,0,0.340,34,0,return home
+18.680,0.0,-36.20,0,0.340,34,0,return home
+18.851,0.0,-36.20,0,0.340,34,0,return home
+19.022,0.0,-36.20,0,0.340,34,0,return home
+19.193,0.0,-36.20,0,0.340,34,0,return home
+19.364,0.0,-36.20,0,0.340,34,0,return home
+19.535,0.0,-36.20,0,0.340,34,0,return home
+19.706,0.0,-36.20,0,0.340,34,0,return home
+19.878,0.0,-36.20,0,0.340,34,0,return home
+20.049,0.0,-36.20,0,0.340,34,0,return home
+20.220,0.0,-36.20,0,0.340,34,0,return home
+20.391,0.0,-36.20,0,0.340,34,0,return home
+20.562,0.0,-36.20,0,0.340,34,0,return home
+20.733,0.0,-36.20,0,0.340,34,0,return home
+20.904,0.0,-36.20,0,0.340,34,0,return home
+21.075,0.0,-36.20,0,0.340,34,0,return home
+21.247,0.0,-36.20,0,0.340,34,0,return home
+21.418,0.0,-36.20,0,0.340,34,0,return home
+21.588,0.0,-36.20,0,0.340,34,0,return home
+21.759,0.0,-36.20,0,0.340,34,0,return home

@@ -1,0 +1,139 @@
+time_s,commanded_deg,actual_deg,velocity_deg_s,speed_erpm,current_amps,temp_c,error_code,duty,loop,label
+0.002,0.0,-0.00,0.00,0,0.000,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+0.102,0.0,-0.00,0.00,0,-0.320,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+0.202,0.0,-0.00,0.00,0,-0.310,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+0.302,0.0,-0.00,0.00,0,-0.220,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+0.402,0.0,-0.00,0.00,0,-0.340,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+0.502,0.0,-0.00,0.00,0,-0.330,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+0.602,0.0,-0.00,0.00,0,-0.220,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+0.703,0.0,-0.00,0.00,0,-0.360,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+0.803,0.0,-0.00,0.00,0,-0.340,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+0.903,0.0,-0.00,0.00,0,-0.350,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+1.003,0.0,-0.00,0.00,0,-0.290,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+1.103,0.0,-0.00,0.00,0,-0.320,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+1.203,0.0,-0.00,0.00,0,-0.360,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+1.303,0.0,-0.00,0.00,0,0.000,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+1.404,0.0,-0.00,0.00,0,0.000,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+1.504,0.0,-0.00,0.00,0,0.000,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+1.604,0.0,-0.00,0.00,0,0.000,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+1.704,0.0,-0.00,0.00,0,0.000,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+1.804,0.0,-0.00,0.00,0,0.000,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+1.904,0.0,-0.00,0.00,0,0.000,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+2.004,0.0,-0.00,0.00,0,0.000,34,0,0.0,1/1,[1/1] home — arm hanging straight down (360° firmware)
+2.005,45.0,-0.00,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+2.105,45.0,-0.00,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+2.205,45.0,-0.00,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+2.305,45.0,-0.00,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+2.405,45.0,-0.00,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+2.506,45.0,-0.00,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+2.606,45.0,-0.00,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+2.706,45.0,-0.00,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+2.806,45.0,-0.00,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+2.906,45.0,-0.00,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+3.006,45.0,-0.00,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+3.106,45.0,-0.00,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+3.206,45.0,-0.00,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+3.306,45.0,-0.00,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+3.407,45.0,-0.00,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+3.507,45.0,-0.00,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+3.607,45.0,-0.00,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+3.707,45.0,0.40,4.00,-150,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+3.807,45.0,1.10,6.99,-70,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+3.907,45.0,1.80,6.99,-230,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+4.007,45.0,3.60,17.98,-110,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+4.107,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+4.207,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+4.307,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+4.407,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+4.508,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+4.608,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+4.708,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+4.808,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+4.908,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+5.008,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+5.108,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+5.208,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+5.309,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+5.409,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+5.509,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+5.609,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+5.709,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+5.809,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+5.909,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+6.009,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+6.110,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+6.210,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+6.310,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+6.410,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+6.510,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+6.610,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+6.710,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+6.810,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+6.910,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+7.010,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+7.111,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+7.211,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+7.311,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+7.411,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+7.511,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+7.611,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+7.711,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+7.811,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+7.911,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+8.011,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+8.112,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+8.212,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+8.312,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+8.412,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+8.512,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+8.612,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+8.712,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+8.812,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+8.912,45.0,3.60,0.00,0,0.000,34,0,-45.0,1/1,[1/1] mid-swing forward (315° firmware)
+9.003,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+9.103,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+9.203,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+9.303,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+9.403,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+9.503,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+9.603,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+9.704,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+9.804,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+9.904,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+10.004,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+10.104,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+10.204,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+10.304,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+10.404,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+10.504,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+10.605,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+10.705,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+10.805,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+10.905,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+11.005,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+11.105,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+11.205,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+11.305,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+11.405,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+11.506,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+11.606,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+11.706,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+11.806,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+11.906,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+12.006,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+12.106,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+12.206,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+12.306,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+12.406,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+12.507,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+12.607,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+12.707,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+12.807,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+12.907,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+13.007,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+13.107,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+13.207,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+13.307,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+13.407,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+13.507,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home
+13.608,0.0,3.60,0.00,0,0.000,34,0,0.0,,abort-return-home

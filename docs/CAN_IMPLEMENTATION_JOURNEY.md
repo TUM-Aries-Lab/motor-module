@@ -121,11 +121,28 @@ Healthy output shows `state ERROR-ACTIVE (berr-counter tx 0 rx 0)`.
 
 The motor has **two interfaces: UART and CAN**. UART has higher priority.
 
-- When a UART cable is connected, the motor **ignores all CAN control commands**.
+- When a UART / R-Link cable is connected, the motor **ignores all CAN control commands**.
 - The motor continues to broadcast its 50 Hz feedback via CAN even while UART is active.
-- CAN commands are transmitted but receive no ACK, causing the Jetson's CAN interface to accumulate TX errors and enter ERROR-PASSIVE state (`berr-counter tx 128+`).
+- CAN commands are transmitted but receive no ACK, causing the Jetson's CAN interface to accumulate TX errors and enter BUS-OFF state.
+- This is **silent** — Python scripts run to completion without error, motor shaft does not move, `Speed=0 ERPM, Cur=0.00A` in all feedback.
+- The Jetson's CAN controller can accumulate **116+ million bus errors and 966+ BUS-OFF crashes** in a single session before the problem is noticed.
+- The interface auto-restarts every 100 ms (`restart-ms 100`) but if the UART cable remains connected it enters BUS-OFF again immediately.
 
-**Fix:** Disconnect UART before using CAN control.
+**Fix:**
+1. Disconnect the UART / R-Link cable from the motor.
+2. Reset the CAN interface to clear the error state:
+   ```bash
+   sudo systemctl restart can0.service   # preferred (systemd)
+   # or
+   sudo ./setup_can.sh                   # manual
+   ```
+3. Verify the bus is clean before running scripts:
+   ```bash
+   ip -details link show can0
+   # Should show: state ERROR-ACTIVE (berr-counter tx 0 rx 0)
+   ```
+
+**How to diagnose:** If `candump can0` shows frames being echoed (your own TX frames appear) but no reply frames from the motor, UART is likely blocking CAN.
 
 ### 2. Extended vs Standard CAN IDs
 

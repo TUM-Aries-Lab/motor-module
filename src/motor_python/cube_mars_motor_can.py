@@ -16,7 +16,6 @@ from motor_python.definitions import (
     TendonAction,
 )
 
-
 # Error code descriptions from CubeMars CAN protocol spec (section 4.3.1)
 CAN_ERROR_CODES: dict[int, str] = {
     0: "No fault",
@@ -44,16 +43,18 @@ class CANMotorFeedback:
       [7]    — Error     : uint8, 0 = no fault, see CAN_ERROR_CODES
     """
 
-    position_degrees: float   # Motor position in degrees   (-3200° to +3200°)
-    speed_erpm: int           # Electrical speed in ERPM    (-320000 to +320000)
-    current_amps: float       # Phase current in amps        (-60 to +60 A)
+    position_degrees: float  # Motor position in degrees   (-3200° to +3200°)
+    speed_erpm: int  # Electrical speed in ERPM    (-320000 to +320000)
+    current_amps: float  # Phase current in amps        (-60 to +60 A)
     temperature_celsius: int  # Driver board temperature     (-20 to +127 °C)
-    error_code: int           # Fault code (0 = OK), see CAN_ERROR_CODES
+    error_code: int  # Fault code (0 = OK), see CAN_ERROR_CODES
 
     @property
     def error_description(self) -> str:
         """Human-readable error description from the CubeMars spec."""
-        return CAN_ERROR_CODES.get(self.error_code, f"Unknown error ({self.error_code})")
+        return CAN_ERROR_CODES.get(
+            self.error_code, f"Unknown error ({self.error_code})"
+        )
 
 
 class CANControlMode:
@@ -72,14 +73,14 @@ class CANControlMode:
       MIT         0x0868 — bit-packed (pos/vel/kp/kd/torque), see MIT protocol
     """
 
-    DUTY_CYCLE    = 0x00  # Duty cycle control  — PWM voltage fraction
-    CURRENT_LOOP  = 0x01  # IQ current control  — direct torque
+    DUTY_CYCLE = 0x00  # Duty cycle control  — PWM voltage fraction
+    CURRENT_LOOP = 0x01  # IQ current control  — direct torque
     CURRENT_BRAKE = 0x02  # Brake current mode  — hold with current
     VELOCITY_LOOP = 0x03  # Velocity loop        — ERPM setpoint
     POSITION_LOOP = 0x04  # Position loop        — degree setpoint
-    SET_ORIGIN    = 0x05  # Set origin          — define new zero
+    SET_ORIGIN = 0x05  # Set origin          — define new zero
     POSITION_VELOCITY = 0x06  # Pos + vel + acc profile
-    MIT_MODE      = 0x08  # MIT actuator protocol (bit-packed)
+    MIT_MODE = 0x08  # MIT actuator protocol (bit-packed)
 
 
 class CubeMarsAK606v3CAN:
@@ -142,10 +143,15 @@ class CubeMarsAK606v3CAN:
         #   0x2900 | id  — extended-ID scheme documented in CAN journey notes
         #   0x0080 | id  — standard-frame scheme (0x83 for id=3)
         #   id itself    — direct-match fallback
+        #   id + 1       — CubeMars firmware variant: feedback ID = motor_id + 1
+        #                  (observed: motor_id=0x03 → feedback on 0x04)
+        #   0x2900       — enable-response frame seen in candump (base, no motor_id suffix)
         self._feedback_ids: set[int] = {
             motor_can_id,
+            motor_can_id + 1,
             0x2900 | motor_can_id,
             0x0080 | motor_can_id,
+            0x2900,  # enable-response frame observed on bus (motor_id=0x03 setup)
         }
         if feedback_can_id is not None:
             self._feedback_ids.add(feedback_can_id)
@@ -166,13 +172,21 @@ class CubeMarsAK606v3CAN:
         :return: None
         """
         try:
-            # Only accept extended-ID feedback frames from this motor.
-            # An unknown device on the bus (0x0088) floods at ~30 kHz with
-            # standard 11-bit frames; without this filter it fills the socket
-            # receive buffer and starves every bus.recv() call.
-            feedback_id = 0x2900 | self.motor_can_id
+            # Kernel filter: accept only extended frames from this motor.
+            # Two filters cover both known feedback IDs:
+            #   0x2903 — periodic 50 Hz status broadcast (primary)
+            #   0x2900 — enable-response acknowledgment frame
+            # The 0x0088 standard-frame flood (~30 kHz) is blocked by these
+            # extended filters, preventing the receive queue from filling up
+            # and starving the motor frames.
+            # Note: CAN_EFF_FLAG is ORed into can_id by python-can for extended=True.
+            feedback_ids_to_filter = [
+                0x2900 | self.motor_can_id,  # 0x2903 — periodic status
+                0x2900,  # 0x2900 — enable ACK
+            ]
             can_filters = [
-                {"can_id": feedback_id, "can_mask": 0x1FFFFFFF, "extended": True}
+                {"can_id": fid, "can_mask": 0x1FFFFFFF, "extended": True}
+                for fid in feedback_ids_to_filter
             ]
             self.bus = can.interface.Bus(
                 channel=self.interface,
@@ -336,22 +350,31 @@ class CubeMarsAK606v3CAN:
         method should be called immediately after every bus.send() so the
         response is buffered and available to the next _receive_feedback() call.
 
+        Loops for the entire timeout window so that non-motor frames (e.g. the
+        0x0088 flood from an unrelated device) are skipped rather than causing
+        an immediate early return.
+
         :param timeout: How long to wait for the response frame (seconds).
         :return: None
         """
         if not self.connected or self.bus is None:
             return
+        deadline = time.monotonic() + timeout
         try:
-            msg = self.bus.recv(timeout=timeout)
-            if msg is None:
-                return
-            fb = self._parse_feedback_msg(msg)
-            if fb is not None:
-                self._pending_feedback = fb
-                self._last_feedback = fb
-                self._consecutive_no_response = 0
-                self.communicating = True
-            else:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return
+                msg = self.bus.recv(timeout=remaining)
+                if msg is None:
+                    return
+                fb = self._parse_feedback_msg(msg)
+                if fb is not None:
+                    self._pending_feedback = fb
+                    self._last_feedback = fb
+                    self._consecutive_no_response = 0
+                    self.communicating = True
+                    return
                 logger.debug(
                     f"_capture_response: ignoring 0x{msg.arbitration_id:08X} "
                     f"[{' '.join(f'{b:02X}' for b in msg.data)}]"
@@ -389,26 +412,33 @@ class CubeMarsAK606v3CAN:
             return None
 
         # Slow path: wait on the bus (caller sent a command externally, or
-        # motor is configured for periodic broadcast).
+        # motor is configured for periodic broadcast).  Loop for the full
+        # timeout window, skipping frames from unrelated devices (e.g. the
+        # 0x0088 flood) rather than returning None on the first non-motor frame.
+        deadline = time.monotonic() + timeout
         try:
-            msg = self.bus.recv(timeout=timeout)
-            if msg is None:
-                self._consecutive_no_response += 1
-                return None
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    self._consecutive_no_response += 1
+                    return None
+                msg = self.bus.recv(timeout=remaining)
+                if msg is None:
+                    self._consecutive_no_response += 1
+                    return None
 
-            fb = self._parse_feedback_msg(msg)
-            if fb is None:
+                fb = self._parse_feedback_msg(msg)
+                if fb is not None:
+                    self._last_feedback = fb
+                    self._consecutive_no_response = 0
+                    self.communicating = True
+                    return fb
+
                 logger.debug(
                     f"_receive_feedback: ignoring 0x{msg.arbitration_id:08X} "
                     f"[{' '.join(f'{b:02X}' for b in msg.data)}] "
                     f"(want one of {[hex(x) for x in sorted(self._feedback_ids)]})"
                 )
-                return None
-
-            self._last_feedback = fb
-            self._consecutive_no_response = 0
-            self.communicating = True
-            return fb
 
         except (can.CanError, Exception) as e:
             logger.error(f"CAN error receiving feedback: {e}")
@@ -428,13 +458,21 @@ class CubeMarsAK606v3CAN:
                                 is_extended_id=True,
                             )
                         )
-                        # Capture the one-shot reply without blocking long
-                        msg = self.bus.recv(timeout=0.015)
-                        if msg and msg.arbitration_id in self._feedback_ids:
+                        # Capture the one-shot reply — loop to skip non-motor
+                        # frames (e.g. 0x0088 flood) within the time budget.
+                        deadline = time.monotonic() + 0.015
+                        while True:
+                            remaining = deadline - time.monotonic()
+                            if remaining <= 0:
+                                break
+                            msg = self.bus.recv(timeout=remaining)
+                            if msg is None:
+                                break
                             fb = self._parse_feedback_msg(msg)
                             if fb:
                                 self._last_feedback = fb
                                 self.communicating = True
+                                break
                     except can.CanError:
                         pass
             self._refresh_stop.wait(self._refresh_interval)
@@ -765,7 +803,9 @@ class CubeMarsAK606v3CAN:
             logger.info(f"  Speed: {feedback.speed_erpm} ERPM")
             logger.info(f"  Current: {feedback.current_amps:.2f} A")
             logger.info(f"  Temperature: {feedback.temperature_celsius} °C")
-            logger.info(f"  Error Code: {feedback.error_code} — {feedback.error_description}")
+            logger.info(
+                f"  Error Code: {feedback.error_code} — {feedback.error_description}"
+            )
             logger.info("=" * 50)
         return feedback
 
@@ -806,18 +846,24 @@ class CubeMarsAK606v3CAN:
     def check_communication(self) -> bool:
         """Check whether the motor is alive and responding over CAN.
 
-        Sends no command — just listens for a feedback frame.  Call this
-        after enable_motor() to confirm the motor is ready before sending
-        control commands.
+        Sends an enable command to put the motor into servo mode, then listens
+        for a feedback frame.  The AK60-6 only transmits status frames while in
+        servo mode — a zero-duty or passive-listen approach will always time out
+        if the motor is currently disabled.
 
-        :return: True if at least one feedback frame is received, False if
-            the motor is silent (check power, wiring, and CAN ID).
+        Side effect: leaves the motor enabled (in servo mode) on success.
+        Call disable_motor() afterwards if you do not want it enabled.
+
+        :return: True if a feedback frame is received, False if the motor is
+            silent (check power, wiring, CAN ID, and UART cable).
         """
         if not self.connected:
             return False
 
-        # Try to receive feedback multiple times
+        # Send the enable command — this puts the motor into servo mode and
+        # triggers a feedback response.  Retry up to max_communication_attempts.
         for _attempt in range(MOTOR_DEFAULTS.max_communication_attempts):
+            self.enable_motor()
             feedback = self._receive_feedback(timeout=0.5)
             if feedback:
                 self.communicating = True

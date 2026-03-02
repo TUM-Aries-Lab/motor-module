@@ -39,6 +39,16 @@ If you ever need to reset manually: `sudo systemctl restart can0.service`
 
 See [docs/CAN_SETUP_GUIDE.md](docs/CAN_SETUP_GUIDE.md) for hardware wiring details.
 
+> **Critical — UART blocks CAN:** If the R-Link / UART cable is connected to the motor,
+> CAN commands are silently ignored. The motor still broadcasts 50 Hz feedback over CAN, but
+> it will not ACK any command frame — this fills the Jetson's TX error counter and pushes
+> the interface into BUS-OFF state (116 M+ errors observed in one session).
+> **Always disconnect the UART/R-Link cable before using CAN control.**
+> After connecting or disconnecting any cable, reset the interface:
+> ```bash
+> sudo systemctl restart can0.service   # or: sudo ./setup_can.sh
+> ```
+
 > **Important:** Only **duty cycle mode** (`arb_id = motor_id`) works on the current
 > CubeMars AK60-6 firmware. Velocity (0x0303), position (0x0403), and PVA (0x0603)
 > modes ACK but do **not** produce shaft rotation.
