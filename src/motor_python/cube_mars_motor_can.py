@@ -166,27 +166,166 @@ class CubeMarsAK606v3CAN:
 
         self._connect()
 
+    @staticmethod
+    def _get_can_state(interface: str = "can0") -> dict:
+        """Parse CAN controller state from the kernel via `ip` command.
+
+        :param interface: CAN interface name (e.g. 'can0').
+        :return: Dict with keys 'state', 'tx_err', 'rx_err'.
+        """
+        import subprocess
+
+        try:
+            result = subprocess.run(
+                ["ip", "-details", "-statistics", "link", "show", interface],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            output = result.stdout
+            state = "UNKNOWN"
+            tx_err = rx_err = 0
+            for line in output.splitlines():
+                if "state" in line and "berr-counter" in line:
+                    for part in line.split():
+                        if part in (
+                            "ERROR-ACTIVE",
+                            "ERROR-PASSIVE",
+                            "ERROR-WARNING",
+                            "BUS-OFF",
+                        ):
+                            state = part
+                    if "tx" in line:
+                        idx = line.index("tx")
+                        tx_err = int(line[idx:].split()[1])
+                    if "rx" in line:
+                        idx = line.index("rx")
+                        rx_err = int(line[idx:].split()[1].rstrip(")"))
+            return {"state": state, "tx_err": tx_err, "rx_err": rx_err}
+        except Exception as e:
+            logger.debug(f"Could not read CAN state: {e}")
+            return {"state": "UNKNOWN", "tx_err": 0, "rx_err": 0}
+
+    @staticmethod
+    def _reset_can_interface(interface: str = "can0", bitrate: int = 1000000) -> bool:
+        """Bring the CAN interface down and back up to clear error counters.
+
+        Requires passwordless sudo for ``ip link``.  If sudo is not available
+        or prompts for a password, the reset is skipped gracefully.
+
+        :param interface: CAN interface name.
+        :param bitrate: CAN bus bitrate.
+        :return: True if reset succeeded.
+        """
+        import subprocess
+
+        try:
+            # Use stdin=DEVNULL so sudo never blocks waiting for a password
+            devnull = subprocess.DEVNULL
+            result = subprocess.run(
+                ["sudo", "-n", "ip", "link", "set", interface, "down"],
+                capture_output=True,
+                stdin=devnull,
+                timeout=3,
+            )
+            if result.returncode != 0:
+                logger.warning(
+                    f"Cannot reset CAN (sudo -n failed): {result.stderr.decode().strip()}"
+                )
+                return False
+            subprocess.run(
+                [
+                    "sudo",
+                    "-n",
+                    "ip",
+                    "link",
+                    "set",
+                    interface,
+                    "up",
+                    "type",
+                    "can",
+                    "bitrate",
+                    str(bitrate),
+                ],
+                capture_output=True,
+                stdin=devnull,
+                timeout=3,
+            )
+            time.sleep(0.1)
+            logger.info(f"CAN interface {interface} reset successfully")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to reset CAN interface: {e}")
+            return False
+
     def _connect(self) -> None:
         """Establish CAN bus connection to motor.
+
+        Checks the CAN controller state first and resets the interface if it
+        is in ERROR-PASSIVE or BUS-OFF (accumulated errors from a previous
+        run).  Then opens the SocketCAN bus with kernel-level receive filters
+        that accept every known motor feedback ID while blocking unrelated
+        traffic (e.g. the 0x0088 standard-frame flood).
 
         :return: None
         """
         try:
-            # Kernel filter: accept only extended frames from this motor.
-            # Two filters cover both known feedback IDs:
-            #   0x2903 — periodic 50 Hz status broadcast (primary)
-            #   0x2900 — enable-response acknowledgment frame
-            # The 0x0088 standard-frame flood (~30 kHz) is blocked by these
-            # extended filters, preventing the receive queue from filling up
-            # and starving the motor frames.
-            # Note: CAN_EFF_FLAG is ORed into can_id by python-can for extended=True.
-            feedback_ids_to_filter = [
-                0x2900 | self.motor_can_id,  # 0x2903 — periodic status
-                0x2900,  # 0x2900 — enable ACK
-            ]
+            # ── Pre-flight: ensure the CAN controller is healthy ──────────
+            bus_state = self._get_can_state(self.interface)
+            logger.info(
+                f"CAN bus state: {bus_state['state']}  "
+                f"(tx_err={bus_state['tx_err']} rx_err={bus_state['rx_err']})"
+            )
+            if bus_state["state"] in ("ERROR-PASSIVE", "BUS-OFF", "ERROR-WARNING"):
+                logger.warning(f"CAN bus in {bus_state['state']} — attempting recovery")
+                # Try an explicit reset first (requires passwordless sudo).
+                if not self._reset_can_interface(self.interface, self.bitrate):
+                    # No sudo — rely on the kernel's restart-ms auto-recovery.
+                    # setup_can.sh configures restart-ms 100 which auto-restarts
+                    # the controller after 100 ms in BUS-OFF.  Wait up to 500 ms
+                    # for the kernel to recover.
+                    logger.info("Waiting for kernel auto-recovery (restart-ms 100)...")
+                    for _ in range(5):
+                        time.sleep(0.15)
+                        bus_state = self._get_can_state(self.interface)
+                        if bus_state["state"] == "ERROR-ACTIVE":
+                            break
+                bus_state = self._get_can_state(self.interface)
+                logger.info(f"After recovery: {bus_state['state']}")
+
+            # ── Kernel CAN filters ────────────────────────────────────────
+            # Accept every ID the motor firmware is known to use for
+            # feedback / ACKs.  The 0x0088 standard-frame flood from
+            # unrelated devices is blocked because it matches none of
+            # these filters.
+            #
+            # Known response IDs (motor_id = 0x03):
+            #   0x2903 — extended 29-bit status (mode 0x29 | motor_id)
+            #   0x2900 — extended 29-bit enable ACK
+            #   0x0004 — extended 29-bit (motor_id + 1, firmware variant)
+            #   0x0003 — extended 29-bit (motor_id itself, direct echo)
+            #   0x0083 — extended 29-bit (0x80 | motor_id, variant)
             can_filters = [
-                {"can_id": fid, "can_mask": 0x1FFFFFFF, "extended": True}
-                for fid in feedback_ids_to_filter
+                {
+                    "can_id": 0x2900 | self.motor_can_id,
+                    "can_mask": 0x1FFFFFFF,
+                    "extended": True,
+                },
+                {"can_id": 0x2900, "can_mask": 0x1FFFFFFF, "extended": True},
+                {
+                    "can_id": self.motor_can_id + 1,
+                    "can_mask": 0x1FFFFFFF,
+                    "extended": True,
+                },
+                {"can_id": self.motor_can_id, "can_mask": 0x1FFFFFFF, "extended": True},
+                {
+                    "can_id": 0x0080 | self.motor_can_id,
+                    "can_mask": 0x1FFFFFFF,
+                    "extended": True,
+                },
+                # Also accept standard-frame variant of motor_id+1 in case
+                # firmware sends standard (11-bit) frames.
+                {"can_id": self.motor_can_id + 1, "can_mask": 0x7FF, "extended": False},
             ]
             self.bus = can.interface.Bus(
                 channel=self.interface,
@@ -322,7 +461,24 @@ class CubeMarsAK606v3CAN:
         current_amps = current_int * 0.01
 
         # Temperature: int8, range -20..127 → -20..127 °C (driver board, direct)
-        temperature_celsius = struct.unpack("b", bytes([msg.data[6]]))[0]
+        temperature_raw = struct.unpack("b", bytes([msg.data[6]]))[0]
+        # Validate: the driver board temperature must be physically plausible.
+        # At startup the enable-response frame sometimes carries uninitialised
+        # data in byte 6 (observed: -112, -120, -104 °C).  Clamp to the spec
+        # range and fall back to the last known good reading if available.
+        if -20 <= temperature_raw <= 127:
+            temperature_celsius = temperature_raw
+        else:
+            logger.debug(
+                f"Temperature out of range ({temperature_raw} °C) — "
+                f"using last known value"
+            )
+            temperature_celsius = (
+                self._last_feedback.temperature_celsius
+                if self._last_feedback is not None
+                and -20 <= self._last_feedback.temperature_celsius <= 127
+                else 0
+            )
 
         # Error code: uint8 (0=OK, 1-7 see CAN_ERROR_CODES)
         error_code = msg.data[7]
@@ -342,19 +498,22 @@ class CubeMarsAK606v3CAN:
         )
         return feedback
 
-    def _capture_response(self, timeout: float = 0.05) -> None:
+    def _capture_response(self, timeout: float = 0.20) -> None:
         """Read the motor's one-shot response frame and store it as pending feedback.
 
         The AK60-6 (in its default CubeMars firmware mode) sends exactly one
-        0x2903 status frame in response to each command it receives.  This
-        method should be called immediately after every bus.send() so the
-        response is buffered and available to the next _receive_feedback() call.
+        status frame in response to each command it receives.  This method
+        should be called immediately after every bus.send() so the response
+        is buffered and available to the next _receive_feedback() call.
 
         Loops for the entire timeout window so that non-motor frames (e.g. the
         0x0088 flood from an unrelated device) are skipped rather than causing
         an immediate early return.
 
         :param timeout: How long to wait for the response frame (seconds).
+            Default 200 ms — the motor typically replies within 2 ms but we
+            allow plenty of margin for bus contention, ERROR-WARNING
+            recovery, and kernel scheduling jitter.
         :return: None
         """
         if not self.connected or self.bus is None:
@@ -792,10 +951,21 @@ class CubeMarsAK606v3CAN:
           - temperature_celsius — driver board temperature
           - error_code          — 0 = no fault (see FaultCode in definitions.py)
 
-        :return: CANMotorFeedback dataclass, or None if the motor does not
-            respond within 0.5 s.
+        The AK60-6 is response-only: it sends one status frame per command
+        received.  If the command response was already captured by
+        _capture_response() or the refresh thread, this returns that buffered
+        frame.  Otherwise, falls back to the most recent feedback (_last_feedback)
+        which is kept fresh by the 50 Hz refresh loop during active control.
+
+        :return: CANMotorFeedback dataclass, or None if the motor has never
+            responded (e.g. not yet enabled or cable disconnected).
         """
         feedback = self._receive_feedback(timeout=0.5)
+        if feedback is None:
+            # The motor is response-only — if no new frame arrived, return
+            # the most recent feedback from the refresh thread or a prior
+            # command.  This mirrors get_position() / get_temperature().
+            feedback = self._last_feedback
         if feedback:
             logger.info("=" * 50)
             logger.info("MOTOR STATUS:")
@@ -861,18 +1031,26 @@ class CubeMarsAK606v3CAN:
             return False
 
         # Send the enable command — this puts the motor into servo mode and
-        # triggers a feedback response.  Retry up to max_communication_attempts.
-        for _attempt in range(MOTOR_DEFAULTS.max_communication_attempts):
+        # triggers a feedback response.  The motor is response-only (no
+        # autonomous broadcast) so we must actively command it each attempt.
+        max_attempts = max(MOTOR_DEFAULTS.max_communication_attempts, 5)
+        for attempt in range(1, max_attempts + 1):
+            logger.debug(f"check_communication attempt {attempt}/{max_attempts}")
             self.enable_motor()
+            # enable_motor() already calls _capture_response(200 ms).
+            # If the reply was captured, _pending_feedback is set.
             feedback = self._receive_feedback(timeout=0.5)
             if feedback:
                 self.communicating = True
                 self._consecutive_no_response = 0
-                logger.info("Motor communication verified")
+                logger.info(f"Motor communication verified on attempt {attempt}")
                 return True
             time.sleep(MOTOR_DEFAULTS.communication_retry_delay)
 
-        logger.warning("Motor not responding - no feedback messages received")
+        logger.warning(
+            f"Motor not responding after {max_attempts} attempts — "
+            "check power, wiring, CAN ID, and ensure UART cable is disconnected"
+        )
         self.communicating = False
         return False
 
