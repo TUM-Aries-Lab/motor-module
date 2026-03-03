@@ -1,383 +1,715 @@
-"""Motion capture validation script — arm sweep with IMU.
+"""Motion capture validation — duty-cycle P-controller sine sweep.
 
-Moves an arm attached to the motor through a defined angle sequence while
-logging motor feedback at 20 Hz to a CSV file.  The CSV can be compared
-against the motion capture / IMU data to verify angle and velocity accuracy.
+Motor: CubeMars AK60-6 v3, CAN ID 0x03, CAN bus (can0, 1 Mbps).
 
-Uses DUTY CYCLE mode (arb_id = motor_id = 0x03) was tested first, but the
-confirmed working mode is POSITION-VELOCITY LOOP (0x0603 for motor_id=0x03).
-Position loop (0x0403) and position-velocity loop (0x0603) were previously
-noted as not working, but that was before the UART cable was disconnected.
-See docs/CAN_IMPLEMENTATION_JOURNEY.md for full details.
+The 100 ms CAN watchdog only resets from frames on arb_id = MOTOR_ID (0x03).
+Position-mode (0x0403) and velocity-mode (0x0303) do NOT feed the watchdog
+and the motor goes silent after ~100 ms.  Therefore we use **duty-cycle
+control** on arb_id 0x03 with a software proportional controller.
 
-Leg sequence (motor zero = leg hanging straight down, right-side only):
-  0°  → 45°   swing leg forward to mid-range
-  45° → 65°   push to peak forward angle
-  65° → 30°   partial return through mid
-  30° →  0°   return to home
+The motor's 0x0088 standard-frame flood is handled by draining the receive
+buffer until a valid feedback frame is found within a 15 ms deadline.
 
-  The arm NEVER goes below 0° (left side).  If the PID overshoots below
-  MIN_ANGLE a corrective duty is applied immediately to push it back.
+Physical angle convention (cable-drive joint):
+  phys = 0 deg  → arm hanging straight down (gravity rest)
+  phys increases → arm swings forward / up
+  fw_target = fw_home + phys * _fw_dir
+
+Motion sequence
+---------------
+  1.  0 → 90 deg    raise arm to parallel
+  2.  90 → 120 deg  swing 30 deg above parallel
+  3.  Sine wave      oscillate 120 ↔ 60 deg for ~10 s
+  4.  → 0 deg        coast back to gravity hang
 
 Run:
-    sudo ./setup_can.sh          # bring up can0 if not already up
+    sudo ./setup_can.sh
     source .venv/bin/activate
     python motion_capture_test.py
-
-Output CSV is saved to data/logs/mocap_<timestamp>.csv
 """
 
 import csv
+import math
+import struct
 import time
 from datetime import datetime
 from pathlib import Path
 
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+import can
 
-# ---------------------------------------------------------------------------
-# CAN / motor constants
-# ---------------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────
+# Hardware
+# ──────────────────────────────────────────────────────────────────────────
+MOTOR_ID  = 0x03
+INTERFACE = "can0"
+DUTY_ARB  = MOTOR_ID          # 0x03 — duty-cycle frames (keeps watchdog alive)
 
-MOTOR_ID    = 0x03   # CAN ID of the motor
-INTERFACE   = "can0"
+# ──────────────────────────────────────────────────────────────────────────
+# CAN payloads
+# ──────────────────────────────────────────────────────────────────────────
+ENABLE_CMD  = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC])
+DISABLE_CMD = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD])
+STOP_CMD    = struct.pack(">i", 0) + bytes(4)   # duty = 0%
 
-# ---------------------------------------------------------------------------
-# Motion parameters — adjust to taste
-# ---------------------------------------------------------------------------
+# Feedback arbitration IDs (motor may use any of these variants)
+FEEDBACK_IDS = {
+    MOTOR_ID,
+    MOTOR_ID + 1,            # 0x04  — firmware variant
+    0x2900 | MOTOR_ID,       # 0x2903
+    0x2900,                   # enable-response
+    0x0080 | MOTOR_ID,       # 0x0083
+}
 
-HOLD_TIME   = 15.0       # max seconds per waypoint before moving on
-SAMPLE_HZ   = 20         # CSV log rate
-LOG_DIR     = Path(__file__).parent / "data" / "logs"
+# ──────────────────────────────────────────────────────────────────────────
+# P-controller
+# ──────────────────────────────────────────────────────────────────────────
+KP        = 0.005        # duty per degree of error (proportional gain)
+KD        = 0.000015     # duty per ERPM (damping — reduces overshoot)
+MAX_DUTY  = 0.30         # 30% absolute max — needed to fight gravity at 90°+
+DEADBAND  = 1.0          # degrees — no correction below this error
 
-# Motor direction: +1 if positive duty → positive angle, -1 if reversed.
-# Set to -1 when physical wiring/gearbox causes positive duty to drive
-# the leg toward negative firmware angles (observed empirically).
-MOTOR_DIRECTION = -1
+# ──────────────────────────────────────────────────────────────────────────
+# Motion parameters
+# ──────────────────────────────────────────────────────────────────────────
+WAYPOINT_SETTLE_DEG  = 5.0
+WAYPOINT_SETTLE_ERPM = 500
+WAYPOINT_SETTLE_TIME = 1.5
+WAYPOINT_TIMEOUT     = 20.0
 
-# ---------------------------------------------------------------------------
-# Position-Velocity loop parameters
-# ---------------------------------------------------------------------------
-# Uses CAN mode 0x0603 (position-velocity loop): one frame sets target angle,
-# max speed, and acceleration.  The motor's own trapezoidal position controller
-# handles everything — no software PID needed.
-#
-# Firmware target = initial_pos + (physical_target × MOTOR_DIRECTION)
-# Physical frame : 0° = start, positive = forward (always, regardless of wiring)
+SINE_CENTER   = 90.0    # degrees
+SINE_AMP      = 30.0    # degrees
+SINE_PERIOD   = 6.0     # seconds
+SINE_DURATION = 90.0    # seconds (~15 full cycles at 6s period)
 
-MOVE_SPEED_ERPM = 5000   # max travel speed (ERPM) — motor decelerates into target
-MOVE_ACCEL      = 2000   # acceleration profile (ERPM/s) — 0 = firmware default
-TOLERANCE  = 3.0          # degrees — considered arrived within this band
-HOLD_AFTER = 2.0          # seconds to confirm settled before next waypoint
-LOOP_HZ    = 10           # position-poll rate (motor handles motion internally)
+ROT_GUARD_NEG = 25.0
+ROT_GUARD_POS = 175.0
+PHYS_MIN      = -20.0
+PHYS_MAX      = 190.0
+MAX_SAFE_ERPM = 3000    # coast to a stop if speed exceeds this during sine sweep
+BRAKE_ERPM    = 1000    # resume normal control once speed drops below this
 
-# Safety clamp — single-turn mode, half-rotation limit
-# Firmware setup (in CubeMars software):
-#   - Single rotation mode enabled (encoder range 0°..360°)
-#   - Arm hanging straight down = 360° (home position)
-#   - Forward swing decreases firmware angle: 360° → 315° → 180°
-#   - Hard stop at 180° firmware = 180° physical (arm fully forward)
-#   - NEVER drive below 180° firmware — that crosses to the wrong side
-# Physical frame (what PID sees): 0° = home, +° = forward, max = 180°
-MIN_ANGLE  = 0.0      # degrees — never go behind home position
-MAX_ANGLE  = 180.0    # degrees — hard limit: half rotation forward only
+LOOP_HZ   = 50
+SAMPLE_HZ = 20
 
-# ---------------------------------------------------------------------------
-# Waypoint sequence  (PHYSICAL degrees from startup position)
-# ---------------------------------------------------------------------------
-# Physical frame: 0° = arm at bottom (firmware ≈360°), positive = forward swing.
-# Firmware counts DOWN as arm swings forward (MOTOR_DIRECTION = -1).
-# All waypoints must be within [0° .. 180°] physical (half-rotation limit).
+LOG_DIR = Path(__file__).parent / "data" / "logs"
 
-BASE_WAYPOINTS = [
-    (  0.0, "home — arm hanging straight down (360° firmware)"),
-    ( 45.0, "mid-swing forward (315° firmware)"),
-    ( 65.0, "peak forward swing (295° firmware)"),
-    ( 30.0, "partial return through mid (330° firmware)"),
-    (  0.0, "return home (360° firmware)"),
-]
-
+# ──────────────────────────────────────────────────────────────────────────
+# Direction state  (set by detect_fw_dir)
+# ──────────────────────────────────────────────────────────────────────────
+_fw_dir: int = +1   # +1 means fw increases as phys increases (normal cable)
 
 
+def phys_to_fw(phys: float, fw_home: float) -> float:
+    return fw_home + phys * _fw_dir
 
-# ---------------------------------------------------------------------------
-# Core move-and-sample loop
-# ---------------------------------------------------------------------------
 
-def move_and_sample(
-    motor: CubeMarsAK606v3CAN,
-    target_degrees: float,
+def fw_to_phys(fw: float, fw_home: float) -> float:
+    return (fw - fw_home) * _fw_dir
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# CAN helpers
+# ──────────────────────────────────────────────────────────────────────────
+
+def tx(bus: can.BusABC, data: bytes, arb_id: int = DUTY_ARB) -> None:
+    try:
+        bus.send(can.Message(arbitration_id=arb_id, data=data, is_extended_id=True))
+    except can.CanOperationError:
+        pass
+
+
+def duty_frame(duty: float) -> bytes:
+    """Encode duty [-1.0 .. +1.0] as 8-byte CAN payload."""
+    duty = max(-1.0, min(1.0, duty))
+    raw = int(duty * 100_000)
+    return struct.pack(">i", raw) + bytes(4)
+
+
+def tx_duty(bus: can.BusABC, duty: float) -> None:
+    """Send a duty-cycle command on arb_id=MOTOR_ID (keeps watchdog alive)."""
+    tx(bus, duty_frame(duty), arb_id=DUTY_ARB)
+
+
+def read_feedback(bus: can.BusABC, deadline_ms: float = 15.0):
+    """Drain 0x0088 flood and return the first valid feedback frame.
+
+    Loops through received CAN frames for up to *deadline_ms* milliseconds,
+    skipping non-feedback frames (e.g. the 0x0088 flood).
+
+    Returns (pos_deg, erpm, cur_A, temp_C, err_code) or None.
+    """
+    deadline = time.monotonic() + deadline_ms / 1000.0
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        msg = bus.recv(timeout=remaining)
+        if msg is None:
+            return None
+        if msg.arbitration_id not in FEEDBACK_IDS:
+            continue          # skip 0x0088 and other noise
+        d = msg.data
+        if len(d) < 8:
+            continue
+        pos_deg = struct.unpack(">h", d[0:2])[0] * 0.1
+        erpm    = struct.unpack(">h", d[2:4])[0] * 10
+        cur_a   = struct.unpack(">h", d[4:6])[0] * 0.01
+        temp_c  = d[6]
+        err     = d[7]
+        return pos_deg, erpm, cur_a, temp_c, err
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# P-controller
+# ──────────────────────────────────────────────────────────────────────────
+
+def compute_duty(error_phys: float, speed_erpm: int) -> float:
+    """Proportional-derivative controller → duty command.
+
+    error_phys: target_phys - actual_phys  (positive = need to swing forward)
+    speed_erpm: current motor speed in ERPM (feedback)
+
+    Returns duty in [-MAX_DUTY, +MAX_DUTY], in the fw direction.
+    """
+    if abs(error_phys) < DEADBAND:
+        return 0.0
+    p = KP * error_phys
+    d = KD * speed_erpm * _fw_dir   # damping: opposes motion in phys-space
+    duty_phys = p - d
+    # Convert to fw-space duty
+    duty_fw = duty_phys * _fw_dir
+    return max(-MAX_DUTY, min(MAX_DUTY, duty_fw))
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Init
+# ──────────────────────────────────────────────────────────────────────────
+
+def find_home(bus: can.BusABC) -> float:
+    """Coast arm to gravity hang and return fw_home (= physical 0°)."""
+    STILL_ERPM = 200
+    STILL_TIME = 1.5
+    TIMEOUT    = 15.0
+
+    print("  Waiting for arm to settle at gravity home...", end="", flush=True)
+    t0       = time.monotonic()
+    still_at = None
+    fw_home  = None
+    last_fw  = None
+
+    while time.monotonic() - t0 < TIMEOUT:
+        tx(bus, STOP_CMD)
+        fb = read_feedback(bus)
+        if fb is None:
+            time.sleep(0.01)
+            continue
+        fw_pos, spd, *_ = fb
+        last_fw = fw_pos
+        now = time.monotonic()
+        if abs(spd) < STILL_ERPM:
+            if still_at is None:
+                still_at = now
+            elif now - still_at >= STILL_TIME:
+                fw_home = fw_pos
+                break
+        else:
+            still_at = None
+        time.sleep(0.01)
+
+    fw_home = fw_home if fw_home is not None else (last_fw or 0.0)
+    print(f" settled  fw_home={fw_home:.1f} deg")
+    return fw_home
+
+
+def detect_fw_dir(bus: can.BusABC, fw_home: float) -> int:
+    """Determine sign of fw_pos vs physical angle with a brief duty pulse.
+
+    Sends a small positive duty for 1 s, observes which way fw_pos moves.
+    """
+    global _fw_dir
+
+    TEST_DUTY = 0.02     # 2% — gentle nudge
+    TEST_SEC  = 0.5
+    DEADZONE  = 0.5      # degrees
+
+    print("  Detecting fw direction (1 s duty pulse)...", end="", flush=True)
+
+    # Flush stale frames
+    while bus.recv(timeout=0.01):
+        pass
+
+    fw_start = None
+    fw_end   = fw_home
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < TEST_SEC:
+        tx_duty(bus, TEST_DUTY)
+        fb = read_feedback(bus)
+        if fb:
+            if fw_start is None:
+                fw_start = fb[0]
+            fw_end = fb[0]
+        time.sleep(0.01)
+
+    if fw_start is None:
+        fw_start = fw_home
+
+    # Coast back
+    for _ in range(40):
+        tx(bus, STOP_CMD)
+        time.sleep(0.015)
+
+    delta = fw_end - fw_start
+    if abs(delta) < DEADZONE:
+        print(f" no movement ({delta:+.1f} deg) — keeping _fw_dir={_fw_dir:+d}")
+    elif delta > 0:
+        _fw_dir = +1
+        print(f" fw moved {delta:+.1f} deg → _fw_dir=+1  (positive duty = forward)")
+    else:
+        _fw_dir = -1
+        print(f" fw moved {delta:+.1f} deg → _fw_dir=-1  [INVERTED]")
+
+    return _fw_dir
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Safety
+# ──────────────────────────────────────────────────────────────────────────
+
+def check_safety(fw_pos: float, fw_home: float) -> str | None:
+    fw_delta = fw_pos - fw_home
+    phys     = fw_to_phys(fw_pos, fw_home)
+    if fw_delta < -ROT_GUARD_NEG:
+        return f"ROT GUARD NEG: fw_delta={fw_delta:+.1f}"
+    if fw_delta > ROT_GUARD_POS:
+        return f"ROT GUARD POS: fw_delta={fw_delta:+.1f}"
+    if phys < PHYS_MIN:
+        return f"PHYS MIN: phys={phys:.1f}"
+    if phys > PHYS_MAX:
+        return f"PHYS MAX: phys={phys:.1f}"
+    return None
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Motion primitives
+# ──────────────────────────────────────────────────────────────────────────
+
+def move_to(
+    bus: can.BusABC,
+    phys_tgt: float,
+    fw_home: float,
     label: str,
     writer: csv.DictWriter,
     t0: float,
-    initial_pos: float,
-    *,
-    phys_min: float = -5.0,
-    phys_max: float = MAX_ANGLE,
-) -> None:
-    """Move to target_degrees (PHYSICAL degrees from startup) via position-velocity loop.
+) -> bool:
+    """Drive arm to phys_tgt using P-controller on duty-cycle.
 
-    Converts physical target → firmware degrees, sends one
-    set_position_velocity_accel() command, then polls feedback until the
-    motor settles within TOLERANCE for HOLD_AFTER seconds.  The motor's own
-    trapezoidal controller handles speed and deceleration — no software PID.
+    Returns True on success, False on safety abort.
     """
-    # Convert physical target → absolute firmware degrees.
-    # phys = (firmware - initial_pos) * MOTOR_DIRECTION  →  firmware = initial_pos + phys * MOTOR_DIRECTION
-    # Normalise into [0°, 360°) — single-turn mode firmware rejects negative values.
-    firmware_target = (initial_pos + target_degrees * MOTOR_DIRECTION) % 360.0
-    print(f"\n  ▶  Moving to {target_degrees:+.1f}° physical  "
-          f"(firmware = {firmware_target:.1f}°)  —  {label}")
-
-    # Safety: reject targets outside physical bounds before sending anything.
-    if target_degrees < phys_min or target_degrees > phys_max:
-        print(f"  ⚠  Target {target_degrees:.1f}° outside bounds "
-              f"[{phys_min:.0f}°..{phys_max:.0f}°] — skipping")
-        return
-
-    # Issue the command once — the refresh thread repeats it at 50 Hz.
-    motor.set_position_velocity_accel(
-        position_degrees=firmware_target,
-        velocity_erpm=MOVE_SPEED_ERPM,
-        accel_erpm_per_sec=MOVE_ACCEL,
-    )
-
-    last_csv_t = -1.0
-    csv_interval = 1.0 / SAMPLE_HZ
-    settled_at = None
-    deadline   = time.monotonic() + HOLD_TIME
     loop_dt    = 1.0 / LOOP_HZ
-    prev_phys  = None
-    prev_time  = None
+    csv_dt     = 1.0 / SAMPLE_HZ
+    last_csv   = -1.0
+    settled_at = None
+    deadline   = time.monotonic() + WAYPOINT_TIMEOUT
+    no_fb      = 0
+
+    print(f"\n  >> MOVE  target={phys_tgt:+.1f} deg  [{label}]")
 
     while True:
-        tick_start = time.monotonic()
+        tick = time.monotonic()
 
-        fb = motor._last_feedback
+        # Will compute duty after reading feedback
+        fb = read_feedback(bus)
         if fb is None:
-            fb = motor.get_status()
-            if fb is None:
-                print("  ⚠  feedback lost", end="\r")
-                time.sleep(loop_dt)
-                continue
+            # Keep watchdog alive even without feedback
+            tx(bus, STOP_CMD)
+            no_fb += 1
+            if no_fb % 50 == 0:
+                print(f"  ⚠ no feedback ({no_fb} ticks)", end="\r")
+            elapsed = tick - tick  # can't compute
+            time.sleep(max(loop_dt - (time.monotonic() - tick), 0.005))
+            continue
+        no_fb = 0
 
-        firmware_pos = fb.position_degrees
-        spd          = fb.speed_erpm
-        cur          = fb.current_amps
-        tmp          = fb.temperature_celsius
-        err_code     = fb.error_code
-        now          = time.monotonic()
+        fw_pos, spd, cur, tmp, err_code = fb
+        now    = time.monotonic()
+        phys   = fw_to_phys(fw_pos, fw_home)
+        err    = phys_tgt - phys
+        elapsed = now - t0
 
-        phys_pos = (firmware_pos - initial_pos) * MOTOR_DIRECTION
-        error    = target_degrees - phys_pos
+        # Safety
+        fault = check_safety(fw_pos, fw_home)
+        if fault:
+            tx(bus, STOP_CMD)
+            print(f"\n  !! {fault} — aborting")
+            return False
 
-        d_error = 0.0
-        if prev_phys is not None and prev_time is not None:
-            dt = now - prev_time
-            if dt > 0.001:
-                d_error = (phys_pos - prev_phys) / dt
-        prev_phys = phys_pos
-        prev_time = now
+        # P-controller
+        duty = compute_duty(err, spd)
+        tx_duty(bus, duty)
 
-        if abs(error) < TOLERANCE:
+        # CSV logging
+        if elapsed - last_csv >= csv_dt:
+            last_csv = elapsed
+            writer.writerow({
+                "time_s":        f"{elapsed:.3f}",
+                "label":         label,
+                "commanded_deg": f"{phys_tgt:.1f}",
+                "actual_deg":    f"{phys:.2f}",
+                "error_deg":     f"{err:.2f}",
+                "duty":          f"{duty:.5f}",
+                "speed_erpm":    spd,
+                "current_amps":  f"{cur:.3f}",
+                "temp_c":        tmp,
+                "error_code":    err_code,
+            })
+
+        print(
+            f"    t={elapsed:6.2f}s  phys={phys:+7.2f}  err={err:+6.1f}  "
+            f"duty={duty:+.4f}  erpm={spd:+6d}  cur={cur:+5.2f}A",
+            end="\r",
+        )
+
+        # Settle check
+        if abs(err) < WAYPOINT_SETTLE_DEG and abs(spd) < WAYPOINT_SETTLE_ERPM:
             if settled_at is None:
                 settled_at = now
         else:
             settled_at = None
 
+        if settled_at is not None and (now - settled_at) >= WAYPOINT_SETTLE_TIME:
+            print(f"\n  ✓ Settled at phys={phys:+.2f} (err={err:+.2f})")
+            return True
+
+        if now >= deadline:
+            print(f"\n  ⏱ Timeout — phys={phys:+.2f} err={err:+.2f}")
+            return True
+
+        time.sleep(max(loop_dt - (time.monotonic() - tick), 0.001))
+
+
+def sine_sweep(
+    bus: can.BusABC,
+    fw_home: float,
+    writer: csv.DictWriter,
+    t0: float,
+) -> bool:
+    """Oscillate arm sinusoidally: phys(t) = 90 + 30·cos(2πt/6) for 10 s.
+
+    Starts at 120° (cos(0)=1) and ends near 120° after ~1.67 full cycles.
+    """
+    loop_dt  = 1.0 / LOOP_HZ
+    csv_dt   = 1.0 / SAMPLE_HZ
+    last_csv = -1.0
+    no_fb    = 0
+    label    = "sine-sweep"
+
+    t_start = time.monotonic()
+    t_end   = t_start + SINE_DURATION
+
+    print(
+        f"\n  >> SINE  {SINE_CENTER}±{SINE_AMP} deg  "
+        f"period={SINE_PERIOD}s  duration={SINE_DURATION}s"
+    )
+
+    while True:
+        tick = time.monotonic()
+        t    = tick - t_start
+        if tick >= t_end:
+            print(f"\n  ✓ Sine sweep complete ({SINE_DURATION:.0f} s)")
+            break
+
+        phys_tgt = SINE_CENTER + SINE_AMP * math.cos(2 * math.pi * t / SINE_PERIOD)
+
+        fb = read_feedback(bus)
+        if fb is None:
+            tx(bus, STOP_CMD)
+            no_fb += 1
+            time.sleep(max(loop_dt - (time.monotonic() - tick), 0.005))
+            continue
+        no_fb = 0
+
+        fw_pos, spd, cur, tmp, err_code = fb
+        now    = time.monotonic()
+        phys   = fw_to_phys(fw_pos, fw_home)
+        err    = phys_tgt - phys
         elapsed = now - t0
-        if elapsed - last_csv_t >= csv_interval:
-            last_csv_t = elapsed
+
+        fault = check_safety(fw_pos, fw_home)
+        if fault:
+            tx(bus, STOP_CMD)
+            print(f"\n  !! {fault} — aborting sine")
+            return False
+
+        # Speed brake: if motor is moving too fast, coast until it slows down
+        if abs(spd) > MAX_SAFE_ERPM:
+            print(f"\n  ⚡ Speed brake: {spd:+d} ERPM > {MAX_SAFE_ERPM} — coasting...",
+                  end="", flush=True)
+            while abs(spd) > BRAKE_ERPM:
+                tx(bus, STOP_CMD)
+                fb2 = read_feedback(bus)
+                if fb2:
+                    spd = fb2[1]
+                    # Update phys and log while braking
+                    phys = fw_to_phys(fb2[0], fw_home)
+                    now2 = time.monotonic()
+                    elapsed2 = now2 - t0
+                    if elapsed2 - last_csv >= csv_dt:
+                        last_csv = elapsed2
+                        writer.writerow({
+                            "time_s":        f"{elapsed2:.3f}",
+                            "label":         "brake",
+                            "commanded_deg": f"{phys_tgt:.2f}",
+                            "actual_deg":    f"{phys:.2f}",
+                            "error_deg":     f"{phys_tgt - phys:.2f}",
+                            "duty":          "0.00000",
+                            "speed_erpm":    spd,
+                            "current_amps":  f"{fb2[2]:.3f}",
+                            "temp_c":        fb2[3],
+                            "error_code":    fb2[4],
+                        })
+                time.sleep(0.01)
+            print(f" resumed at {spd:+d} ERPM")
+
+        duty = compute_duty(err, spd)
+        tx_duty(bus, duty)
+
+        if elapsed - last_csv >= csv_dt:
+            last_csv = elapsed
             writer.writerow({
-                "time_s":         f"{elapsed:.3f}",
-                "commanded_deg":  f"{target_degrees:.1f}",
-                "actual_deg":     f"{phys_pos:.2f}",
-                "velocity_deg_s": f"{d_error:.2f}",
-                "speed_erpm":     spd,
-                "current_amps":   f"{cur:.3f}",
-                "temp_c":         tmp,
-                "error_code":     err_code,
-                "duty":           f"{firmware_target:.1f}",
-                "loop":           label.split("]")[0].lstrip("[") if "]" in label else "",
-                "label":          label,
+                "time_s":        f"{elapsed:.3f}",
+                "label":         label,
+                "commanded_deg": f"{phys_tgt:.2f}",
+                "actual_deg":    f"{phys:.2f}",
+                "error_deg":     f"{err:.2f}",
+                "duty":          f"{duty:.5f}",
+                "speed_erpm":    spd,
+                "current_amps":  f"{cur:.3f}",
+                "temp_c":        tmp,
+                "error_code":    err_code,
             })
+
         print(
-            f"    t={elapsed:6.2f}s  "
-            f"cmd={target_degrees:+6.1f}°  "
-            f"phys={phys_pos:+7.2f}°  "
-            f"err={error:+6.1f}°  "
-            f"erpm={spd:+6.0f}",
+            f"    t={t:5.2f}/{SINE_DURATION:.0f}s  "
+            f"cmd={phys_tgt:+7.2f}  phys={phys:+7.2f}  "
+            f"err={err:+5.1f}  duty={duty:+.4f}  erpm={spd:+6d}",
             end="\r",
         )
 
-        if settled_at is not None and (now - settled_at) >= HOLD_AFTER:
+        time.sleep(max(loop_dt - (time.monotonic() - tick), 0.001))
+
+    return True
+
+
+def coast_to_hang(
+    bus: can.BusABC,
+    fw_home: float,
+    writer: csv.DictWriter,
+    t0: float,
+) -> None:
+    """Send duty=0 and let gravity lower the arm."""
+    STILL_ERPM = 300
+    STILL_TIME = 2.0
+    label      = "hang-return"
+    loop_dt    = 1.0 / LOOP_HZ
+    csv_dt     = 1.0 / SAMPLE_HZ
+    last_csv   = -1.0
+    still_at   = None
+    deadline   = time.monotonic() + WAYPOINT_TIMEOUT
+
+    print("\n  >> COAST  lowering arm to gravity hang (duty=0)...")
+
+    while time.monotonic() < deadline:
+        tick = time.monotonic()
+        tx(bus, STOP_CMD)
+        fb = read_feedback(bus)
+        if fb is None:
+            time.sleep(max(loop_dt - (time.monotonic() - tick), 0.005))
+            continue
+
+        fw_pos, spd, cur, tmp, err_code = fb
+        now     = time.monotonic()
+        phys    = fw_to_phys(fw_pos, fw_home)
+        elapsed = now - t0
+
+        if elapsed - last_csv >= csv_dt:
+            last_csv = elapsed
+            writer.writerow({
+                "time_s":        f"{elapsed:.3f}",
+                "label":         label,
+                "commanded_deg": "0.0",
+                "actual_deg":    f"{phys:.2f}",
+                "error_deg":     f"{phys:.2f}",
+                "duty":          "0.00000",
+                "speed_erpm":    spd,
+                "current_amps":  f"{cur:.3f}",
+                "temp_c":        tmp,
+                "error_code":    err_code,
+            })
+
+        print(
+            f"    t={elapsed:6.2f}s  phys={phys:+7.2f}  erpm={spd:+6d}",
+            end="\r",
+        )
+
+        if abs(spd) < STILL_ERPM:
+            if still_at is None:
+                still_at = now
+        else:
+            still_at = None
+
+        if still_at is not None and (now - still_at) >= STILL_TIME:
+            print(f"\n  ✓ Arm at rest  phys={phys:+.2f}")
             break
-        if now >= deadline:
-            print(f"\n  ⚠  Waypoint timeout after {HOLD_TIME:.0f}s", end="")
-            break
 
-        elapsed_tick = time.monotonic() - tick_start
-        if elapsed_tick < loop_dt:
-            time.sleep(loop_dt - elapsed_tick)
-
-    print()
+        time.sleep(max(loop_dt - (time.monotonic() - tick), 0.001))
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
-def main() -> None:
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    csv_path = LOG_DIR / f"mocap_{timestamp}.csv"
-
-    fieldnames = ["time_s", "commanded_deg", "actual_deg", "velocity_deg_s",
-                  "speed_erpm", "current_amps", "temp_c", "error_code",
-                  "duty", "loop", "label"]
-
-    print("=" * 60)
-    print("  Motion Capture Validation — Arm Sweep  (position-velocity loop)")
-    print("=" * 60)
-    print(f"  Log file      : {csv_path}")
-    print(f"  Speed         : {MOVE_SPEED_ERPM} ERPM  |  Accel: {MOVE_ACCEL} ERPM/s")
-    print(f"  Tolerance     : {TOLERANCE}°  |  Hold: {HOLD_AFTER}s  |  Timeout: {HOLD_TIME}s")
-    print(f"  Poll rate     : {LOOP_HZ} Hz  |  Sample: {SAMPLE_HZ} Hz")
-    print("=" * 60)
-
-    with CubeMarsAK606v3CAN(motor_can_id=MOTOR_ID, interface=INTERFACE) as motor:
-        with open(csv_path, "w", newline="") as csv_file:
-            writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-            writer.writeheader()
-
-            # ── Enable motor and wait for first feedback ────────────────
-            # check_communication() has a tight 50ms capture window that can
-            # race against the motor's 20ms broadcast period.  Instead, send
-            # enable and then poll get_status() — which uses a 500ms timeout —
-            # until we get a valid response (up to ~5 s total).
-            print("\n  Enabling motor...")
-            motor.enable_motor()
-            time.sleep(0.3)  # let motor enter servo mode
-
-            fb = None
-            for attempt in range(10):
-                fb = motor.get_status()
-                if fb is not None:
-                    break
-                print(f"  Waiting for motor feedback (attempt {attempt + 1}/10)...", end="\r")
-                motor.enable_motor()   # re-send enable in case motor missed first
-                time.sleep(0.5)
-
-            if fb is None:
-                print("\nERROR: Motor not responding after 10 attempts.  "
-                      "Check wiring, power, and CAN ID.")
-                return
-            initial_pos = fb.position_degrees
-            print(f"  Motor alive — firmware pos={initial_pos:.1f}°  "
-                  f"temp={fb.temperature_celsius}°C  cur={fb.current_amps:.2f}A ✓")
-            print(f"  Physical frame: 0° = current position, +° = forward swing")
-            print(f"  Safety bounds : {-5.0:.0f}° .. {MAX_ANGLE:.0f}° (physical)")
-
-            # Waypoints are already physical offsets — no translation needed.
-            # Physical: 0=start, positive=forward regardless of MOTOR_DIRECTION.
-            # MOTOR_DIRECTION flips the ERPM sign inside move_and_sample.
-            print(f"  Waypoints (physical): " +
-                  ", ".join(f"{deg:+.1f}°" for deg, _ in BASE_WAYPOINTS))
-
-            # ── Waypoint sequence ───────────────────────────────────────
-            NUM_LOOPS = 1
-            print(f"\n  Starting sequence ({NUM_LOOPS} loops) — press Ctrl+C to abort safely\n")
-            t0 = time.monotonic()
-
-            try:
-                for loop_num in range(1, NUM_LOOPS + 1):
-                    print(f"\n  ━━━ Loop {loop_num}/{NUM_LOOPS} ━━━")
-                    for target_deg, label in BASE_WAYPOINTS:
-                        move_and_sample(motor, target_deg,
-                                        f"[{loop_num}/{NUM_LOOPS}] {label}",
-                                        writer, t0, initial_pos)
-
-                # ── Return home (physical 0° = startup position) ────────
-                print("\n  All loops complete — returning to physical 0° (startup)...")
-                move_and_sample(motor, 0.0, "final-return-home",
-                                writer, t0, initial_pos)
-
-            except KeyboardInterrupt:
-                print("\n\n  Aborted — returning to physical 0° (startup)...")
-                move_and_sample(motor, 0.0, "abort-return-home",
-                                writer, t0, initial_pos)
-
-            finally:
-                motor.stop()
-                time.sleep(0.05)
-                motor.disable_motor()
-
-    # ── Post-run analysis ────────────────────────────────────────
-    print_summary(csv_path)
-
-    print("\n" + "=" * 60)
-    print(f"  Done.  Data saved to:\n  {csv_path}")
-    print("=" * 60)
-
-
-# ---------------------------------------------------------------------------
-# Post-run summary
-# ---------------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────
+# Summary
+# ──────────────────────────────────────────────────────────────────────────
 
 def print_summary(csv_path: Path) -> None:
-    """Read the CSV and print per-waypoint statistics."""
-    rows = []
     with open(csv_path, newline="") as f:
-        for row in csv.DictReader(f):
-            rows.append(row)
+        rows = list(csv.DictReader(f))
     if not rows:
         print("  No data recorded.")
         return
 
-    # Group by (commanded_deg, loop) pairs to get per-waypoint stats
     from collections import OrderedDict
-    waypoints: dict[str, list] = OrderedDict()
+    by_label: dict[str, list] = OrderedDict()
     for r in rows:
-        key = f"{r['commanded_deg']}°"
-        waypoints.setdefault(key, []).append(r)
+        by_label.setdefault(r["label"], []).append(r)
 
     print("\n" + "=" * 72)
     print("  POST-RUN SUMMARY")
     print("=" * 72)
-    print(f"  {'Waypoint':>10s}  {'Samples':>7s}  {'Mean Err':>8s}  "
-          f"{'Max Err':>7s}  {'Mean Vel':>8s}  {'Peak Vel':>8s}")
-    print("  " + "-" * 68)
-
-    total_samples = 0
-    all_errors = []
-    all_velocities = []
-
-    for wp, wp_rows in waypoints.items():
-        errors = [abs(float(r["commanded_deg"]) - float(r["actual_deg"]))
-                  for r in wp_rows]
-        velocities = [abs(float(r["velocity_deg_s"])) for r in wp_rows
-                      if r.get("velocity_deg_s")]
-        n = len(wp_rows)
-        mean_err = sum(errors) / n if n else 0
-        max_err  = max(errors) if errors else 0
-        mean_vel = sum(velocities) / len(velocities) if velocities else 0
-        peak_vel = max(velocities) if velocities else 0
-
-        print(f"  {wp:>10s}  {n:>7d}  {mean_err:>7.2f}°  "
-              f"{max_err:>6.2f}°  {mean_vel:>7.1f}°/s  {peak_vel:>7.1f}°/s")
-
-        total_samples += n
-        all_errors.extend(errors)
-        all_velocities.extend(velocities)
-
-    print("  " + "-" * 68)
-    overall_mean_err = sum(all_errors) / len(all_errors) if all_errors else 0
-    overall_max_err  = max(all_errors) if all_errors else 0
-    overall_peak_vel = max(all_velocities) if all_velocities else 0
-    duration = float(rows[-1]["time_s"]) - float(rows[0]["time_s"])
-    print(f"  {'TOTAL':>10s}  {total_samples:>7d}  {overall_mean_err:>7.2f}°  "
-          f"{overall_max_err:>6.2f}°  {'':>8s}  {overall_peak_vel:>7.1f}°/s")
-    print(f"  Duration: {duration:.1f}s  |  Samples: {total_samples}")
+    print(f"  {'Label':<18s}  {'N':>5s}  {'MeanErr':>8s}  {'MaxErr':>7s}  "
+          f"{'PeakERPM':>9s}  {'PeakDuty':>9s}")
+    print("  " + "-" * 66)
+    for lbl, lrows in by_label.items():
+        errs   = [abs(float(r["error_deg"])) for r in lrows]
+        erpms  = [abs(int(r["speed_erpm"])) for r in lrows]
+        duties = [abs(float(r["duty"])) for r in lrows]
+        n = len(lrows)
+        print(
+            f"  {lbl:<18s}  {n:>5d}  {sum(errs)/n:>7.2f}°  "
+            f"{max(errs):>6.2f}°  {max(erpms):>9d}  {max(duties):>8.4f}"
+        )
     print("=" * 72)
+    dur = float(rows[-1]["time_s"]) - float(rows[0]["time_s"])
+    print(f"  Duration: {dur:.1f} s  |  Samples: {len(rows)}")
+    print(f"  CSV: {csv_path}")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Main
+# ──────────────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    ts       = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    csv_path = LOG_DIR / f"mocap_{ts}.csv"
+
+    fieldnames = [
+        "time_s", "label", "commanded_deg", "actual_deg", "error_deg",
+        "duty", "speed_erpm", "current_amps", "temp_c", "error_code",
+    ]
+
+    print("=" * 64)
+    print("  Motion Capture — Duty-Cycle P-Controller Sine Sweep")
+    print(f"  Motor ID: 0x{MOTOR_ID:02X}   Interface: {INTERFACE}")
+    print(f"  KP={KP}  KD={KD}  MAX_DUTY={MAX_DUTY}  DEADBAND={DEADBAND}")
+    print(f"  Sine: {SINE_CENTER}±{SINE_AMP} deg  period={SINE_PERIOD}s  "
+          f"duration={SINE_DURATION}s")
+    print(f"  Loop: {LOOP_HZ} Hz   CSV: {SAMPLE_HZ} Hz")
+    print(f"  Log: {csv_path}")
+    print("=" * 64)
+
+    bus = can.interface.Bus(channel=INTERFACE, interface="socketcan")
+
+    try:
+        with open(csv_path, "w", newline="") as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+            writer.writeheader()
+
+            # ── Enable ────────────────────────────────────────────────────
+            print("\n  Enabling motor...")
+            tx(bus, ENABLE_CMD)
+            time.sleep(0.3)
+
+            fw_alive = None
+            for attempt in range(30):
+                fb = read_feedback(bus)
+                if fb is not None:
+                    fw_alive = fb[0]
+                    print(
+                        f"  Motor alive  fw={fw_alive:.1f}°  temp={fb[3]}°C  "
+                        f"cur={fb[2]:.2f}A  err={fb[4]}  (attempt {attempt + 1})"
+                    )
+                    break
+                tx(bus, ENABLE_CMD)
+                time.sleep(0.1)
+
+            if fw_alive is None:
+                print("  ✗ No motor feedback — check power & wiring")
+                return
+
+            # ── Home ──────────────────────────────────────────────────────
+            fw_home = find_home(bus)
+            print(f"  Physical 0° = fw_pos {fw_home:.1f}°")
+            print(f"  Safety: fw_delta [{-ROT_GUARD_NEG}, +{ROT_GUARD_POS}]°   "
+                  f"phys [{PHYS_MIN}, {PHYS_MAX}]°")
+
+            # ── Direction detection ───────────────────────────────────────
+            detect_fw_dir(bus, fw_home)
+            sign = "+" if _fw_dir > 0 else "-"
+            print(f"  _fw_dir={_fw_dir:+d}   duty_fw = duty_phys × ({sign}1)")
+
+            # Re-home after direction test
+            fw_home = find_home(bus)
+            print(f"  Re-homed: fw_home={fw_home:.1f}°")
+            print("\n  Press Ctrl+C to abort at any time\n")
+
+            t0 = time.monotonic()
+
+            try:
+                # Step 1: 0 → 90°
+                ok = move_to(bus, 90.0, fw_home, "parallel", writer, t0)
+                if not ok:
+                    raise RuntimeError("move to 90° aborted by safety")
+
+                # Step 2: 90 → 120°
+                ok = move_to(bus, 120.0, fw_home, "swing-up", writer, t0)
+                if not ok:
+                    raise RuntimeError("move to 120° aborted by safety")
+
+                # Step 3: Sine sweep 120 ↔ 60° for 10 s
+                ok = sine_sweep(bus, fw_home, writer, t0)
+                if not ok:
+                    raise RuntimeError("sine sweep aborted by safety")
+
+                # Step 4: Coast back to 0° (gravity hang)
+                coast_to_hang(bus, fw_home, writer, t0)
+
+            except KeyboardInterrupt:
+                print("\n\n  Ctrl+C — stopping safely...")
+            except RuntimeError as e:
+                print(f"\n  Sequence aborted: {e}")
+
+            # ── Stop & disable ────────────────────────────────────────────
+            print("\n  Sending stop + disable...")
+            for _ in range(15):
+                tx(bus, STOP_CMD)
+                time.sleep(0.02)
+            tx(bus, DISABLE_CMD)
+            time.sleep(0.2)
+
+    finally:
+        bus.shutdown()
+
+    print_summary(csv_path)
+    print(f"\n  Done.  Data → {csv_path}")
+    print("=" * 64)
 
 
 if __name__ == "__main__":

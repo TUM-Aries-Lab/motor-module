@@ -10,7 +10,7 @@ import time
 import can
 
 MOTOR_ID  = 0x03
-DUTY      = 0.20      # 20% — adjust if you want more/less speed
+DUTY      = 0.40      # 40% — adjust if you want more/less speed
 SPIN_SECS = 2.0
 PAUSE_SECS = 0.5
 
@@ -33,9 +33,12 @@ def tx(arb_id, data, ext=True):
     bus.send(can.Message(arbitration_id=arb_id, data=data, is_extended_id=ext))
 
 
+FEEDBACK_IDS = {0x2903, 0x2900, MOTOR_ID, MOTOR_ID + 1, 0x0080 | MOTOR_ID}
+
+
 def get_feedback():
     m = bus.recv(timeout=0.02)
-    if m and m.arbitration_id == 0x2903 and len(m.data) == 8:
+    if m and m.arbitration_id in FEEDBACK_IDS and len(m.data) == 8:
         d = m.data
         pos = struct.unpack(">h", d[0:2])[0] * 0.1
         spd = struct.unpack(">h", d[2:4])[0] * 10
