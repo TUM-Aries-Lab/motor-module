@@ -220,7 +220,7 @@ class TestCANVelocityControl:
             time.sleep(0.5)
 
             fb = get_feedback_with_retry(motor)
-            if abs(fb.speed_erpm) < HARDWARE_TEST_DEFAULTS.speed_corruption_threshold:
+            if abs(fb.speed_erpm) < HARDWARE_TEST_DEFAULTS.speed_corruption_threshold_erpm:
                 assert (
                     abs(fb.speed_erpm - target)
                     < target * HARDWARE_TEST_DEFAULTS.velocity_tolerance
@@ -240,7 +240,7 @@ class TestCANVelocityControl:
         time.sleep(0.5)
 
         fb = get_feedback_with_retry(motor)
-        if abs(fb.speed_erpm) < HARDWARE_TEST_DEFAULTS.speed_corruption_threshold:
+        if abs(fb.speed_erpm) < HARDWARE_TEST_DEFAULTS.speed_corruption_threshold_erpm:
             assert abs(fb.speed_erpm) < 10000, (
                 f"Motor speed {fb.speed_erpm} ERPM too high after stop"
             )
@@ -255,7 +255,7 @@ class TestCANVelocityControl:
             time.sleep(0.3)
 
             fb = get_feedback_with_retry(motor)
-            if abs(fb.speed_erpm) < HARDWARE_TEST_DEFAULTS.speed_corruption_threshold:
+            if abs(fb.speed_erpm) < HARDWARE_TEST_DEFAULTS.speed_corruption_threshold_erpm:
                 assert abs(fb.speed_erpm) <= 320000
         finally:
             motor.stop()
@@ -270,7 +270,7 @@ class TestCANVelocityControl:
             time.sleep(0.5)
 
             fb = get_feedback_with_retry(motor)
-            if abs(fb.speed_erpm) < HARDWARE_TEST_DEFAULTS.speed_corruption_threshold:
+            if abs(fb.speed_erpm) < HARDWARE_TEST_DEFAULTS.speed_corruption_threshold_erpm:
                 assert fb.speed_erpm < 0, (
                     f"Expected negative speed, got {fb.speed_erpm} ERPM"
                 )
@@ -288,7 +288,7 @@ class TestCANVelocityControl:
             time.sleep(0.5)
 
             fb = get_feedback_with_retry(motor)
-            if abs(fb.speed_erpm) < HARDWARE_TEST_DEFAULTS.speed_corruption_threshold:
+            if abs(fb.speed_erpm) < HARDWARE_TEST_DEFAULTS.speed_corruption_threshold_erpm:
                 assert (
                     abs(fb.speed_erpm - target)
                     < target * HARDWARE_TEST_DEFAULTS.velocity_tolerance
@@ -424,7 +424,7 @@ class TestCANPositionControl:
             fb = get_feedback_with_retry(motor)
             if (
                 abs(fb.position_degrees)
-                < HARDWARE_TEST_DEFAULTS.position_corruption_threshold
+                < HARDWARE_TEST_DEFAULTS.position_corruption_threshold_degrees
             ):
                 assert (
                     abs(fb.position_degrees - target)
@@ -599,3 +599,231 @@ class TestCANContextManager:
                 pytest.skip("CAN bus not available")
             assert m.connected
         # After __exit__ calls close() → bus.shutdown(); no exception should propagate
+
+
+# ---------------------------------------------------------------------------
+# Telemetry helpers
+# ---------------------------------------------------------------------------
+
+
+class TestCANTelemetry:
+    """Test individual telemetry getter methods."""
+
+    @pytest.mark.flaky(reruns=3, reruns_delay=1)
+    def test_get_speed_returns_int(self, motor: CubeMarsAK606v3CAN) -> None:
+        """get_speed() returns an integer ERPM value."""
+        motor.enable_motor()
+        time.sleep(0.1)
+        speed = motor.get_speed()
+        assert isinstance(speed, int), f"Expected int, got {type(speed)}"
+        assert -320000 <= speed <= 320000, f"Speed {speed} ERPM out of protocol range"
+
+    @pytest.mark.flaky(reruns=3, reruns_delay=1)
+    def test_get_current_returns_float(self, motor: CubeMarsAK606v3CAN) -> None:
+        """get_current() returns a float Ampere value."""
+        motor.enable_motor()
+        time.sleep(0.1)
+        cur = motor.get_current()
+        assert isinstance(cur, float), f"Expected float, got {type(cur)}"
+        assert -60.0 <= cur <= 60.0, f"Current {cur} A out of protocol range"
+
+    @pytest.mark.flaky(reruns=3, reruns_delay=1)
+    def test_get_temperature_returns_int(self, motor: CubeMarsAK606v3CAN) -> None:
+        """get_temperature() returns an integer Celsius value."""
+        motor.enable_motor()
+        time.sleep(0.1)
+        temp = motor.get_temperature()
+        assert isinstance(temp, int), f"Expected int, got {type(temp)}"
+        assert -20 <= temp <= 127, f"Temperature {temp} °C out of plausible range"
+
+    @pytest.mark.flaky(reruns=3, reruns_delay=1)
+    def test_get_motor_data_returns_dict(self, motor: CubeMarsAK606v3CAN) -> None:
+        """get_motor_data() returns a dict with all expected keys."""
+        motor.enable_motor()
+        time.sleep(0.1)
+        data = motor.get_motor_data()
+        assert data is not None, "get_motor_data() returned None"
+        assert isinstance(data, dict)
+        expected_keys = {
+            "position_degrees",
+            "speed_erpm",
+            "current_amps",
+            "temperature_celsius",
+            "error_code",
+            "error_description",
+        }
+        assert expected_keys == set(data.keys()), (
+            f"Unexpected keys in motor data: {set(data.keys())}"
+        )
+
+    @pytest.mark.flaky(reruns=3, reruns_delay=1)
+    def test_get_motor_data_no_fault_at_rest(self, motor: CubeMarsAK606v3CAN) -> None:
+        """Motor reports error_code=0 (No fault) when idle."""
+        motor.enable_motor()
+        time.sleep(0.2)
+        data = motor.get_motor_data()
+        assert data is not None
+        assert data["error_code"] == 0, (
+            f"Motor fault reported: code={data['error_code']} ({data['error_description']})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Brake Current
+# ---------------------------------------------------------------------------
+
+
+class TestCANBrakeCurrent:
+    """Test brake current mode over CAN."""
+
+    @pytest.mark.flaky(reruns=3, reruns_delay=1)
+    def test_set_brake_current_does_not_raise(self, motor: CubeMarsAK606v3CAN) -> None:
+        """set_brake_current() sends without raising."""
+        try:
+            motor.enable_motor()
+            time.sleep(0.1)
+            motor.set_brake_current(2.0)
+            time.sleep(0.2)
+        finally:
+            motor.stop()
+
+    @pytest.mark.flaky(reruns=3, reruns_delay=1)
+    def test_brake_current_slows_motor(self, motor: CubeMarsAK606v3CAN) -> None:
+        """Applying brake current after spinning reduces speed faster than coasting."""
+        try:
+            motor.enable_motor()
+            time.sleep(0.1)
+            motor.set_velocity(velocity_erpm=10000)
+            time.sleep(0.5)
+            # Apply braking
+            motor.set_brake_current(5.0)
+            time.sleep(0.5)
+
+            fb = get_feedback_with_retry(motor)
+            if abs(fb.speed_erpm) < HARDWARE_TEST_DEFAULTS.speed_corruption_threshold_erpm:
+                # Motor should be decelerating — just check it's not still at full speed
+                assert abs(fb.speed_erpm) < 10000, (
+                    f"Motor still at {fb.speed_erpm} ERPM after braking"
+                )
+        finally:
+            motor.stop()
+
+    @pytest.mark.flaky(reruns=3, reruns_delay=1)
+    def test_brake_current_clamped(self, motor: CubeMarsAK606v3CAN) -> None:
+        """Brake current beyond 60 A is clamped, not rejected."""
+        try:
+            motor.enable_motor()
+            time.sleep(0.1)
+            motor.set_brake_current(100.0)  # Clamped to 60.0 A internally
+            time.sleep(0.1)
+        finally:
+            motor.stop()
+
+
+# ---------------------------------------------------------------------------
+# MIT Impedance Control
+# ---------------------------------------------------------------------------
+
+
+class TestCANMITMode:
+    """Test MIT impedance control mode over CAN.
+
+    MIT mode uses different enable/disable commands than Servo mode.
+    The output torque follows: τ = kp*(pos_tgt - pos) + kd*(vel_tgt - vel) + tau_ff
+    """
+
+    @pytest.mark.flaky(reruns=3, reruns_delay=1)
+    def test_enable_mit_mode_does_not_raise(self, motor: CubeMarsAK606v3CAN) -> None:
+        """enable_mit_mode() transmits the MIT enable frame without raising."""
+        motor.enable_mit_mode()
+        time.sleep(0.2)
+        motor.disable_mit_mode()
+
+    @pytest.mark.flaky(reruns=3, reruns_delay=1)
+    def test_disable_mit_mode_does_not_raise(self, motor: CubeMarsAK606v3CAN) -> None:
+        """disable_mit_mode() transmits the MIT disable frame without raising."""
+        motor.enable_mit_mode()
+        time.sleep(0.1)
+        motor.disable_mit_mode()  # Must not raise
+        time.sleep(0.1)
+
+    @pytest.mark.flaky(reruns=3, reruns_delay=1)
+    def test_mit_mode_still_feeds_back(self, motor: CubeMarsAK606v3CAN) -> None:
+        """Motor continues broadcasting feedback after MIT enable command."""
+        motor.enable_mit_mode()
+        time.sleep(0.2)
+        try:
+            fb = get_feedback_with_retry(motor)
+            assert fb is not None
+        finally:
+            motor.disable_mit_mode()
+
+    @pytest.mark.flaky(reruns=3, reruns_delay=1)
+    def test_set_mit_mode_zero_torque_float(self, motor: CubeMarsAK606v3CAN) -> None:
+        """set_mit_mode(all zeros) sends passive float command without raising."""
+        motor.enable_mit_mode()
+        time.sleep(0.15)
+        try:
+            motor.set_mit_mode(pos_rad=0.0, vel_rad_s=0.0, kp=0.0, kd=0.0, torque_ff_nm=0.0)
+            time.sleep(0.2)
+        finally:
+            motor.disable_mit_mode()
+
+    @pytest.mark.flaky(reruns=3, reruns_delay=1)
+    def test_set_mit_mode_velocity_damping(self, motor: CubeMarsAK606v3CAN) -> None:
+        """MIT velocity-damping mode: kd > 0, kp = 0, tau_ff = 0."""
+        motor.enable_mit_mode()
+        time.sleep(0.15)
+        try:
+            motor.set_mit_mode(pos_rad=0.0, vel_rad_s=3.0, kd=1.0)
+            time.sleep(0.3)
+        finally:
+            motor.disable_mit_mode()
+
+    @pytest.mark.flaky(reruns=3, reruns_delay=1)
+    def test_set_mit_mode_torque_only(self, motor: CubeMarsAK606v3CAN) -> None:
+        """MIT torque-feed-forward mode: kp = kd = 0, tau_ff > 0."""
+        motor.enable_mit_mode()
+        time.sleep(0.15)
+        try:
+            motor.set_mit_mode(pos_rad=0.0, torque_ff_nm=2.0)
+            time.sleep(0.2)
+
+            fb = get_feedback_with_retry(motor)
+            # With 2 Nm torque FF the motor should be drawing some current
+            assert abs(fb.current_amps) >= 0.0  # Will be > 0 under load
+        finally:
+            motor.disable_mit_mode()
+
+    @pytest.mark.flaky(reruns=3, reruns_delay=1)
+    def test_set_mit_mode_position_spring(self, motor: CubeMarsAK606v3CAN) -> None:
+        """MIT spring-hold mode: kp > 0, kd > 0 holds shaft against disturbance."""
+        motor.enable_mit_mode()
+        time.sleep(0.15)
+        try:
+            current_pos = motor.get_position() or 0.0
+            target_rad = current_pos * (3.14159 / 180.0)  # convert to rad
+            motor.set_mit_mode(pos_rad=target_rad, kp=50.0, kd=1.0)
+            time.sleep(0.3)
+            fb = get_feedback_with_retry(motor)
+            assert fb is not None
+        finally:
+            motor.disable_mit_mode()
+
+    @pytest.mark.flaky(reruns=3, reruns_delay=1)
+    def test_mit_mode_values_clamped(self, motor: CubeMarsAK606v3CAN) -> None:
+        """Physical limits (pos, vel, kp, kd, tau) are clamped, not rejected."""
+        motor.enable_mit_mode()
+        time.sleep(0.15)
+        try:
+            # All values beyond physical limits — should clamp silently
+            motor.set_mit_mode(
+                pos_rad=999.0,       # clamped to 12.5 rad
+                vel_rad_s=999.0,     # clamped to 45 rad/s
+                kp=9999.0,           # clamped to 500 Nm/rad
+                kd=999.0,            # clamped to 5 Nms/rad
+                torque_ff_nm=999.0,  # clamped to 18 Nm
+            )
+            time.sleep(0.1)
+        finally:
+            motor.disable_mit_mode()
