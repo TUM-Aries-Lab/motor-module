@@ -36,6 +36,11 @@ from pathlib import Path
 
 import can
 
+
+class BusDownError(RuntimeError):
+    """Raised when the CAN socket reports the interface has gone down."""
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Hardware
 # ──────────────────────────────────────────────────────────────────────────
@@ -114,7 +119,7 @@ def fw_to_phys(fw: float, fw_home: float) -> float:
 def tx(bus: can.BusABC, data: bytes, arb_id: int = DUTY_ARB) -> None:
     try:
         bus.send(can.Message(arbitration_id=arb_id, data=data, is_extended_id=True))
-    except can.CanOperationError:
+    except (can.CanOperationError, OSError):
         pass
 
 
@@ -137,13 +142,17 @@ def read_feedback(bus: can.BusABC, deadline_ms: float = 15.0):
     skipping non-feedback frames (e.g. the 0x0088 flood).
 
     Returns (pos_deg, erpm, cur_A, temp_C, err_code) or None.
+    Raises BusDownError if the CAN interface went BUS-OFF.
     """
     deadline = time.monotonic() + deadline_ms / 1000.0
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return None
-        msg = bus.recv(timeout=remaining)
+        try:
+            msg = bus.recv(timeout=remaining)
+        except (can.CanOperationError, OSError) as exc:
+            raise BusDownError(str(exc)) from exc
         if msg is None:
             return None
         if msg.arbitration_id not in FEEDBACK_IDS:
@@ -321,7 +330,11 @@ def move_to(
         tick = time.monotonic()
 
         # Will compute duty after reading feedback
-        fb = read_feedback(bus)
+        try:
+            fb = read_feedback(bus)
+        except BusDownError as exc:
+            print(f"\n  ✗ CAN bus down during move_to: {exc}")
+            return False
         if fb is None:
             # Keep watchdog alive even without feedback
             tx(bus, STOP_CMD)
@@ -423,7 +436,11 @@ def sine_sweep(
 
         phys_tgt = SINE_CENTER + SINE_AMP * math.cos(2 * math.pi * t / SINE_PERIOD)
 
-        fb = read_feedback(bus)
+        try:
+            fb = read_feedback(bus)
+        except BusDownError as exc:
+            print(f"\n  ✗ CAN bus down during sine_sweep: {exc}")
+            return False
         if fb is None:
             tx(bus, STOP_CMD)
             no_fb += 1
@@ -449,7 +466,11 @@ def sine_sweep(
                   end="", flush=True)
             while abs(spd) > BRAKE_ERPM:
                 tx(bus, STOP_CMD)
-                fb2 = read_feedback(bus)
+                try:
+                    fb2 = read_feedback(bus)
+                except BusDownError as exc:
+                    print(f"\n  ✗ CAN bus down during speed brake: {exc}")
+                    return False
                 if fb2:
                     spd = fb2[1]
                     # Update phys and log while braking
@@ -530,7 +551,11 @@ def coast_to_hang(
     while time.monotonic() < deadline:
         tick = time.monotonic()
         tx(bus, STOP_CMD)
-        fb = read_feedback(bus)
+        try:
+            fb = read_feedback(bus)
+        except BusDownError as exc:
+            print(f"\n  ✗ CAN bus down during coast_to_hang: {exc}")
+            break
         if fb is None:
             time.sleep(max(loop_dt - (time.monotonic() - tick), 0.005))
             continue
@@ -634,6 +659,31 @@ def main() -> None:
     print(f"  Log: {csv_path}")
     print("=" * 64)
 
+    # ── Pre-flight: confirm bus is live before opening filtered socket ─────
+    # Open a raw unfiltered socket for 1.5 s.  If we see zero frames the motor
+    # is almost certainly powered off — sending ENABLE on a dead bus causes TX
+    # errors → BUS-OFF → socket dies.  Print a clear message and exit early.
+    print("  Pre-flight: checking for CAN bus traffic...")
+    _raw_bus = can.interface.Bus(channel=INTERFACE, interface="socketcan")
+    _t0_sniff = time.monotonic()
+    _got_frame = False
+    while time.monotonic() - _t0_sniff < 1.5:
+        try:
+            _m = _raw_bus.recv(timeout=0.1)
+        except (can.CanOperationError, OSError):
+            break
+        if _m is not None:
+            _got_frame = True
+            break
+    _raw_bus.shutdown()
+    if not _got_frame:
+        print(
+            "  ✗ No CAN frames detected in 1.5 s — motor appears to be OFF.\n"
+            "  Power on the motor, then re-run:  python motion_capture_test.py"
+        )
+        return
+    print("  ✓ Bus is live — opening filtered socket")
+
     # Apply kernel-level CAN receive filter so the 0x0088 standard-frame
     # flood (~30 kfps) is dropped before it fills the socket buffer and
     # starves Python of motor feedback frames.
@@ -659,7 +709,12 @@ def main() -> None:
 
             fw_alive = None
             for attempt in range(30):
-                fb = read_feedback(bus)
+                try:
+                    fb = read_feedback(bus)
+                except BusDownError as exc:
+                    print(f"\n  ✗ CAN bus went down during enable loop: {exc}")
+                    print("  Run: sudo ./setup_can.sh   then try again.")
+                    return
                 if fb is not None:
                     fw_alive = fb[0]
                     print(
@@ -708,7 +763,7 @@ def main() -> None:
 
             except KeyboardInterrupt:
                 print("\n\n  Ctrl+C — stopping safely...")
-            except RuntimeError as e:
+            except (RuntimeError, BusDownError) as e:
                 print(f"\n  Sequence aborted: {e}")
 
             # ── Stop & disable ────────────────────────────────────────────
