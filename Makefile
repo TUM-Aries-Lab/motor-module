@@ -9,16 +9,18 @@ test:
 	uv run pytest -m "not hardware" --cov=src --cov-report=term-missing --no-cov-on-fail --cov-report=xml --cov-fail-under=70
 	rm -f .coverage
 
-test-hardware:
-	uv run pytest --cov=src --cov-report=term-missing --no-cov-on-fail --cov-report=xml --cov-fail-under=73
-	rm -f .coverage
+test-hardware: test-hardware-can  ## Alias for test-hardware-can (CAN is the active setup)
 
-test-hardware-can:  ## Run only CAN hardware tests (requires motor on can0)
+test-hardware-can:  ## Run only CAN hardware tests (requires motor on can0, NO UART cable)
 	uv run pytest tests/hardware_can_test.py -v --cov=src --cov-report=term-missing --no-cov-on-fail
 	rm -f .coverage
 
-test-hardware-uart:  ## Run only UART hardware tests (requires serial motor)
-	uv run pytest tests/hardware_test.py -v --cov=src --cov-report=term-missing --no-cov-on-fail
+test-hardware-uart:  ## Run only UART hardware tests (requires R-Link cable; UART blocks CAN — never run alongside CAN)
+	uv run pytest -m hardware_uart -v --cov=src --cov-report=term-missing --no-cov-on-fail
+	rm -f .coverage
+
+test-hardware-all:  ## Run ALL hardware tests (requires both CAN motor and UART serial connected)
+	uv run pytest tests/hardware_can_test.py tests/hardware_test.py -v --cov=src --cov-report=term-missing --no-cov-on-fail
 	rm -f .coverage
 
 setup-can:  ## Configure can0 interface (requires sudo)

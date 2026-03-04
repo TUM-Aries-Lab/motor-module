@@ -56,7 +56,8 @@ line-ending = "lf"
 
 [tool.pytest.ini_options]
 markers = [
-    "hardware: tests that require actual motor hardware (deselect with '-m \"not hardware\"')",
+    "hardware: CAN hardware tests — require motor on can0, NO UART cable (deselect with '-m \"not hardware\"')",
+    "hardware_uart: UART/serial hardware tests — require R-Link cable, incompatible with CAN tests",
 ]
 testpaths = ["tests"]
 pythonpath = ["src"]

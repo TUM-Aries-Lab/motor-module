@@ -150,7 +150,10 @@ class TestCANVelocityControl:
             time.sleep(0.8)
 
             fb = get_feedback_with_retry(motor)
-            if abs(fb.speed_erpm) < HARDWARE_TEST_DEFAULTS.speed_corruption_threshold_erpm:
+            if (
+                abs(fb.speed_erpm)
+                < HARDWARE_TEST_DEFAULTS.speed_corruption_threshold_erpm
+            ):
                 assert (
                     abs(fb.speed_erpm - target)
                     < target * HARDWARE_TEST_DEFAULTS.velocity_tolerance
@@ -185,7 +188,10 @@ class TestCANVelocityControl:
             time.sleep(0.8)
 
             fb = get_feedback_with_retry(motor)
-            if abs(fb.speed_erpm) < HARDWARE_TEST_DEFAULTS.speed_corruption_threshold_erpm:
+            if (
+                abs(fb.speed_erpm)
+                < HARDWARE_TEST_DEFAULTS.speed_corruption_threshold_erpm
+            ):
                 assert fb.speed_erpm < 0, (
                     f"Expected negative speed, got {fb.speed_erpm} ERPM"
                 )
@@ -405,7 +411,10 @@ class TestCANBrakeCurrent:
             time.sleep(0.3)
 
             fb = get_feedback_with_retry(motor)
-            if abs(fb.speed_erpm) < HARDWARE_TEST_DEFAULTS.speed_corruption_threshold_erpm:
+            if (
+                abs(fb.speed_erpm)
+                < HARDWARE_TEST_DEFAULTS.speed_corruption_threshold_erpm
+            ):
                 assert abs(fb.speed_erpm) < 10000, (
                     f"Motor still at {fb.speed_erpm} ERPM after braking"
                 )
@@ -437,7 +446,9 @@ class TestCANMITMode:
         motor.enable_mit_mode()
         time.sleep(0.15)
         try:
-            motor.set_mit_mode(pos_rad=0.0, vel_rad_s=0.0, kp=0.0, kd=0.0, torque_ff_nm=0.0)
+            motor.set_mit_mode(
+                pos_rad=0.0, vel_rad_s=0.0, kp=0.0, kd=0.0, torque_ff_nm=0.0
+            )
             time.sleep(0.2)
             fb = get_feedback_with_retry(motor)
             assert fb is not None

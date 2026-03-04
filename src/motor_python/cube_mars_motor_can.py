@@ -29,6 +29,19 @@ CAN_ERROR_CODES: dict[int, str] = {
 }
 
 
+# Motor thermal cutoff — firmware refuses all motion above this temperature.
+# CubeMars AK60-6 spec: driver board shutdown at 100 °C.
+MOTOR_MAX_TEMP_CELSIUS: int = 100
+
+
+class OverheatError(RuntimeError):
+    """Raised when the motor driver board exceeds the safe temperature limit.
+
+    The motor firmware silently refuses all motion commands when overheated;
+    this exception makes that failure visible immediately.
+    """
+
+
 @dataclass
 class CANMotorFeedback:
     """Motor feedback data from the CAN upload message (8 bytes, section 4.3.1).
@@ -378,6 +391,15 @@ class CubeMarsAK606v3CAN:
             self.bus.send(msg, timeout=0.1)
             logger.info("Motor enabled (Servo mode)")
             self._capture_response()
+            # Thermal guard: motor silently refuses all motion above 100 °C.
+            # Fail loudly here rather than returning Speed=0 with no explanation.
+            if self._last_feedback is not None:
+                temp = self._last_feedback.temperature_celsius
+                if temp > MOTOR_MAX_TEMP_CELSIUS:
+                    raise OverheatError(
+                        f"Motor is overheated ({temp} °C > {MOTOR_MAX_TEMP_CELSIUS} °C). "
+                        f"Let it cool before running."
+                    )
         except can.CanError as e:
             logger.error(f"Failed to enable motor: {e}")
 
@@ -473,25 +495,13 @@ class CubeMarsAK606v3CAN:
         current_int = struct.unpack(">h", msg.data[4:6])[0]
         current_amps = current_int * 0.01
 
-        # Temperature: int8, range -20..127 → -20..127 °C (driver board, direct)
-        temperature_raw = struct.unpack("b", bytes([msg.data[6]]))[0]
-        # Validate: the driver board temperature must be physically plausible.
-        # At startup the enable-response frame sometimes carries uninitialised
-        # data in byte 6 (observed: -112, -120, -104 °C).  Clamp to the spec
-        # range and fall back to the last known good reading if available.
-        if -20 <= temperature_raw <= 127:
-            temperature_celsius = temperature_raw
-        else:
-            logger.debug(
-                f"Temperature out of range ({temperature_raw} °C) — "
-                f"using last known value"
-            )
-            temperature_celsius = (
-                self._last_feedback.temperature_celsius
-                if self._last_feedback is not None
-                and -20 <= self._last_feedback.temperature_celsius <= 127
-                else 0
-            )
+        # Temperature: uint8, 0..255 °C (driver board).  CubeMars firmware sends
+        # this as an unsigned byte — observed values like 0x98 (152 °C) indicate
+        # genuine overtemperature, NOT a negative signed value.  Earlier sessions
+        # parsed this as int8 and discarded "out of range" readings, hiding thermal
+        # faults; that is now corrected.
+        temperature_raw = msg.data[6]  # unsigned 0-255
+        temperature_celsius = int(temperature_raw)
 
         # Error code: uint8 (0=OK, 1-7 see CAN_ERROR_CODES)
         error_code = msg.data[7]
@@ -638,11 +648,48 @@ class CubeMarsAK606v3CAN:
             return None
 
     def _refresh_loop(self) -> None:
-        """Background thread: re-send the active command at 50 Hz until stopped."""
+        """Background thread: re-send the active command at 50 Hz until stopped.
+
+        The motor has a 1-second CAN watchdog that disables servo mode if no
+        frame arrives on arb_id=motor_can_id (0x03).  Only DUTY_CYCLE (mode
+        0x00) and the raw enable/disable commands use that arb_id.  Velocity,
+        current, position, and MIT commands all use (mode<<8)|motor_id ≠ 0x03
+        — so they do NOT feed the watchdog.
+
+        Fix: every _WATCHDOG_KEEPALIVE_INTERVAL iterations (≈500 ms) send a
+        raw ENABLE frame on arb_id=motor_can_id so the watchdog never fires.
+        Re-sending the enable payload while already in servo mode is benign.
+        """
+        # Feed the watchdog every 3 iterations (≈60 ms), safely under the
+        # ~100 ms hardware timeout (see class-level comment).  After sending
+        # the ENABLE keepalive, immediately drain the motor's ACK from the
+        # recv buffer: that ACK always reports Speed=0 (the motor has just
+        # re-entered servo mode) and would otherwise overwrite _refresh_feedback
+        # with stale zeroes before the real control-command response arrives.
+        _WATCHDOG_KEEPALIVE_INTERVAL = 3  # every 3 × 20 ms = 60 ms
+        _ENABLE_PAYLOAD = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC])
+        _keepalive_ctr = 0
+
         while not self._refresh_stop.is_set():
             if self._refresh_mode is not None and self._refresh_data is not None:
                 if self.connected and self.bus is not None:
                     try:
+                        # ── Watchdog keepalive ─────────────────────────────
+                        _keepalive_ctr += 1
+                        if _keepalive_ctr >= _WATCHDOG_KEEPALIVE_INTERVAL:
+                            _keepalive_ctr = 0
+                            self.bus.send(
+                                can.Message(
+                                    arbitration_id=self.motor_can_id,
+                                    data=_ENABLE_PAYLOAD,
+                                    is_extended_id=True,
+                                )
+                            )
+                            # Drain the enable ACK (Speed=0) so it does NOT
+                            # contaminate _refresh_feedback before the real
+                            # control-command response is captured below.
+                            self.bus.recv(timeout=0.005)
+                        # ── Main control command ───────────────────────────
                         arb_id = self._build_extended_id(self._refresh_mode)
                         self.bus.send(
                             can.Message(
@@ -1142,16 +1189,16 @@ class CubeMarsAK606v3CAN:
     # ──────────────────────────────────────────────────────────────────────
 
     # Physical limits for MIT bit-field encoding (from CubeMars AK60-6 spec)
-    _MIT_POS_MIN:  float = -12.5   # rad
-    _MIT_POS_MAX:  float =  12.5   # rad
-    _MIT_VEL_MIN:  float = -45.0   # rad/s
-    _MIT_VEL_MAX:  float =  45.0   # rad/s
-    _MIT_KP_MIN:   float =   0.0   # Nm/rad
-    _MIT_KP_MAX:   float = 500.0   # Nm/rad
-    _MIT_KD_MIN:   float =   0.0   # Nms/rad
-    _MIT_KD_MAX:   float =   5.0   # Nms/rad
-    _MIT_TAU_MIN:  float = -18.0   # Nm
-    _MIT_TAU_MAX:  float =  18.0   # Nm
+    _MIT_POS_MIN: float = -12.5  # rad
+    _MIT_POS_MAX: float = 12.5  # rad
+    _MIT_VEL_MIN: float = -45.0  # rad/s
+    _MIT_VEL_MAX: float = 45.0  # rad/s
+    _MIT_KP_MIN: float = 0.0  # Nm/rad
+    _MIT_KP_MAX: float = 500.0  # Nm/rad
+    _MIT_KD_MIN: float = 0.0  # Nms/rad
+    _MIT_KD_MAX: float = 5.0  # Nms/rad
+    _MIT_TAU_MIN: float = -18.0  # Nm
+    _MIT_TAU_MAX: float = 18.0  # Nm
 
     @staticmethod
     def _float_to_uint(value: float, v_min: float, v_max: float, n_bits: int) -> int:
@@ -1203,23 +1250,29 @@ class CubeMarsAK606v3CAN:
         :param torque_ff_nm: Feed-forward torque in Nm.
         :return: 8-byte payload ready for a CAN message.
         """
-        pos_int = self._float_to_uint(pos_rad,      self._MIT_POS_MIN, self._MIT_POS_MAX, 16)
-        vel_int = self._float_to_uint(vel_rad_s,    self._MIT_VEL_MIN, self._MIT_VEL_MAX, 12)
-        kp_int  = self._float_to_uint(kp,           self._MIT_KP_MIN,  self._MIT_KP_MAX,  12)
-        kd_int  = self._float_to_uint(kd,           self._MIT_KD_MIN,  self._MIT_KD_MAX,  12)
-        tau_int = self._float_to_uint(torque_ff_nm, self._MIT_TAU_MIN, self._MIT_TAU_MAX, 12)
+        pos_int = self._float_to_uint(pos_rad, self._MIT_POS_MIN, self._MIT_POS_MAX, 16)
+        vel_int = self._float_to_uint(
+            vel_rad_s, self._MIT_VEL_MIN, self._MIT_VEL_MAX, 12
+        )
+        kp_int = self._float_to_uint(kp, self._MIT_KP_MIN, self._MIT_KP_MAX, 12)
+        kd_int = self._float_to_uint(kd, self._MIT_KD_MIN, self._MIT_KD_MAX, 12)
+        tau_int = self._float_to_uint(
+            torque_ff_nm, self._MIT_TAU_MIN, self._MIT_TAU_MAX, 12
+        )
 
         # Pack 5 fields into 8 bytes (big-endian bit stream)
-        return bytes([
-            pos_int >> 8,                                  # pos [15:8]
-            pos_int & 0xFF,                                # pos [7:0]
-            vel_int >> 4,                                  # vel [11:4]
-            ((vel_int & 0xF) << 4) | (kp_int >> 8),       # vel [3:0] | kp [11:8]
-            kp_int & 0xFF,                                 # kp  [7:0]
-            kd_int >> 4,                                   # kd  [11:4]
-            ((kd_int & 0xF) << 4) | (tau_int >> 8),       # kd  [3:0] | tau [11:8]
-            tau_int & 0xFF,                                # tau [7:0]
-        ])
+        return bytes(
+            [
+                pos_int >> 8,  # pos [15:8]
+                pos_int & 0xFF,  # pos [7:0]
+                vel_int >> 4,  # vel [11:4]
+                ((vel_int & 0xF) << 4) | (kp_int >> 8),  # vel [3:0] | kp [11:8]
+                kp_int & 0xFF,  # kp  [7:0]
+                kd_int >> 4,  # kd  [11:4]
+                ((kd_int & 0xF) << 4) | (tau_int >> 8),  # kd  [3:0] | tau [11:8]
+                tau_int & 0xFF,  # tau [7:0]
+            ]
+        )
 
     def enable_mit_mode(self) -> None:
         """Switch the motor from Servo mode to MIT impedance mode.
