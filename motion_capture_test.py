@@ -17,10 +17,9 @@ Physical angle convention (cable-drive joint):
 
 Motion sequence
 ---------------
-  1.  0 → 90 deg    raise arm to parallel
-  2.  90 → 120 deg  swing 30 deg above parallel
-  3.  Sine wave      oscillate 120 ↔ 60 deg for ~10 s
-  4.  → 0 deg        coast back to gravity hang
+  1.  0 → 120 deg   raise arm directly to 120° (no intermediate stop)
+  2.  Sine wave      oscillate 120 ↔ 60 deg for SINE_DURATION s
+  3.  → 0 deg        coast back to gravity hang
 
 Run:
     sudo ./setup_can.sh
@@ -73,7 +72,7 @@ DEADBAND  = 1.0          # degrees — no correction below this error
 # ──────────────────────────────────────────────────────────────────────────
 WAYPOINT_SETTLE_DEG  = 5.0
 WAYPOINT_SETTLE_ERPM = 500
-WAYPOINT_SETTLE_TIME = 1.5
+WAYPOINT_SETTLE_TIME = 0.3
 WAYPOINT_TIMEOUT     = 20.0
 
 SINE_CENTER   = 90.0    # degrees
@@ -673,22 +672,17 @@ def main() -> None:
             t0 = time.monotonic()
 
             try:
-                # Step 1: 0 → 90°
-                ok = move_to(bus, 90.0, fw_home, "parallel", writer, t0)
-                if not ok:
-                    raise RuntimeError("move to 90° aborted by safety")
-
-                # Step 2: 90 → 120°
+                # Step 1: 0 → 120° directly (no pause at 90°)
                 ok = move_to(bus, 120.0, fw_home, "swing-up", writer, t0)
                 if not ok:
                     raise RuntimeError("move to 120° aborted by safety")
 
-                # Step 3: Sine sweep 120 ↔ 60° for 10 s
+                # Step 2: Sine sweep 120 ↔ 60°
                 ok = sine_sweep(bus, fw_home, writer, t0)
                 if not ok:
                     raise RuntimeError("sine sweep aborted by safety")
 
-                # Step 4: Coast back to 0° (gravity hang)
+                # Step 3: Coast back to 0° (gravity hang)
                 coast_to_hang(bus, fw_home, writer, t0)
 
             except KeyboardInterrupt:
