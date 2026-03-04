@@ -49,10 +49,9 @@ See [docs/CAN_SETUP_GUIDE.md](docs/CAN_SETUP_GUIDE.md) for hardware wiring detai
 > sudo systemctl restart can0.service   # or: sudo ./setup_can.sh
 > ```
 
-> **Important:** Only **duty cycle mode** (`arb_id = motor_id`) works on the current
-> CubeMars AK60-6 firmware. Velocity (0x0303), position (0x0403), and PVA (0x0603)
-> modes ACK but do **not** produce shaft rotation.
-> See [docs/CAN_TROUBLESHOOTING.md](docs/CAN_TROUBLESHOOTING.md) for details.
+> **All control modes are confirmed working:** duty cycle, velocity, position,
+> position+velocity+acceleration, current, brake current, and MIT impedance mode.
+> See [docs/CAN_TELEMETRY_API.md](docs/CAN_TELEMETRY_API.md) for the full API reference.
 
 ## Quick Start — CAN
 
@@ -83,31 +82,39 @@ Key parameters (adjustable at the top of the script):
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `MAX_DUTY` | 0.15 | Peak duty cycle (15%) |
-| `KP / KD / KI` | 0.004 / 0.0003 / 0.0008 | PID gains |
-| `TOLERANCE` | 2.0° | Settle tolerance |
-| `NUM_LOOPS` | 5 | Number of full sweep repetitions |
-| `MIN_ANGLE / MAX_ANGLE` | 0° / 130° | Safety clamp (arm stays on one side) |
+| `MAX_DUTY` | 0.30 | Peak duty cycle (30%) |
+| `KP / KD` | 0.005 / 0.000015 | PD gains |
+| `SINE_CENTER / SINE_AMP` | 90° / 30° | Sine sweep centre and amplitude |
+| `SINE_PERIOD / SINE_DURATION` | 6 s / 90 s | Oscillation period and total run time |
+| `WAYPOINT_SETTLE_TIME` | 0.3 s | Settle dwell at each waypoint |
 
-### Quick Start — UART
-
-```python
-from motor_python.cube_mars_motor import CubeMarsAK606v3
-
-motor = CubeMarsAK606v3()
-motor.set_velocity(velocity_erpm=10000)   # Pull tendon
-motor.stop()
-```
-
-### Quick Start — CAN (Python class)
+### Quick Start — CAN (primary interface)
 
 ```python
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+from motor_python import Motor  # CAN by default
+from motor_python.definitions import TendonAction
 
-motor = CubeMarsAK606v3CAN(motor_can_id=0x03, interface="can0", bitrate=1000000)
-motor.set_velocity(velocity_erpm=10000)
-motor.stop()
+with Motor(motor_can_id=0x03) as motor:
+    motor.enable_motor()
+    motor.set_velocity(velocity_erpm=10000)              # spin at 10 000 ERPM
+    motor.control_exosuit_tendon(TendonAction.PULL)      # high-level: pull tendon
+    motor.control_exosuit_tendon(TendonAction.STOP)
+    motor.set_position_velocity_accel(90.0, 8000, 4000)  # smooth move to 90°
+    motor.set_mit_mode(pos_rad=1.57, kp=100, kd=2)       # impedance control
 ```
+
+### Quick Start — UART (testing only)
+
+```python
+from motor_python import CubeMarsAK606v3 as Motor  # swap this one line
+
+with Motor() as motor:
+    motor.set_velocity(velocity_erpm=10000)
+    motor.stop()
+```
+
+Both classes share the same public API — `set_velocity`, `set_position`, `stop`,
+`control_exosuit_tendon`, `get_position`, `get_status`, `check_communication`, etc.
 
 ## Publishing
 
@@ -118,16 +125,48 @@ It's super easy to publish your own packages on PyPi. To build and publish this 
 
 ## API
 
+### Lifecycle
+
 | Method | Description |
 |--------|-------------|
-| `set_velocity(velocity_erpm, allow_low_speed=False)` | Set speed in ERPM |
-| `set_position(position_degrees)` | Set target position in degrees (unlimited for spool cable system) |
-| `get_position()` | Read current position from motor |
-| `move_to_position_with_speed(target_degrees, motor_speed_erpm)` | Move to position via velocity then hold |
-| `control_exosuit_tendon(action, velocity_erpm)` | Helper for pull / release / stop |
-| `stop()` | Stop the motor (current = 0, releases windings) |
-| `get_status()` | Query all motor parameters |
-| `check_communication()` | Verify motor is responding |
+| `enable_motor()` | Power on — enter Servo mode (required before any command) |
+| `disable_motor()` | Power off — motor coasts |
+| `check_communication()` | Verify motor is responding over CAN |
+| `close()` | Stop + release CAN bus (also called automatically by `with` statement) |
+
+### Control (Servo mode)
+
+| Method | Description |
+|--------|-------------|
+| `set_velocity(velocity_erpm, allow_low_speed=False)` | Continuous spin at given ERPM |
+| `set_position(position_degrees)` | Move to angle and hold |
+| `set_position_velocity_accel(pos, vel, accel)` | Smooth trapezoidal profile move |
+| `set_current(current_amps)` | Direct torque via IQ current |
+| `set_brake_current(current_amps)` | Regenerative hold against external load |
+| `set_duty_cycle(duty)` | Raw PWM fraction −1.0 … +1.0 |
+| `set_origin(permanent=False)` | Define current angle as new zero |
+| `move_to_position_with_speed(target, speed_erpm)` | Velocity-drive to target then hold |
+| `control_exosuit_tendon(action, velocity_erpm)` | High-level: `TendonAction.PULL / RELEASE / STOP` |
+| `stop()` | Zero current, coast to stop |
+
+### Control (MIT impedance mode — CAN only)
+
+| Method | Description |
+|--------|-------------|
+| `enable_mit_mode()` | Enter MIT mode (replaces `enable_motor()`) |
+| `set_mit_mode(pos_rad, vel_rad_s, kp, kd, torque_ff_nm)` | τ = kp·Δpos + kd·Δvel + tau_ff |
+| `disable_mit_mode()` | Exit MIT mode |
+
+### Telemetry
+
+| Method | Returns |
+|--------|---------|
+| `get_position()` | Current angle in degrees |
+| `get_speed()` | Current speed in ERPM |
+| `get_current()` | Phase current in Amps |
+| `get_temperature()` | Driver board temperature in °C |
+| `get_status()` | Full state — logs position / speed / current / temp / error |
+| `get_motor_data()` | All fields as a `dict` |
 
 ## Velocity Safety
 
