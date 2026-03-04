@@ -136,6 +136,10 @@ class CubeMarsAK606v3CAN:
         # _receive_feedback call).  The motor operates in response-only mode:
         # it sends exactly one 0x2903 status frame per command it receives.
         self._pending_feedback: CANMotorFeedback | None = None
+        # Most recent feedback captured by the background refresh thread.
+        # Cleared by _start_refresh() so _receive_feedback() never returns a
+        # stale one-shot response (e.g. the enable ACK) when polling refresh data.
+        self._refresh_feedback: CANMotorFeedback | None = None
         self._consecutive_no_response = 0
         self._max_no_response = MOTOR_DEFAULTS.max_no_response_attempts
 
@@ -571,6 +575,9 @@ class CubeMarsAK606v3CAN:
         :return: CANMotorFeedback or None.
         """
         # Fast path: return the response already captured by _capture_response.
+        # _start_refresh() clears _pending_feedback, so this path is only
+        # taken for one-shot commands (enable/disable/set_origin) that are NOT
+        # followed by a refresh loop.
         if self._pending_feedback is not None:
             fb = self._pending_feedback
             self._pending_feedback = None
@@ -579,10 +586,28 @@ class CubeMarsAK606v3CAN:
         if not self.connected or self.bus is None:
             return None
 
-        # Slow path: wait on the bus (caller sent a command externally, or
-        # motor is configured for periodic broadcast).  Loop for the full
-        # timeout window, skipping frames from unrelated devices (e.g. the
-        # 0x0088 flood) rather than returning None on the first non-motor frame.
+        # Refresh-thread path: the background loop is continuously sending
+        # commands and capturing responses into _refresh_feedback.  Racing on
+        # bus.recv() here would steal messages from the refresh thread (or
+        # vice versa).  Instead, poll _refresh_feedback until it is populated
+        # or the timeout expires.  _start_refresh() clears this field each
+        # time a new command is issued, so stale data from previous commands
+        # (e.g. the enable ACK) is never returned here.
+        if self._refresh_thread is not None and self._refresh_thread.is_alive():
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                if self._refresh_feedback is not None:
+                    self._consecutive_no_response = 0
+                    self.communicating = True
+                    return self._refresh_feedback
+                time.sleep(self._refresh_interval)
+            self._consecutive_no_response += 1
+            return None
+
+        # Slow path: no refresh thread — wait on the bus directly (used when
+        # the caller sent a command externally, or the motor is configured for
+        # periodic broadcast).  Loop for the full timeout window, skipping
+        # frames from unrelated devices (e.g. the 0x0088 flood).
         deadline = time.monotonic() + timeout
         try:
             while True:
@@ -639,6 +664,7 @@ class CubeMarsAK606v3CAN:
                             fb = self._parse_feedback_msg(msg)
                             if fb:
                                 self._last_feedback = fb
+                                self._refresh_feedback = fb
                                 self.communicating = True
                                 break
                     except can.CanError:
@@ -658,6 +684,14 @@ class CubeMarsAK606v3CAN:
             data = data[:8]
         self._refresh_mode = mode
         self._refresh_data = data
+        # Clear any stale one-shot response buffered by a previous enable/disable
+        # or single-command call.  Without this, _receive_feedback() returns the
+        # old response (e.g. the enable ACK with Speed=0) instead of waiting for
+        # the refresh thread's live data.
+        self._pending_feedback = None
+        # Also clear the refresh-specific feedback so _receive_feedback() polls
+        # for a new frame captured by this refresh cycle, not a prior one.
+        self._refresh_feedback = None
         if self._refresh_thread is None or not self._refresh_thread.is_alive():
             self._refresh_stop.clear()
             self._refresh_thread = threading.Thread(
@@ -670,6 +704,7 @@ class CubeMarsAK606v3CAN:
         """Stop the background refresh thread and clear the active command."""
         self._refresh_mode = None
         self._refresh_data = None
+        self._refresh_feedback = None
         self._refresh_stop.set()
         if self._refresh_thread is not None:
             self._refresh_thread.join(timeout=0.2)

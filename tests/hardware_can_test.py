@@ -250,6 +250,14 @@ class TestCANPositionControl:
     """Test position commands over CAN."""
 
     @pytest.mark.flaky(reruns=3, reruns_delay=0)
+    @pytest.mark.xfail(
+        strict=False,
+        reason=(
+            "Position mode 0x04 not functional on this firmware: motor ACKs the "
+            "command and returns feedback but does not physically move. "
+            "See docs/CAN_TROUBLESHOOTING.md — requires CubeMars PC software config."
+        ),
+    )
     def test_set_position_move_and_verify(self, motor: CubeMarsAK606v3CAN) -> None:
         """Motor moves to target position within tolerance."""
         target = 90.0
