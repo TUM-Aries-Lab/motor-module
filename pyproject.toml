@@ -60,7 +60,6 @@ markers = [
 ]
 testpaths = ["tests"]
 pythonpath = ["src"]
-log_level = "WARNING"
 
 [build-system]
 requires = ["hatchling"]

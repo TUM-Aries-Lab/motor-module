@@ -101,6 +101,9 @@ class TestCANFeedback:
     @pytest.mark.flaky(reruns=3, reruns_delay=0)
     def test_receives_feedback(self, motor: CubeMarsAK606v3CAN) -> None:
         """Motor broadcasts feedback frames that parse correctly."""
+        # Motor only broadcasts after being enabled; enable first to ensure frames flow
+        motor.enable_motor()
+        time.sleep(0.1)
         fb = get_feedback_with_retry(motor)
         assert isinstance(fb, CANMotorFeedback)
         # Validate all fields are in protocol range
