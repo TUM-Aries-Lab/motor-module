@@ -84,8 +84,9 @@ ROT_GUARD_NEG = 25.0
 ROT_GUARD_POS = 175.0
 PHYS_MIN      = -20.0
 PHYS_MAX      = 190.0
-MAX_SAFE_ERPM = 3000    # coast to a stop if speed exceeds this during sine sweep
-BRAKE_ERPM    = 1000    # resume normal control once speed drops below this
+MAX_SAFE_ERPM = 6000    # coast to a stop if speed exceeds this during sine sweep
+                        # NOTE: normal sine peaks at ~2560 ERPM; 6000 gives 2× margin
+BRAKE_ERPM    = 1500    # resume normal control once speed drops below this
 
 LOOP_HZ   = 50
 SAMPLE_HZ = 20
@@ -153,8 +154,11 @@ def read_feedback(bus: can.BusABC, deadline_ms: float = 15.0):
         pos_deg = struct.unpack(">h", d[0:2])[0] * 0.1
         erpm    = struct.unpack(">h", d[2:4])[0] * 10
         cur_a   = struct.unpack(">h", d[4:6])[0] * 0.01
-        temp_c  = d[6]
-        err     = d[7]
+        # Byte 6 is signed int8 (-20..127 °C).  The enable-ACK frame sometimes
+        # carries uninitialised data here; clamp to a plausible range.
+        temp_raw = struct.unpack("b", bytes([d[6]]))[0]
+        temp_c   = temp_raw if -20 <= temp_raw <= 127 else 0
+        err      = d[7]
         return pos_deg, erpm, cur_a, temp_c, err
 
 
@@ -466,6 +470,12 @@ def sine_sweep(
                             "temp_c":        fb2[3],
                             "error_code":    fb2[4],
                         })
+                    # Safety check inside brake loop — abort if position goes OOB
+                    brake_fault = check_safety(fb2[0], fw_home)
+                    if brake_fault:
+                        tx(bus, STOP_CMD)
+                        print(f"\n  !! {brake_fault} during speed brake — aborting")
+                        return False
                 time.sleep(0.01)
             print(f" resumed at {spd:+d} ERPM")
 
@@ -624,7 +634,18 @@ def main() -> None:
     print(f"  Log: {csv_path}")
     print("=" * 64)
 
-    bus = can.interface.Bus(channel=INTERFACE, interface="socketcan")
+    # Apply kernel-level CAN receive filter so the 0x0088 standard-frame
+    # flood (~30 kfps) is dropped before it fills the socket buffer and
+    # starves Python of motor feedback frames.
+    _can_filters = [
+        {"can_id": fid, "can_mask": 0x1FFFFFFF, "extended": True}
+        for fid in FEEDBACK_IDS
+    ]
+    bus = can.interface.Bus(
+        channel=INTERFACE,
+        interface="socketcan",
+        can_filters=_can_filters,
+    )
 
     try:
         with open(csv_path, "w", newline="") as csv_file:
