@@ -157,43 +157,117 @@ motor.set_brake_current(5.0)   # braking force equivalent to 5 A
 
 ### `set_velocity(velocity_erpm: int)`
 
-Command a shaft speed in electrical RPM.
+Command a shaft speed in electrical RPM.  Positive = forward, negative = reverse.
 
-**Note:** On the evaluation unit's firmware, this mode ACKs correctly over CAN but
-does **not** produce shaft rotation.  The method is implemented correctly and will
-work on units with updated or production firmware.
+A soft-start pre-spin (3 A current for 150 ms) is applied automatically before
+switching to velocity PID to avoid current oscillations in the low-speed zone
+(< 5 000 ERPM).  Speeds below 5 000 ERPM are blocked by default — pass
+`allow_low_speed=True` to override.
 
 ```python
-motor.set_velocity(10000)   # 10 000 ERPM ≈ 476 mechanical RPM
+motor.set_velocity(10000)                      # 10 000 ERPM ≈ 476 mechanical RPM
+motor.set_velocity(-8000)                      # reverse
+motor.set_velocity(2000, allow_low_speed=True) # slow speed (noisy, use with caution)
 ```
 
 ---
 
-### `set_position(degrees: float, speed_erpm: int, accel_erpm_s: int)`
+### `set_position(position_degrees: float)`
 
-Command a target absolute angle with a trapezoidal speed profile.
+Command a target absolute angle.  The motor moves at its firmware-default speed
+and holds the position against external load.
 
-Position is encoded as `int32(degrees × 10000)`.
-Speed and acceleration limits are each divided by 10 before being encoded as
-`int16`, as required by the CubeMars CAN spec (section 4.4.1).
+For a controlled-speed move use `set_position_velocity_accel()` instead.
 
-Same firmware caveat as `set_velocity()`: ACKs but no shaft rotation on
-evaluation unit.
+```python
+motor.set_position(90.0)   # move to 90 degrees and hold
+```
+
+---
+
+### `set_position_velocity_accel(position_degrees, velocity_erpm, accel_erpm_per_sec)`
+
+Trapezoidal motion profile: accelerate to `velocity_erpm`, travel, decelerate into
+target, and hold.  Preferred for smooth exosuit joint movements.
+
+- `position_degrees`: target in degrees (−3200 to +3200)
+- `velocity_erpm`: max travel speed (0 = firmware default, very fast)
+- `accel_erpm_per_sec`: max acceleration (0 = firmware default)
+
+```python
+motor.set_position_velocity_accel(120.0, velocity_erpm=10000, accel_erpm_per_sec=5000)
+```
+
+---
+
+### `set_mit_mode(pos_rad, vel_rad_s, kp, kd, torque_ff_nm)`
+
+Impedance control via the MIT actuator protocol.  The output torque is:
+
+```
+τ = kp × (pos_target − pos_actual) + kd × (vel_target − vel_actual) + tau_ff
+```
+
+**Requires `enable_mit_mode()` before use — not `enable_motor()`.**
+
+Use cases:
+
+| Goal | kp | kd | tau_ff | vel |
+|---|---|---|---|---|
+| Spring position hold | > 0 | > 0 | 0 | 0 |
+| Velocity damping | 0 | > 0 | 0 | desired |
+| Pure torque | 0 | 0 | > 0 | 0 |
+| Passive float | 0 | 0 | 0 | 0 |
+
+Physical limits (automatically clamped):
+
+| Parameter | Range | Unit |
+|---|---|---|
+| `pos_rad` | −12.5 … +12.5 | rad |
+| `vel_rad_s` | −45 … +45 | rad/s |
+| `kp` | 0 … 500 | Nm/rad |
+| `kd` | 0 … 5 | Nms/rad |
+| `torque_ff_nm` | −18 … +18 | Nm |
+
+```python
+motor.enable_mit_mode()
+motor.set_mit_mode(pos_rad=1.57, kp=100, kd=2)          # spring to 90°
+motor.set_mit_mode(pos_rad=0, vel_rad_s=3.0, kd=1.5)    # velocity damping
+motor.set_mit_mode(pos_rad=0, torque_ff_nm=5.0)          # torque only
+motor.disable_mit_mode()
+```
+
+---
+
+### `enable_mit_mode()` / `disable_mit_mode()`
+
+Switch into and out of MIT impedance mode.  MIT uses different enable/disable
+bytes than Servo mode — do not mix them.
+
+| | Byte sequence | Arb ID |
+|---|---|---|
+| Enable MIT | `FF FF FF FF FF FF FF FF` | `motor_id` |
+| Disable MIT | `FF FF FF FF FF FF FF FE` | `motor_id` |
 
 ---
 
 ### `stop()`
 
-Terminates the background refresh thread and sends a zero-duty command,
-causing the motor to coast to a stop.
+Stops the background refresh thread and sends a zero-current command,
+causing the motor to coast to a halt.  Safe to call at any time.
 
 ---
 
 ### `enable_motor()` / `disable_motor()`
 
-Special 8-byte command frames that activate / deactivate the motor drive output.
-The motor will not respond to any motion command until `enable_motor()` has been
-sent.  `disable_motor()` returns the motor to a free-spinning, unpowered state.
+Special 8-byte frames that activate / deactivate **Servo mode** (duty, current,
+velocity, position commands).  The motor ignores all control commands until
+`enable_motor()` has been called.
+
+| | Byte sequence | Arb ID |
+|---|---|---|
+| Enable Servo | `FF FF FF FF FF FF FF FC` | `motor_id` |
+| Disable Servo | `FF FF FF FF FF FF FF FD` | `motor_id` |
 
 ---
 
@@ -255,5 +329,16 @@ All values are big-endian (most significant byte first).
 | Velocity | `int32(ERPM)` | `0x00000000` | `0x00000303` |
 | Position | `int32(deg × 10000)` | `0x00000000` | `0x00000403` |
 | Position+Vel | `int32(deg × 10000)` | `int16(speed÷10)` + `int16(accel÷10)` | `0x00000603` |
+| MIT (all modes) | bit-packed (see below) | bit-packed | `0x00000803` |
+
+**MIT 8-byte bit layout:**
+
+```
+Bits [63:48]  pos  uint16  [-12.5, 12.5] rad    → _pack_mit_frame()
+Bits [47:36]  vel  uint12  [-45,   45]   rad/s
+Bits [35:24]  kp   uint12  [0,    500]   Nm/rad
+Bits [23:12]  kd   uint12  [0,      5]   Nms/rad
+Bits [11: 0]  tau  uint12  [-18,   18]   Nm
+```
 
 All payloads are padded to exactly 8 bytes, big-endian.

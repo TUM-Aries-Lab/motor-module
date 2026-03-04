@@ -80,7 +80,16 @@ class CANControlMode:
     POSITION_LOOP = 0x04  # Position loop        — degree setpoint
     SET_ORIGIN = 0x05  # Set origin          — define new zero
     POSITION_VELOCITY = 0x06  # Pos + vel + acc profile
-    MIT_MODE = 0x08  # MIT actuator protocol (bit-packed)
+    MIT_MODE = 0x08  # MIT impedance/actuator protocol (bit-packed 64-bit frame)
+    #                    Enable:  FF FF FF FF FF FF FF FF  (arb_id = motor_id)
+    #                    Disable: FF FF FF FF FF FF FF FE  (arb_id = motor_id)
+    #                    Payload encoding — all big-endian bit-fields (8 bytes total):
+    #                      [63:48] pos  uint16  range [-12.5, 12.5] rad   → 0..65535
+    #                      [47:36] vel  uint12  range [-45.0, 45.0] rad/s → 0..4095
+    #                      [35:24] kp   uint12  range [0, 500] Nm/rad     → 0..4095
+    #                      [23:12] kd   uint12  range [0, 5] Nms/rad      → 0..4095
+    #                      [11:0]  tau  uint12  range [-18, 18] Nm        → 0..4095
+    #                    See _pack_mit_frame() and set_mit_mode() for Python helpers.
 
 
 class CubeMarsAK606v3CAN:
@@ -1091,6 +1100,208 @@ class CubeMarsAK606v3CAN:
         self.set_position(target_degrees)
         logger.info(
             f"Reached position: {target_degrees:.1f}° at {motor_speed_erpm} ERPM"
+        )
+
+    # ──────────────────────────────────────────────────────────────────────
+    # MIT Impedance Control (mode 0x08)
+    # ──────────────────────────────────────────────────────────────────────
+
+    # Physical limits for MIT bit-field encoding (from CubeMars AK60-6 spec)
+    _MIT_POS_MIN:  float = -12.5   # rad
+    _MIT_POS_MAX:  float =  12.5   # rad
+    _MIT_VEL_MIN:  float = -45.0   # rad/s
+    _MIT_VEL_MAX:  float =  45.0   # rad/s
+    _MIT_KP_MIN:   float =   0.0   # Nm/rad
+    _MIT_KP_MAX:   float = 500.0   # Nm/rad
+    _MIT_KD_MIN:   float =   0.0   # Nms/rad
+    _MIT_KD_MAX:   float =   5.0   # Nms/rad
+    _MIT_TAU_MIN:  float = -18.0   # Nm
+    _MIT_TAU_MAX:  float =  18.0   # Nm
+
+    @staticmethod
+    def _float_to_uint(value: float, v_min: float, v_max: float, n_bits: int) -> int:
+        """Map a physical value to an unsigned integer within an n-bit range.
+
+        :param value:  Physical value to encode.
+        :param v_min:  Minimum physical value (maps to 0).
+        :param v_max:  Maximum physical value (maps to 2**n_bits - 1).
+        :param n_bits: Number of bits in the output field (12 or 16).
+        :return: Unsigned integer in [0, 2**n_bits - 1].
+        """
+        value = float(np.clip(value, v_min, v_max))
+        span = v_max - v_min
+        return int((value - v_min) * ((1 << n_bits) - 1) / span)
+
+    @staticmethod
+    def _uint_to_float(raw: int, v_min: float, v_max: float, n_bits: int) -> float:
+        """Decode an unsigned integer field back to a physical value.
+
+        :param raw:    Unsigned integer read from the CAN frame.
+        :param v_min:  Minimum physical value.
+        :param v_max:  Maximum physical value.
+        :param n_bits: Width of the field in bits (12 or 16).
+        :return: Physical value in [v_min, v_max].
+        """
+        return raw * (v_max - v_min) / ((1 << n_bits) - 1) + v_min
+
+    def _pack_mit_frame(
+        self,
+        pos_rad: float,
+        vel_rad_s: float,
+        kp: float,
+        kd: float,
+        torque_ff_nm: float,
+    ) -> bytes:
+        """Encode five MIT control fields into the 8-byte bit-packed CAN payload.
+
+        Bit layout (big-endian, 64 bits):
+          [63:48] pos  16 bits  [-12.5, 12.5] rad
+          [47:36] vel  12 bits  [-45.0, 45.0] rad/s
+          [35:24] kp   12 bits  [0, 500] Nm/rad
+          [23:12] kd   12 bits  [0, 5]   Nms/rad
+          [11:0]  tau  12 bits  [-18, 18] Nm
+
+        :param pos_rad:      Target position in radians.
+        :param vel_rad_s:    Target velocity in rad/s (used as feedforward).
+        :param kp:           Position stiffness in Nm/rad.
+        :param kd:           Velocity damping in Nms/rad.
+        :param torque_ff_nm: Feed-forward torque in Nm.
+        :return: 8-byte payload ready for a CAN message.
+        """
+        pos_int = self._float_to_uint(pos_rad,      self._MIT_POS_MIN, self._MIT_POS_MAX, 16)
+        vel_int = self._float_to_uint(vel_rad_s,    self._MIT_VEL_MIN, self._MIT_VEL_MAX, 12)
+        kp_int  = self._float_to_uint(kp,           self._MIT_KP_MIN,  self._MIT_KP_MAX,  12)
+        kd_int  = self._float_to_uint(kd,           self._MIT_KD_MIN,  self._MIT_KD_MAX,  12)
+        tau_int = self._float_to_uint(torque_ff_nm, self._MIT_TAU_MIN, self._MIT_TAU_MAX, 12)
+
+        # Pack 5 fields into 8 bytes (big-endian bit stream)
+        return bytes([
+            pos_int >> 8,                                  # pos [15:8]
+            pos_int & 0xFF,                                # pos [7:0]
+            vel_int >> 4,                                  # vel [11:4]
+            ((vel_int & 0xF) << 4) | (kp_int >> 8),       # vel [3:0] | kp [11:8]
+            kp_int & 0xFF,                                 # kp  [7:0]
+            kd_int >> 4,                                   # kd  [11:4]
+            ((kd_int & 0xF) << 4) | (tau_int >> 8),       # kd  [3:0] | tau [11:8]
+            tau_int & 0xFF,                                # tau [7:0]
+        ])
+
+    def enable_mit_mode(self) -> None:
+        """Switch the motor from Servo mode to MIT impedance mode.
+
+        **Important:** Call this instead of (or after) enable_motor() when you
+        intend to use set_mit_mode().  MIT mode uses a different enable command
+        (0xFFFFFFFFFFFFFFFF) than Servo mode (0xFFFFFFFFFFFFFFFC).
+
+        Mixing MIT and Servo commands (e.g. calling set_position() while in MIT
+        mode) is not supported — call disable_mit_mode() then enable_motor()
+        before switching back to Servo commands.
+
+        :return: None
+        """
+        if not self.connected or self.bus is None:
+            logger.warning("Cannot enable MIT mode — CAN bus not connected")
+            return
+        try:
+            msg = can.Message(
+                arbitration_id=self.motor_can_id,
+                data=bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]),
+                is_extended_id=True,
+            )
+            self.bus.send(msg, timeout=0.1)
+            logger.info("MIT mode enabled")
+            self._capture_response()
+        except can.CanError as e:
+            logger.error(f"Failed to enable MIT mode: {e}")
+
+    def disable_mit_mode(self) -> None:
+        """Exit MIT mode and cut motor drive output.
+
+        The motor will coast to a stop.  Call enable_motor() before using
+        any Servo-mode command (set_velocity, set_position, etc.).
+
+        :return: None
+        """
+        if not self.connected or self.bus is None:
+            logger.warning("Cannot disable MIT mode — CAN bus not connected")
+            return
+        self._stop_refresh()
+        try:
+            msg = can.Message(
+                arbitration_id=self.motor_can_id,
+                data=bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE]),
+                is_extended_id=True,
+            )
+            self.bus.send(msg, timeout=0.1)
+            logger.info("MIT mode disabled")
+            self._capture_response()
+        except can.CanError as e:
+            logger.error(f"Failed to disable MIT mode: {e}")
+
+    def set_mit_mode(
+        self,
+        pos_rad: float,
+        vel_rad_s: float = 0.0,
+        kp: float = 0.0,
+        kd: float = 0.0,
+        torque_ff_nm: float = 0.0,
+    ) -> None:
+        """Send an impedance control command using the MIT actuator protocol.
+
+        MIT mode gives direct control over the motor's virtual spring-damper:
+        the output torque is computed as::
+
+            τ = kp * (pos_target − pos_actual) + kd * (vel_target − vel_actual) + tau_ff
+
+        This allows smooth, compliant motion ideal for exosuit joints.
+
+        **You must call enable_mit_mode() once before using this method.**
+
+        Common use cases:
+
+        * Position + stiffness (spring mode)::
+
+            motor.set_mit_mode(pos_rad=1.57, kp=100, kd=2)
+
+        * Pure velocity damping (velocity loop)::
+
+            motor.set_mit_mode(pos_rad=0, vel_rad_s=6.0, kd=2)
+
+        * Pure torque feed-forward (torque loop)::
+
+            motor.set_mit_mode(pos_rad=0, torque_ff_nm=5.0)
+
+        * Zero-torque (safe float / gravity comp off)::
+
+            motor.set_mit_mode(pos_rad=0)   # kp=kd=tau=0
+
+        Physical limits (values are clamped, not rejected):
+
+        =========== =================== ===========
+        Field       Range               Unit
+        =========== =================== ===========
+        pos_rad     −12.5 … +12.5       rad
+        vel_rad_s   −45.0 … +45.0       rad/s
+        kp          0 … 500             Nm/rad
+        kd          0 … 5               Nms/rad
+        torque_ff   −18 … +18           Nm
+        =========== =================== ===========
+
+        CAN frame: arb_id = 0x0800 | motor_id, 8-byte bit-packed payload.
+        See _pack_mit_frame() for encoding details.
+
+        :param pos_rad:      Target joint angle in radians.
+        :param vel_rad_s:    Target / feedforward velocity in rad/s.
+        :param kp:           Position stiffness gain in Nm/rad.
+        :param kd:           Velocity damping gain in Nms/rad.
+        :param torque_ff_nm: Feed-forward torque in Nm.
+        :return: None
+        """
+        data = self._pack_mit_frame(pos_rad, vel_rad_s, kp, kd, torque_ff_nm)
+        self._start_refresh(CANControlMode.MIT_MODE, data)
+        logger.info(
+            f"MIT mode: pos={pos_rad:.3f} rad  vel={vel_rad_s:.2f} rad/s  "
+            f"kp={kp:.1f}  kd={kd:.2f}  tau_ff={torque_ff_nm:.2f} Nm"
         )
 
     def control_exosuit_tendon(
