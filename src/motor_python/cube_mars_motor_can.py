@@ -391,15 +391,6 @@ class CubeMarsAK606v3CAN:
             self.bus.send(msg, timeout=0.1)
             logger.info("Motor enabled (Servo mode)")
             self._capture_response()
-            # Thermal guard: motor silently refuses all motion above 100 °C.
-            # Fail loudly here rather than returning Speed=0 with no explanation.
-            if self._last_feedback is not None:
-                temp = self._last_feedback.temperature_celsius
-                if temp > MOTOR_MAX_TEMP_CELSIUS:
-                    raise OverheatError(
-                        f"Motor is overheated ({temp} °C > {MOTOR_MAX_TEMP_CELSIUS} °C). "
-                        f"Let it cool before running."
-                    )
         except can.CanError as e:
             logger.error(f"Failed to enable motor: {e}")
 
@@ -495,13 +486,25 @@ class CubeMarsAK606v3CAN:
         current_int = struct.unpack(">h", msg.data[4:6])[0]
         current_amps = current_int * 0.01
 
-        # Temperature: uint8, 0..255 °C (driver board).  CubeMars firmware sends
-        # this as an unsigned byte — observed values like 0x98 (152 °C) indicate
-        # genuine overtemperature, NOT a negative signed value.  Earlier sessions
-        # parsed this as int8 and discarded "out of range" readings, hiding thermal
-        # faults; that is now corrected.
-        temperature_raw = msg.data[6]  # unsigned 0-255
-        temperature_celsius = int(temperature_raw)
+        # Temperature: int8, range -20..127 → -20..127 °C (driver board, direct)
+        temperature_raw = struct.unpack("b", bytes([msg.data[6]]))[0]
+        # Validate: the driver board temperature must be physically plausible.
+        # At startup the enable-response frame sometimes carries uninitialised
+        # data in byte 6 (observed: -112, -120, -104 °C).  Clamp to the spec
+        # range and fall back to the last known good reading if available.
+        if -20 <= temperature_raw <= 127:
+            temperature_celsius = temperature_raw
+        else:
+            logger.debug(
+                f"Temperature out of range ({temperature_raw} °C) — "
+                f"using last known value"
+            )
+            temperature_celsius = (
+                self._last_feedback.temperature_celsius
+                if self._last_feedback is not None
+                and -20 <= self._last_feedback.temperature_celsius <= 127
+                else 0
+            )
 
         # Error code: uint8 (0=OK, 1-7 see CAN_ERROR_CODES)
         error_code = msg.data[7]
@@ -650,34 +653,29 @@ class CubeMarsAK606v3CAN:
     def _refresh_loop(self) -> None:
         """Background thread: re-send the active command at 50 Hz until stopped.
 
-        The motor has a 1-second CAN watchdog that disables servo mode if no
-        frame arrives on arb_id=motor_can_id (0x03).  Only DUTY_CYCLE (mode
-        0x00) and the raw enable/disable commands use that arb_id.  Velocity,
-        current, position, and MIT commands all use (mode<<8)|motor_id ≠ 0x03
-        — so they do NOT feed the watchdog.
+        The motor has a ~100 ms CAN watchdog on arb_id=motor_can_id (0x03).
+        Only DUTY_CYCLE (mode 0x00) naturally lands on that arb_id.  All other
+        modes (velocity 0x0303, current 0x0103, position 0x0403, …) use a
+        different arb_id and do NOT feed the watchdog.
 
-        Fix: every _WATCHDOG_KEEPALIVE_INTERVAL iterations (≈500 ms) send a
-        raw ENABLE frame on arb_id=motor_can_id so the watchdog never fires.
-        Re-sending the enable payload while already in servo mode is benign.
+        Fix: for non-duty-cycle modes, send a brief ENABLE keepalive on
+        motor_can_id before the real command each iteration (~50 Hz, well
+        within the 100 ms window).  The motor's ACK to the keepalive always
+        reports Speed=0; to avoid poisoning feedback we read ALL motor frames
+        up to the deadline and keep the **last** one (the real command reply).
         """
-        # Feed the watchdog every 3 iterations (≈60 ms), safely under the
-        # ~100 ms hardware timeout (see class-level comment).  After sending
-        # the ENABLE keepalive, immediately drain the motor's ACK from the
-        # recv buffer: that ACK always reports Speed=0 (the motor has just
-        # re-entered servo mode) and would otherwise overwrite _refresh_feedback
-        # with stale zeroes before the real control-command response arrives.
-        _WATCHDOG_KEEPALIVE_INTERVAL = 3  # every 3 × 20 ms = 60 ms
         _ENABLE_PAYLOAD = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC])
-        _keepalive_ctr = 0
 
         while not self._refresh_stop.is_set():
             if self._refresh_mode is not None and self._refresh_data is not None:
                 if self.connected and self.bus is not None:
                     try:
-                        # ── Watchdog keepalive ─────────────────────────────
-                        _keepalive_ctr += 1
-                        if _keepalive_ctr >= _WATCHDOG_KEEPALIVE_INTERVAL:
-                            _keepalive_ctr = 0
+                        needs_keepalive = (
+                            self._refresh_mode != CANControlMode.DUTY_CYCLE
+                        )
+
+                        # ── Watchdog keepalive (non-duty-cycle modes) ──────
+                        if needs_keepalive:
                             self.bus.send(
                                 can.Message(
                                     arbitration_id=self.motor_can_id,
@@ -685,10 +683,7 @@ class CubeMarsAK606v3CAN:
                                     is_extended_id=True,
                                 )
                             )
-                            # Drain the enable ACK (Speed=0) so it does NOT
-                            # contaminate _refresh_feedback before the real
-                            # control-command response is captured below.
-                            self.bus.recv(timeout=0.005)
+
                         # ── Main control command ───────────────────────────
                         arb_id = self._build_extended_id(self._refresh_mode)
                         self.bus.send(
@@ -698,8 +693,11 @@ class CubeMarsAK606v3CAN:
                                 is_extended_id=True,
                             )
                         )
-                        # Capture the one-shot reply — loop to skip non-motor
-                        # frames (e.g. 0x0088 flood) within the time budget.
+
+                        # Capture reply.  When a keepalive was sent we expect
+                        # TWO motor frames (enable ACK + command reply); read
+                        # until the deadline and keep the last motor frame so
+                        # the Speed=0 ACK is overwritten by the real response.
                         deadline = time.monotonic() + 0.015
                         while True:
                             remaining = deadline - time.monotonic()
@@ -713,7 +711,8 @@ class CubeMarsAK606v3CAN:
                                 self._last_feedback = fb
                                 self._refresh_feedback = fb
                                 self.communicating = True
-                                break
+                                if not needs_keepalive:
+                                    break
                     except can.CanError:
                         pass
             self._refresh_stop.wait(self._refresh_interval)

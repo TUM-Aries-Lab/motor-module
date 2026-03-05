@@ -8,7 +8,7 @@ Pre-conditions:
 
 Run with: make test-hardware (or pytest -m hardware tests/hardware_can_test.py)
 
-Test count: 23 tests covering all core motor control functions.
+Test count: 18 tests covering all core motor control functions.
 """
 
 import logging
