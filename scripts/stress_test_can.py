@@ -8,13 +8,15 @@ simulating real usage patterns including:
   - Back-to-back commands at full speed
 
 Run:
-    python stress_test_can.py
+    sudo ./setup_can.sh
+    .venv/bin/python scripts/stress_test_can.py
 """
 
 import sys
 import time
+from pathlib import Path
 
-sys.path.insert(0, "src")
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
 
 MOTOR_ID = 0x03

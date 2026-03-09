@@ -1,7 +1,7 @@
 # ruff: noqa: T201  (print is intentional in this diagnostic script)
 """Quick test to check motor feedback.
 
-Run this after: sudo ./setup_can.sh
+Run this after: sudo ./setup_can.sh && .venv/bin/python scripts/quick_test.py
 Make sure the UART cable is DISCONNECTED from the motor first.
 """
 

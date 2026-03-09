@@ -15,7 +15,7 @@ def main(
     stderr_level: str = DEFAULT_LOG_LEVEL,
     dual: bool = False,
     motor_id_left: int = CAN_DEFAULTS.motor_can_id,
-    motor_id_right: int = 0x04,
+    motor_id_right: int = CAN_DEFAULTS.motor_can_id_2,
 ) -> None:
     """Run the main CAN motor control loop.
 
@@ -113,7 +113,7 @@ if __name__ == "__main__":  # pragma: no cover
     )
     parser.add_argument(
         "--motor-id-right",
-        default=0x04,
+        default=CAN_DEFAULTS.motor_can_id_2,
         type=lambda x: int(x, 0),
         help="CAN ID of the right / secondary motor (default: 0x04).",
     )

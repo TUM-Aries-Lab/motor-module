@@ -20,14 +20,14 @@ echo ""
 echo "Step 1: Loading CAN kernel modules..."
 modprobe can 2>/dev/null || echo "  - can module already loaded or built-in"
 modprobe can_raw 2>/dev/null || echo "  - can_raw module already loaded or built-in"
+# Reload mttcan to fully reset the CAN hardware error counters.
+# 'ip link set down/up' does NOT reset the TX/RX error counters on the
+# Jetson Orin Nano mttcan controller — only a full module reload does.
+# This is critical after a test run that accumulated TX errors (ERROR-PASSIVE).
+ip link set can0 down 2>/dev/null || true
+modprobe -r mttcan 2>/dev/null || true
 modprobe mttcan 2>/dev/null || echo "  - mttcan module already loaded or built-in"
-echo "  ✓ Kernel modules loaded"
-
-# Bring down interface (if already up)
-echo ""
-echo "Step 2: Bringing down can0 interface..."
-ip link set can0 down 2>/dev/null || echo "  - Interface already down"
-echo "  ✓ Interface down"
+echo "  ✓ Kernel modules loaded (mttcan reloaded to reset hardware error counters)"
 
 # Configure bitrate and bring up interface with error recovery
 # CRITICAL: 'berr-reporting on restart-ms 100' is required so the interface

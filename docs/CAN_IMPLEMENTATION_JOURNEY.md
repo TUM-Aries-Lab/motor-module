@@ -181,6 +181,32 @@ The motor was configured for Servo mode in CubeMars software.
 
 When monitoring with `candump can0`, you can see your own outgoing frames echoed back (e.g., `00000003 [8] FF FF FF FF FF FF FF FD`). This confirms the Jetson is transmitting — the issue is whether the motor ACKs them.
 
+### 6. PSU Under-Voltage Causes Silent Motor Lockout (March 9, 2026)
+
+The AK60-6 motor controller has a **split power architecture**:
+- The MCU and CAN transceiver operate at low voltage (~12V+) — CAN communication works normally.
+- The MOSFET H-bridge requires ~20V+ — below this threshold it is **silently disabled**.
+
+At 18.5V, the motor communicates perfectly (ACKs commands, sends feedback with `error_code=0`) but the H-bridge never drives the windings. The only observable symptoms are:
+1. PSU ammeter shows ~35 mA (only logic power) instead of 300+ mA (motor driving).
+2. Speed and current are always 0 in feedback, regardless of command.
+
+**This fault latches** — raising the voltage from 18.5V to 24V does NOT automatically recover. A full power-cycle of the motor (PSU off → wait 3s → PSU on) is required to clear the lockout.
+
+**This consumed an entire debugging session** because every CAN diagnostic appeared healthy.
+
+> **Rule: Always verify PSU = 24V and current > 0.3A before debugging software.**
+
+### 7. Only Duty-Cycle Mode Produces CAN Feedback (March 9, 2026)
+
+Testing all control modes on the actual hardware revealed:
+- **Duty cycle (0x0003):** ✅ Works — motor spins, feedback shows real speed/current.
+- **Current mode (0x0103):** ❌ Zero feedback frames received after command.
+- **Velocity mode (0x0303):** ❌ Zero feedback frames received after command.
+- **Position mode (0x0403):** ❌ Motor ACKs but does not move (known from March 3).
+
+Only duty-cycle mode reliably drives the motor. This may be a firmware configuration issue — the motor may need additional setup via CubeMars PC software to enable closed-loop modes over CAN.
+
 ---
 
 ## Files Created
@@ -209,8 +235,13 @@ When monitoring with `candump can0`, you can see your own outgoing frames echoed
 | CAN interface configured (1 Mbps, can0) | ✅ |
 | Motor feedback receiving (50 Hz, ID 0x2903) | ✅ |
 | Commands transmitting (confirmed via candump echo) | ✅ |
-| enable/disable commands implemented | ✅ |
-| Motor responding to control commands | ⏳ Pending UART disconnect test |
+| Enable/disable commands implemented | ✅ |
+| Duty-cycle mode (0x00) — motor spins | ✅ Confirmed 9 March 2026 |
+| Velocity mode (0x03) — closed-loop | ❌ No feedback (needs CubeMars config?) |
+| Current mode (0x01) — torque control | ❌ No feedback (needs CubeMars config?) |
+| Position mode (0x04) — position loop | ❌ ACKs but doesn't move |
+| spin_test.py — forward/reverse demo | ✅ ~7200 ERPM at 40% duty |
+| motion_capture_test.py — sine sweep | ✅ Duty-cycle P-controller |
 | Code pushed to `CAN_implementation` branch | ✅ |
 
 ---

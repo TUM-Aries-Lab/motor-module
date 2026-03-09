@@ -8,6 +8,7 @@ tests/hardware_can_test.py.
 import struct
 from unittest.mock import MagicMock, patch
 
+import can
 import pytest
 
 from motor_python.cube_mars_motor_can import CANMotorFeedback, CubeMarsAK606v3CAN
@@ -45,9 +46,9 @@ def _make_feedback_msg(
       - Temp:     int8 direct
       - Error:    uint8 direct
     """
-    pos_int = int(round(position_degrees / 0.1))
-    speed_int = int(round(speed_erpm / 10))
-    current_int = int(round(current_amps / 0.01))
+    pos_int = round(position_degrees / 0.1)
+    speed_int = round(speed_erpm / 10)
+    current_int = round(current_amps / 0.01)
 
     data = (
         struct.pack(">h", pos_int)
@@ -108,8 +109,6 @@ class TestInitialization:
 
     def test_connection_failure_graceful(self):
         """CAN bus errors are caught and motor marks itself as disconnected."""
-        import can
-
         with patch("motor_python.cube_mars_motor_can.can.interface.Bus") as mock_cls:
             mock_cls.side_effect = can.CanError("interface not found")
             m = CubeMarsAK606v3CAN()
@@ -152,8 +151,6 @@ class TestEnableDisable:
 
     def test_enable_when_not_connected(self):
         """enable_motor is a no-op and does not raise when disconnected."""
-        import can
-
         with patch("motor_python.cube_mars_motor_can.can.interface.Bus") as mock_cls:
             mock_cls.side_effect = can.CanError("no interface")
             m = CubeMarsAK606v3CAN()
@@ -364,8 +361,6 @@ class TestFeedbackAndCommunication:
 
     def test_check_communication_not_connected(self):
         """check_communication returns False when CAN bus is unavailable."""
-        import can
-
         with patch("motor_python.cube_mars_motor_can.can.interface.Bus") as mock_cls:
             mock_cls.side_effect = can.CanError("no interface")
             m = CubeMarsAK606v3CAN()

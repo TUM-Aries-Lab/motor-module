@@ -2,7 +2,7 @@
 
 Run:
     sudo ./setup_can.sh
-    python can_demo.py
+    .venv/bin/python scripts/can_demo.py
 
 Each section prints PASS / FAIL / SKIP so you can confirm which functions
 are working on the current firmware.

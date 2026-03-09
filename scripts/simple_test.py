@@ -3,7 +3,7 @@
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
 import time

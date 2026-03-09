@@ -23,8 +23,12 @@ Motion sequence
 
 Run:
     sudo ./setup_can.sh
+    .venv/bin/python scripts/motion_capture_test.py
+
+  Or with venv activated:
     source .venv/bin/activate
-    python motion_capture_test.py
+    sudo ./setup_can.sh
+    python scripts/motion_capture_test.py
 """
 
 import csv
@@ -96,7 +100,7 @@ BRAKE_ERPM    = 1500    # resume normal control once speed drops below this
 LOOP_HZ   = 50
 SAMPLE_HZ = 20
 
-LOG_DIR = Path(__file__).parent / "data" / "logs"
+LOG_DIR = Path(__file__).parent.parent / "data" / "logs"
 
 # ──────────────────────────────────────────────────────────────────────────
 # Direction state  (set by detect_fw_dir)
@@ -679,7 +683,7 @@ def main() -> None:
     if not _got_frame:
         print(
             "  ✗ No CAN frames detected in 1.5 s — motor appears to be OFF.\n"
-            "  Power on the motor, then re-run:  python motion_capture_test.py"
+            "  Power on the motor, then re-run:  .venv/bin/python scripts/motion_capture_test.py"
         )
         return
     print("  ✓ Bus is live — opening filtered socket")

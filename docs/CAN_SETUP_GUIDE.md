@@ -283,12 +283,26 @@ motor_right.set_velocity(velocity_erpm=10000)
 **Error:** `Motor not responding after X attempts`
 
 **Check:**
-1. **Power:** Motor has 24-48V power supply connected
-2. **Wiring:** Verify CANH/CANL connections (not swapped)
-3. **Termination:** 120Ω resistor is installed across CANH/CANL
-4. **CAN ID:** Motor CAN ID matches code (default: 0x03)
-5. **Bitrate:** CAN bitrate matches motor config (1 Mbps)
-6. **Motor Config:** Motor is configured for CAN mode (not UART)
+1. **Power:** Motor has 24V power supply connected (**must be 24V, not 18V** — see checklist above)
+2. **Current draw:** PSU ammeter should show >0.3A when motor is enabled. If ~35 mA, H-bridge is locked out (under-voltage).
+3. **UART cable:** Must be **physically disconnected** from motor (UART overrides CAN).
+4. **Wiring:** Verify CANH/CANL connections (not swapped)
+5. **Termination:** 120Ω resistor is installed across CANH/CANL
+6. **CAN ID:** Motor CAN ID matches code (default: 0x03)
+7. **Bitrate:** CAN bitrate matches motor config (1 Mbps)
+8. **Motor Config:** Motor is configured for CAN mode (not UART)
+
+### Motor Communicates but Won't Spin (Speed=0)
+
+**Symptom:** CAN feedback frames arrive with `error_code=0`, but `speed=0` and `current=0` regardless of commands sent. PSU shows ~35 mA.
+
+**Cause:** PSU voltage too low. The AK60-6 MOSFET H-bridge has an under-voltage lockout that silently disables motor drive below ~20V. The CAN transceiver and MCU still work normally at lower voltages.
+
+**Fix:**
+1. Set PSU to **24V**
+2. **Power-cycle the motor** (the fault latches — raising voltage alone does NOT recover)
+3. Reset CAN: `sudo ./setup_can.sh`
+4. Verify with `python spin_test.py`
 
 ### Bus-Off State
 
@@ -334,9 +348,39 @@ sudo python your_script.py
 - [ ] CANL connects transceiver pin 6 to motor CANL
 - [ ] 120Ω termination resistor across CANH/CANL
 - [ ] Common GND between Jetson, transceiver, and motor
-- [ ] Motor powered on (24-48V)
+- [ ] **PSU set to 24V** (not 18V, not 12V — see note below)
+- [ ] Motor powered on (24–48V)
+- [ ] UART / R-Link cable **physically disconnected** from motor
 - [ ] can0 interface configured and up at 1 Mbps
 - [ ] Motor configured for CAN mode with matching bitrate
+
+### ⚡ Critical: PSU Voltage (24V Required)
+
+The AK60-6 motor controller has a **split power architecture**:
+
+| Subsystem | Min Voltage | Behaviour below minimum |
+|---|---|---|
+| MCU + CAN transceiver | ~12V | CAN communication works normally |
+| MOSFET H-bridge (motor drive) | ~20V | **Silently disabled** — no error reported |
+
+**At 18.5V the motor will communicate perfectly on CAN but refuse to spin.**
+The firmware reports `error_code=0` ("No fault") even while the H-bridge is locked
+out, making this a very difficult problem to diagnose from software alone.
+
+**Pre-flight power check (do this EVERY session):**
+```bash
+# 1. Verify PSU reads 24.0V ± 0.5V on the display
+# 2. Enable motor and send a 40% duty command, then check current:
+#    - Expected: >0.3A (motor is driving)
+#    - Bad:       ~0.035A (only logic power — H-bridge locked out)
+# 3. If current is low: set PSU to 24V, power-cycle the motor, retry
+```
+
+> **Lesson learned (9 March 2026):** A full day of CAN protocol debugging was
+> wasted because the PSU had been accidentally set to 18.5V. The motor
+> communicated normally, all diagnostics looked clean, and error_code was 0.
+> The only clue was the PSU ammeter showing 35 mA (logic only) instead of
+> 300+ mA (motor driving). **Always check the PSU voltage first.**
 
 ## Performance Notes
 

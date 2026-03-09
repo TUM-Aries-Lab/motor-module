@@ -11,8 +11,9 @@ Chronological record of what was tried, what failed, and **why**, so we don't re
 | Enable motor | `0x000003` | `FF FF FF FF FF FF FF FC` | Standard enable |
 | Disable motor | `0x000003` | `FF FF FF FF FF FF FF FD` | Standard disable |
 | Duty cycle | `0x000003` | `struct.pack('>i', int(duty*100_000)) + bytes(4)` | `spin_test.py` uses this |
-| Velocity | `0x000303` | `struct.pack('>i', erpm) + bytes(4)` | Works **only with CAN filter** (see below) |
-| Feedback reception | listen on `0x2903` | 8 bytes: pos/spd/cur/tmp/err | Works **only with CAN filter** |
+| Velocity | `0x000303` | `struct.pack('>i', erpm) + bytes(4)` | ⚠️ **No feedback received** (see Problem 6) |
+| Current | `0x000103` | `struct.pack('>i', mA) + bytes(4)` | ⚠️ **No feedback received** (see Problem 6) |
+| Feedback reception | listen on `0x2903` | 8 bytes: pos/spd/cur/tmp/err | Works **only with CAN filter** (see below) |
 
 ---
 
@@ -131,6 +132,52 @@ This is confirmed to make the motor move toward the target.
 
 ---
 
+### Problem 5 — PSU under-voltage lockout (motor communicates but won't spin)
+
+**Date discovered:** 9 March 2026
+
+**Symptom:** Motor ACKs every CAN command, feedback reports `error_code=0`, but `Speed=0`, `Current=0` in ALL feedback frames regardless of control mode or duty level. PSU ammeter shows only ~35 mA quiescent draw (logic power only, no motor drive current).
+
+**Root cause:** The PSU was set to **18.5V** instead of the required **24V**. The AK60-6 motor controller has a split power architecture:
+- The MCU + CAN transceiver can operate at lower voltages (~12V+), so CAN communication appears completely normal.
+- The MOSFET H-bridge that drives the windings has an **under-voltage lockout** that silently prevents motor drive below ~20V.
+- The motor firmware does **NOT** report this as an error — `error_code` remains 0, and feedback frames look identical to a working motor at rest.
+
+**How to detect:**
+1. Check PSU voltage: must be **24V** (nominal range 24–48V for AK60-6).
+2. Check PSU current draw: should be >0.3A when motor is enabled and commanded. If it stays at ~35 mA, the H-bridge is not driving.
+3. Send a 40% duty command and watch the feedback `speed_erpm` — if it stays at 0 after 0.5s, suspect under-voltage.
+
+**Fix:**
+1. Set PSU to **24V** (the AK60-6 nominal voltage).
+2. **Power-cycle the motor** (turn PSU off, wait 3s, turn back on). The motor controller latches the under-voltage fault and does NOT auto-recover when voltage is raised — you must power-cycle.
+3. Re-run `sudo ./setup_can.sh` to clear any accumulated CAN errors.
+4. Verify with `spin_test.py` — speed should reach ~7000 ERPM at 40% duty within 0.3s.
+
+**Why this is insidious:**
+- The motor communicates perfectly on CAN — all diagnostics look clean.
+- `error_code=0` ("No fault") is reported in every feedback frame.
+- The only clues are: (a) PSU ammeter showing ~35 mA instead of >300 mA, and (b) speed/current always stuck at 0.
+- Software debugging is a dead-end because the protocol layer is working correctly.
+
+**Pre-flight checklist added:** Always verify PSU voltage (24V) and current draw (>0.3A under command) before debugging CAN software.
+
+---
+
+### Problem 6 — Current mode and Velocity mode produce no feedback
+
+**Date discovered:** 9 March 2026
+
+**Symptom:** Sending commands on arb IDs `0x0103` (current mode) or `0x0303` (velocity mode) produces **zero feedback frames** on `0x2903`. Duty cycle mode (`0x0003`) works perfectly.
+
+**Root cause:** Unknown — possibly a firmware configuration issue or the motor firmware version only supports duty-cycle CAN control. The motor may need additional configuration via the CubeMars PC software to enable current/velocity loop modes over CAN.
+
+**Workaround:** Use duty-cycle mode (`0x0003`) for all motor control. For position tracking, implement a software P-controller in duty-cycle mode (as done in `motion_capture_test.py`).
+
+**Status:** Not critical — duty-cycle mode is sufficient for exosuit tendon control.
+
+---
+
 ## 🔜 Still To Investigate
 
 1. **Why position mode (0x04) and PVA mode (0x06) don't respond** — may need a setting in CubeMars PC software to unlock position control (e.g. encoder calibration, control mode selection). Check the CubeMars configuration app.
@@ -138,3 +185,5 @@ This is confirmed to make the motor move toward the target.
 2. **Why set_origin (0x05) doesn't reset the feedback position** — might only take effect after a power cycle, or might need to be sent in a specific motor state.
 
 3. **P-controller overshoot / oscillation** — `KP=150` may cause oscillation on long moves. Tune or add a derivative term if needed.
+
+4. **Why current mode (0x01) and velocity mode (0x03) produce no CAN feedback** — may need CubeMars PC software configuration.

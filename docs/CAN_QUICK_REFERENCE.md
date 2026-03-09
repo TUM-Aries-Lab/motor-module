@@ -82,8 +82,18 @@ motor2 = CubeMarsAK606v3CAN(motor_can_id=0x04)
 |---------|----------|
 | `No such device can0` | Run `sudo ip link set can0 up` |
 | Motor not responding | Check power, CANH/CANL wiring, termination resistor |
+| Motor responds but Speed=0 | **Check PSU voltage is 24V** (not 18V). Power-cycle motor after fixing. See CAN_TROUBLESHOOTING.md Problem 5 |
 | Bus-off errors | Check termination, verify bitrate matches (1 Mbps) |
 | Permission denied | Add user to dialout group or use sudo |
+| UART cable connected | Physically disconnect R-Link / UART cable from motor |
+
+### ⚡ Pre-Flight Checklist (do EVERY session)
+
+1. PSU voltage reads **24V** (not 18V, not 12V)
+2. UART cable is **disconnected** from motor
+3. Run `sudo ./setup_can.sh`
+4. Verify: `ip -details link show can0` → should say `ERROR-ACTIVE (berr-counter tx 0 rx 0)`
+5. Run `python spin_test.py` → motor should spin, speed should reach ~7000 ERPM
 
 ## Pin Reference (Jetson Orin Nano 40-pin Header)
 

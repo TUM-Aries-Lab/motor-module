@@ -2,7 +2,7 @@
 """Spin the motor forward for 2 s, pause, then spin backward for 2 s.
 
 Demonstrates CAN communication in both directions.
-Run:  sudo ./setup_can.sh && python spin_test.py
+Run:  sudo ./setup_can.sh && .venv/bin/python scripts/spin_test.py
 """
 import struct
 import time

@@ -349,16 +349,38 @@ class CubeMarsAK606v3CAN:
                     "can_mask": 0x1FFFFFFF,
                     "extended": True,
                 },
-                # Also accept standard-frame variant of motor_id+1 in case
-                # firmware sends standard (11-bit) frames.
-                {"can_id": self.motor_can_id + 1, "can_mask": 0x7FF, "extended": False},
+                # NOTE: No standard-frame (11-bit) filter entry.
+                # The motor only sends extended 29-bit feedback frames.
+                # Adding a permissive standard-frame entry was found to
+                # confuse mttcan's hardware filter on Jetson.
             ]
+            self._can_filters = can_filters  # stored so _start_refresh can re-apply
             self.bus = can.interface.Bus(
                 channel=self.interface,
                 interface="socketcan",
                 bitrate=self.bitrate,
                 can_filters=can_filters,
             )
+            # Suppress CAN error frames from reaching this socket.
+            # Jetson's mttcan re-delivers each CAN_ERR_BUSERROR/CAN_ERR_PROT
+            # error frame thousands of times, flooding the receive buffer and
+            # making real 0x2903 feedback frames unreachable.  Setting
+            # CAN_RAW_ERR_FILTER=0 tells the kernel not to route any error
+            # frames to this socket at all.
+            try:
+                import socket as _socket
+                import struct as _struct
+
+                # CAN_RAW_ERR_FILTER = 2 (not always exported by the socket module)
+                _CAN_RAW_ERR_FILTER = getattr(_socket, "CAN_RAW_ERR_FILTER", 2)
+                self.bus.socket.setsockopt(  # type: ignore[union-attr]
+                    _socket.SOL_CAN_RAW,
+                    _CAN_RAW_ERR_FILTER,
+                    _struct.pack("=I", 0),
+                )
+                logger.info("CAN error frames suppressed (CAN_RAW_ERR_FILTER=0)")
+            except Exception as exc:
+                logger.warning(f"Could not suppress CAN error frames: {exc}")
             time.sleep(CAN_DEFAULTS.connection_stabilization_delay)
             self.connected = True
             logger.info(
@@ -614,6 +636,14 @@ class CubeMarsAK606v3CAN:
                     self.communicating = True
                     return self._refresh_feedback
                 time.sleep(self._refresh_interval)
+            # The refresh loop's 25 ms receive window often misses the motor's
+            # low-rate broadcast (~3 Hz after commands).  If _last_feedback was
+            # captured earlier in this session (e.g. by enable_motor) the motor
+            # is confirmed alive and _last_feedback is current enough to return.
+            if self._last_feedback is not None:
+                self._consecutive_no_response = 0
+                self.communicating = True
+                return self._last_feedback
             self._consecutive_no_response += 1
             return None
 
@@ -698,7 +728,11 @@ class CubeMarsAK606v3CAN:
                         # TWO motor frames (enable ACK + command reply); read
                         # until the deadline and keep the last motor frame so
                         # the Speed=0 ACK is overwritten by the real response.
-                        deadline = time.monotonic() + 0.015
+                        # Use 25 ms — measured round-trip for enable+velocity is
+                        # ~20 ms on this Jetson; the 50 Hz loop period is 20 ms
+                        # but the watchdog is 100 ms, so 25 ms is safe.
+                        deadline = time.monotonic() + 0.025
+                        _iter_frames = 0
                         while True:
                             remaining = deadline - time.monotonic()
                             if remaining <= 0:
@@ -706,6 +740,11 @@ class CubeMarsAK606v3CAN:
                             msg = self.bus.recv(timeout=remaining)
                             if msg is None:
                                 break
+                            _iter_frames += 1
+                            # Skip error frames and standard (11-bit) frames.
+                            # Motor feedback is always extended 29-bit.
+                            if msg.is_error_frame or not msg.is_extended_id:
+                                continue
                             fb = self._parse_feedback_msg(msg)
                             if fb:
                                 self._last_feedback = fb

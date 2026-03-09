@@ -80,7 +80,10 @@ class CANDefaults:
 
     interface: str = "can0"  # SocketCAN interface name (can0 or can1 on Jetson)
     bitrate: int = 1000000  # CAN bus bitrate in bits/sec (1 Mbps per motor config)
-    motor_can_id: int = 0x03  # Default motor CAN ID (matches motor config ID: 3)
+    motor_can_id: int = 0x03  # Default motor CAN ID — primary / left motor (ID: 3)
+    motor_can_id_2: int = (
+        0x04  # Secondary motor CAN ID — right motor (ID: 4, arrives Wednesday)
+    )
     controller_can_id: int = 0x00  # Controller/master CAN ID
     receive_timeout: float = 0.5  # Timeout for receiving CAN messages (seconds)
     connection_stabilization_delay: float = 0.05  # Delay after CAN bus init
