@@ -28,8 +28,12 @@ _FEEDBACK_TIMEOUT = 1.0  # seconds
 
 @pytest.fixture
 def motor() -> Generator[CubeMarsAK606v3CAN, None, None]:
+    # Full hardware reset before each test: reloads the mttcan kernel module
+    # (like setup_can.sh), which is the only reliable way to clear hardware
+    # error counters and give the motor time to exit BUS-OFF.  A simple
+    # ip-link down/up is NOT sufficient and actually causes the motor to
+    # enter BUS-OFF (completely silent).
     CubeMarsAK606v3CAN._reset_can_interface()
-    time.sleep(0.15)
     m = CubeMarsAK606v3CAN()
     if not m.connected:
         pytest.skip("CAN bus not available — run: sudo ./setup_can.sh")

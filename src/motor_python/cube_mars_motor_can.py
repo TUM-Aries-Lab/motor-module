@@ -234,10 +234,23 @@ class CubeMarsAK606v3CAN:
 
     @staticmethod
     def _reset_can_interface(interface: str = "can0", bitrate: int = 1000000) -> bool:
-        """Bring the CAN interface down and back up to clear error counters.
+        """Fully reset the CAN interface by reloading the mttcan kernel module.
 
-        Requires passwordless sudo for ``ip link``.  If sudo is not available
-        or prompts for a password, the reset is skipped gracefully.
+        ``ip link set down/up`` does NOT reset TX/RX error counters on the
+        Jetson Orin Nano mttcan controller and causes a CAN bus disruption
+        that can push the motor into BUS-OFF (completely silent).  This method
+        instead:
+
+        1. Takes the interface down.
+        2. Unloads the mttcan module — the bus is silent during unload, giving
+           the motor's CAN controller time to see the 128×11 recessive bits
+           required to exit BUS-OFF automatically.
+        3. Reloads the module and brings the interface up with the same
+           settings as setup_can.sh (berr-reporting on, restart-ms 100,
+           txqueuelen 1000).
+
+        Requires passwordless ``sudo -n`` for ``ip link`` and ``modprobe``.
+        If sudo is not available the reset is skipped gracefully.
 
         :param interface: CAN interface name.
         :param bitrate: CAN bus bitrate.
@@ -246,8 +259,8 @@ class CubeMarsAK606v3CAN:
         import subprocess
 
         try:
-            # Use stdin=DEVNULL so sudo never blocks waiting for a password
             devnull = subprocess.DEVNULL
+            # Step 1: bring interface down
             result = subprocess.run(
                 ["sudo", "-n", "ip", "link", "set", interface, "down"],
                 capture_output=True,
@@ -259,6 +272,25 @@ class CubeMarsAK606v3CAN:
                     f"Cannot reset CAN (sudo -n failed): {result.stderr.decode().strip()}"
                 )
                 return False
+            # Step 2: unload mttcan — makes bus completely silent so the motor
+            # can exit BUS-OFF (needs 128×11 recessive bits, i.e. ~1.5 ms but
+            # firmware timers may need up to 500 ms).
+            subprocess.run(
+                ["sudo", "-n", "modprobe", "-r", "mttcan"],
+                capture_output=True,
+                stdin=devnull,
+                timeout=5,
+            )
+            time.sleep(0.5)  # motor BUS-OFF auto-recovery during silence
+            # Step 3: reload mttcan — resets Jetson hardware error counters
+            subprocess.run(
+                ["sudo", "-n", "modprobe", "mttcan"],
+                capture_output=True,
+                stdin=devnull,
+                timeout=5,
+            )
+            time.sleep(0.2)
+            # Step 4: bring up with proper settings (mirrors setup_can.sh)
             subprocess.run(
                 [
                     "sudo",
@@ -272,13 +304,23 @@ class CubeMarsAK606v3CAN:
                     "can",
                     "bitrate",
                     str(bitrate),
+                    "berr-reporting",
+                    "on",
+                    "restart-ms",
+                    "100",
                 ],
                 capture_output=True,
                 stdin=devnull,
                 timeout=3,
             )
+            subprocess.run(
+                ["sudo", "-n", "ip", "link", "set", interface, "txqueuelen", "1000"],
+                capture_output=True,
+                stdin=devnull,
+                timeout=3,
+            )
             time.sleep(0.1)
-            logger.info(f"CAN interface {interface} reset successfully")
+            logger.info(f"CAN interface {interface} fully reset (mttcan reloaded)")
             return True
         except Exception as e:
             logger.warning(f"Failed to reset CAN interface: {e}")
@@ -302,22 +344,25 @@ class CubeMarsAK606v3CAN:
                 f"CAN bus state: {bus_state['state']}  "
                 f"(tx_err={bus_state['tx_err']} rx_err={bus_state['rx_err']})"
             )
-            if bus_state["state"] in ("ERROR-PASSIVE", "BUS-OFF", "ERROR-WARNING"):
-                logger.warning(f"CAN bus in {bus_state['state']} — attempting recovery")
-                # Try an explicit reset first (requires passwordless sudo).
-                if not self._reset_can_interface(self.interface, self.bitrate):
-                    # No sudo — rely on the kernel's restart-ms auto-recovery.
-                    # setup_can.sh configures restart-ms 100 which auto-restarts
-                    # the controller after 100 ms in BUS-OFF.  Wait up to 500 ms
-                    # for the kernel to recover.
-                    logger.info("Waiting for kernel auto-recovery (restart-ms 100)...")
-                    for _ in range(5):
-                        time.sleep(0.15)
-                        bus_state = self._get_can_state(self.interface)
-                        if bus_state["state"] == "ERROR-ACTIVE":
-                            break
-                bus_state = self._get_can_state(self.interface)
-                logger.info(f"After recovery: {bus_state['state']}")
+            if bus_state["state"] == "BUS-OFF":
+                # BUS-OFF: controller locked out.  setup_can.sh sets restart-ms 100
+                # so the kernel auto-restarts after 100 ms.  Wait up to 500 ms.
+                logger.warning("CAN bus in BUS-OFF — waiting for restart-ms auto-recovery")
+                for _ in range(5):
+                    time.sleep(0.15)
+                    bus_state = self._get_can_state(self.interface)
+                    if bus_state["state"] != "BUS-OFF":
+                        break
+                logger.info(f"After BUS-OFF recovery: {bus_state['state']}")
+            elif bus_state["state"] in ("ERROR-PASSIVE", "ERROR-WARNING"):
+                # ERROR-PASSIVE / WARNING: high error counters but TX/RX still
+                # works.  Do NOT call _reset_can_interface() — ip link down/up
+                # causes the motor to enter BUS-OFF and go completely silent.
+                # Just log and proceed; the socket will communicate normally.
+                logger.warning(
+                    f"CAN bus in {bus_state['state']} "
+                    f"(tx_err={bus_state['tx_err']}) — proceeding without reset"
+                )
 
             # ── Kernel CAN filters ────────────────────────────────────────
             # Accept every ID the motor firmware is known to use for
@@ -410,9 +455,16 @@ class CubeMarsAK606v3CAN:
                 data=bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC]),
                 is_extended_id=True,
             )
-            self.bus.send(msg, timeout=0.1)
+            # Retry up to 3 times — the motor may need a few stimulations to
+            # respond after a quiet period (watchdog fired, post-reset, etc.).
+            for _attempt in range(3):
+                self.bus.send(msg, timeout=0.1)
+                self._capture_response()
+                if self._pending_feedback is not None:
+                    break
+                if _attempt < 2:
+                    time.sleep(0.1)
             logger.info("Motor enabled (Servo mode)")
-            self._capture_response()
         except can.CanError as e:
             logger.error(f"Failed to enable motor: {e}")
 
@@ -697,12 +749,15 @@ class CubeMarsAK606v3CAN:
         _ENABLE_PAYLOAD = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC])
 
         while not self._refresh_stop.is_set():
-            if self._refresh_mode is not None and self._refresh_data is not None:
+            # Capture atomically to avoid a race where _stop_refresh() sets
+            # _refresh_mode / _refresh_data to None between the None-check
+            # and the actual use of the values.
+            _mode = self._refresh_mode
+            _data = self._refresh_data
+            if _mode is not None and _data is not None:
                 if self.connected and self.bus is not None:
                     try:
-                        needs_keepalive = (
-                            self._refresh_mode != CANControlMode.DUTY_CYCLE
-                        )
+                        needs_keepalive = _mode != CANControlMode.DUTY_CYCLE
 
                         # ── Watchdog keepalive (non-duty-cycle modes) ──────
                         if needs_keepalive:
@@ -715,11 +770,11 @@ class CubeMarsAK606v3CAN:
                             )
 
                         # ── Main control command ───────────────────────────
-                        arb_id = self._build_extended_id(self._refresh_mode)
+                        arb_id = self._build_extended_id(_mode)
                         self.bus.send(
                             can.Message(
                                 arbitration_id=arb_id,
-                                data=self._refresh_data,
+                                data=_data,
                                 is_extended_id=True,
                             )
                         )
