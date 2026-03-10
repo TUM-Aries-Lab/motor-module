@@ -43,6 +43,13 @@ lint.select = [
 lint.ignore = [
   "D203","D213","E501","N803","N806","D415","S101","E203","E731",
   "D107","PLR2004","S607","S605","S603",
+  "RUF002","RUF003",  # Unicode × and – in docstrings/comments are intentional
+  "PLC0415",          # Lazy subprocess import inside methods is intentional
+  "PLW1510",          # subprocess.run without check= is handled via try/except
+  "C901",             # Complexity limit – feedback/refresh loops are inherently complex
+  "PLR0911",          # Too many return statements in feedback parser
+  "PLR0913",          # Test helpers may need >5 args for full fixture coverage
+  "D103",             # Pytest fixtures don't need public docstrings
 ]
 
 [tool.ruff.lint.isort]
@@ -53,6 +60,14 @@ combine-as-imports = true
 quote-style = "double"
 indent-style = "space"
 line-ending = "lf"
+
+[tool.coverage.run]
+omit = [
+  "src/motor_python/examples.py",
+  "src/motor_python/examples_can.py",
+  "src/motor_python/test_can.py",
+  "src/motor_python/__main__.py",
+]
 
 [tool.pytest.ini_options]
 markers = [

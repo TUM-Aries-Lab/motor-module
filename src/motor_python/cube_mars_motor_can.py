@@ -347,7 +347,9 @@ class CubeMarsAK606v3CAN:
             if bus_state["state"] == "BUS-OFF":
                 # BUS-OFF: controller locked out.  setup_can.sh sets restart-ms 100
                 # so the kernel auto-restarts after 100 ms.  Wait up to 500 ms.
-                logger.warning("CAN bus in BUS-OFF — waiting for restart-ms auto-recovery")
+                logger.warning(
+                    "CAN bus in BUS-OFF — waiting for restart-ms auto-recovery"
+                )
                 for _ in range(5):
                     time.sleep(0.15)
                     bus_state = self._get_can_state(self.interface)
