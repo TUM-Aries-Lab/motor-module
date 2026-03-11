@@ -49,8 +49,9 @@ See [docs/CAN_SETUP_GUIDE.md](docs/CAN_SETUP_GUIDE.md) for hardware wiring detai
 > sudo systemctl restart can0.service   # or: sudo ./setup_can.sh
 > ```
 
-> **All control modes are confirmed working:** duty cycle, velocity, position,
-> position+velocity+acceleration, current, brake current, and MIT impedance mode.
+> **Confirmed working control modes:** duty cycle, position, position+velocity+acceleration,
+> current, brake current, and MIT impedance mode.
+> **Velocity loop (0x0303) is not functional on this unit — see [Known Firmware Limitations](#known-firmware-limitations) below.**
 > See [docs/CAN_TELEMETRY_API.md](docs/CAN_TELEMETRY_API.md) for the full API reference.
 
 ## Quick Start — CAN
@@ -96,12 +97,16 @@ from motor_python.definitions import TendonAction
 
 with Motor(motor_can_id=0x03) as motor:
     motor.enable_motor()
-    motor.set_velocity(velocity_erpm=10000)              # spin at 10 000 ERPM
+    motor.set_duty_cycle(0.15)                           # 15% duty ≈ 1800 ERPM (works on all firmware)
     motor.control_exosuit_tendon(TendonAction.PULL)      # high-level: pull tendon
     motor.control_exosuit_tendon(TendonAction.STOP)
     motor.set_position_velocity_accel(90.0, 8000, 4000)  # smooth move to 90°
     motor.set_mit_mode(pos_rad=1.57, kp=100, kd=2)       # impedance control
 ```
+
+> **Note:** `set_velocity()` sends `0x0303` frames which are not acknowledged by the motor
+> firmware on this unit. Use `set_duty_cycle()` for speed control instead — see
+> [Known Firmware Limitations](#known-firmware-limitations).
 
 ### Quick Start — UART (testing only)
 
@@ -168,25 +173,120 @@ It's super easy to publish your own packages on PyPi. To build and publish this 
 | `get_status()` | Full state — logs position / speed / current / temp / error |
 | `get_motor_data()` | All fields as a `dict` |
 
-## Velocity Safety
+## Known Firmware Limitations
 
-**Minimum safe velocity: 5000 ERPM** (enforced by default).
+### Velocity loop (0x0303) — not functional on this unit
 
-Below 5000 ERPM the firmware acceleration settings cause current oscillations,
-audible noise, and motor instability.
+The CubeMars protocol spec documents a velocity loop mode (arb_id `0x0303`,
+payload `int32_be(ERPM)`). On this AK60-6 v3 unit the motor's CAN controller
+**does not acknowledge `0x0303` frames at the bus level** — no ACK bit is
+pulled, so the Jetson retries indefinitely, fills its TX queue, and enters
+ERROR-PASSIVE.
+
+This was tested exhaustively on 2026-03-11 (`scripts/test_velocity_loop.py`):
+- Raw CAN, no library, exact spec encoding ✓
+- Enable keepalive on `0x03` before each `0x0303` command ✓
+- Tested at 1 500 ERPM and 5 000 ERPM ✓
+- Unfiltered socket open to catch replies on any arb_id ✓
+- **Result: zero ACKs, zero motion, bus enters ERROR-PASSIVE after ~1.7 s**
+
+**Workaround:** use `set_duty_cycle()` for open-loop speed control:
 
 ```python
-motor.set_velocity(velocity_erpm=10000)              # OK
-motor.set_velocity(velocity_erpm=100)                 # Raises ValueError
-motor.set_velocity(velocity_erpm=100, allow_low_speed=True)  # Bypass
-motor.set_velocity(velocity_erpm=0)                   # Stop always allowed
+ERPM_PER_PHYS_DEG_S = 18.0   # calibrated 2026-03-10
+MAX_VEL_ERPM       = 3000
+MAX_DUTY           = 0.25    # 25% max PWM
+
+def erpm_to_duty(erpm: int) -> float:
+    duty = erpm / MAX_VEL_ERPM * MAX_DUTY
+    return max(-MAX_DUTY, min(MAX_DUTY, duty))
+
+motor.set_duty_cycle(erpm_to_duty(desired_erpm))
+```
+
+Feedback (position, ERPM, current, temperature) is still available via the
+`0x2903` reply that each duty-cycle frame triggers.
+
+## Velocity Safety
+
+**`set_velocity()` is non-functional on this unit** (see above). For
+`set_duty_cycle()` speed control keep duty below `0.25` (25%).
+
+```python
+motor.set_duty_cycle(0.15)    # ~1800 ERPM equivalent
+motor.set_duty_cycle(-0.15)   # reverse
+motor.stop()                  # always works
 ```
 
 ## Position Control
 
-**Range: Unlimited** - Motor can rotate continuously for spool-based cable systems.
-
+**Range: Unlimited** — motor can rotate continuously for spool-based cable systems.
 No artificial position limits. Suitable for applications requiring multiple rotations to wind cable.
+
+## Exosuit Integration
+
+This section describes how to drive the tendon spool motor from an IMU or other
+external sensor for use in the lower exosuit.
+
+### Signal chain
+
+```
+IMU joint angular velocity (deg/s)
+    × ERPM_PER_PHYS_DEG_S          →  desired ERPM
+    ÷ MAX_VEL_ERPM × MAX_DUTY      →  duty fraction
+    → set_duty_cycle(duty)         →  CAN frame on arb_id=0x03
+    ← 0x2903 feedback reply        →  pos / ERPM / current / temp
+```
+
+### Minimal example
+
+```python
+from motor_python import Motor
+
+ERPM_PER_PHYS_DEG_S = 18.0   # calibrated: 5000 ERPM ≈ 278 deg/s (2026-03-10)
+MAX_VEL_ERPM       = 3000    # ERPM ceiling for duty mapping
+MAX_DUTY           = 0.25    # hard limit — do not exceed
+
+def joint_vel_to_duty(joint_vel_dps: float) -> float:
+    """Convert IMU joint angular velocity (deg/s) to motor duty cycle."""
+    erpm = joint_vel_dps * ERPM_PER_PHYS_DEG_S
+    duty = erpm / MAX_VEL_ERPM * MAX_DUTY
+    return max(-MAX_DUTY, min(MAX_DUTY, duty))
+
+with Motor(motor_can_id=0x03) as motor:
+    motor.enable_motor()
+    while True:
+        joint_vel_dps = read_imu()   # your IMU read function (deg/s)
+        motor.set_duty_cycle(joint_vel_to_duty(joint_vel_dps))
+```
+
+### Key notes for exosuit use
+
+| Topic | Detail |
+|-------|--------|
+| **Do NOT use `set_velocity()`** | Sends `0x0303` — not acknowledged by this firmware |
+| **Use `set_duty_cycle()`** | Open-loop speed control, works on all firmware versions |
+| **Calibration** | `ERPM_PER_PHYS_DEG_S = 18.0` — re-calibrate if motor or cable changes |
+| **Direction** | Positive duty = tendon pull. Verify before first run. |
+| **Watchdog** | Each `set_duty_cycle()` call feeds the 100 ms CAN watchdog. Loop must run at ≥ 10 Hz. |
+| **Feedback** | Every duty frame triggers a `0x2903` reply — use for spool position and safety checks. |
+| **Safety guard** | Clamp duty to ±0.25; abort if feedback ERPM exceeds expected maximum. |
+
+### Optional: Jetson-side closed-loop speed correction
+
+If open-loop duty is not accurate enough, add a lightweight P correction
+using the ERPM feedback from each `0x2903` reply:
+
+```python
+KP = 0.00003   # tune empirically — start small
+
+desired_erpm = joint_vel_dps * ERPM_PER_PHYS_DEG_S
+actual_erpm  = motor.get_speed()              # from last 0x2903 reply
+error        = desired_erpm - actual_erpm
+base_duty    = desired_erpm / MAX_VEL_ERPM * MAX_DUTY
+duty         = max(-MAX_DUTY, min(MAX_DUTY, base_duty + error * KP))
+motor.set_duty_cycle(duty)
+```
 
 ## Run
 
