@@ -29,13 +29,8 @@ CAN_ERROR_CODES: dict[int, str] = {
 }
 
 
-# Motor thermal cutoff — firmware refuses all motion above this temperature.
-# CubeMars AK60-6 spec: driver board shutdown at 100 °C.
-MOTOR_MAX_TEMP_CELSIUS: int = 100
-
-
 class OverheatError(RuntimeError):
-    """Raised when the motor driver board exceeds the safe temperature limit.
+    """Raised when the motor driver board exceeds MOTOR_LIMITS.max_temperature_celsius.
 
     The motor firmware silently refuses all motion commands when overheated;
     this exception makes that failure visible immediately.
@@ -121,6 +116,14 @@ class CubeMarsAK606v3CAN:
       can use _receive_feedback() right after any command without waiting for the next broadcast.
     """
 
+    # ── CAN protocol command payloads (CubeMars spec, section 4.4.1) ───────────
+    # These 8-byte sequences use the base motor_id arbitration ID (no mode prefix).
+    # Defined as class constants to avoid inline magic-byte duplication.
+    _CAN_SERVO_ENABLE: bytes = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC])
+    _CAN_SERVO_DISABLE: bytes = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD])
+    _CAN_MIT_ENABLE: bytes = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
+    _CAN_MIT_DISABLE: bytes = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE])
+
     def __init__(
         self,
         motor_can_id: int = CAN_DEFAULTS.motor_can_id,
@@ -162,7 +165,7 @@ class CubeMarsAK606v3CAN:
         self._refresh_data: bytes | None = None
         self._refresh_stop = threading.Event()
         self._refresh_thread: threading.Thread | None = None
-        self._refresh_interval: float = 0.02  # 50 Hz
+        self._refresh_interval: float = 1.0 / CAN_DEFAULTS.feedback_rate_hz  # 50 Hz
 
         # Build the set of candidate feedback IDs so _receive_feedback can
         # accept whichever scheme this firmware version uses.
@@ -454,7 +457,7 @@ class CubeMarsAK606v3CAN:
         try:
             msg = can.Message(
                 arbitration_id=self.motor_can_id,
-                data=bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC]),
+                data=self._CAN_SERVO_ENABLE,
                 is_extended_id=True,
             )
             # Retry up to 3 times — the motor may need a few stimulations to
@@ -483,7 +486,7 @@ class CubeMarsAK606v3CAN:
         try:
             msg = can.Message(
                 arbitration_id=self.motor_can_id,
-                data=bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD]),
+                data=self._CAN_SERVO_DISABLE,
                 is_extended_id=True,
             )
             self.bus.send(msg, timeout=0.1)
@@ -748,8 +751,6 @@ class CubeMarsAK606v3CAN:
         reports Speed=0; to avoid poisoning feedback we read ALL motor frames
         up to the deadline and keep the **last** one (the real command reply).
         """
-        _ENABLE_PAYLOAD = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC])
-
         while not self._refresh_stop.is_set():
             # Capture atomically to avoid a race where _stop_refresh() sets
             # _refresh_mode / _refresh_data to None between the None-check
@@ -766,7 +767,7 @@ class CubeMarsAK606v3CAN:
                             self.bus.send(
                                 can.Message(
                                     arbitration_id=self.motor_can_id,
-                                    data=_ENABLE_PAYLOAD,
+                                    data=self._CAN_SERVO_ENABLE,
                                     is_extended_id=True,
                                 )
                             )
@@ -785,10 +786,13 @@ class CubeMarsAK606v3CAN:
                         # TWO motor frames (enable ACK + command reply); read
                         # until the deadline and keep the last motor frame so
                         # the Speed=0 ACK is overwritten by the real response.
-                        # Use 25 ms — measured round-trip for enable+velocity is
-                        # ~20 ms on this Jetson; the 50 Hz loop period is 20 ms
-                        # but the watchdog is 100 ms, so 25 ms is safe.
-                        deadline = time.monotonic() + 0.025
+                        # Use CAN_DEFAULTS.refresh_capture_window_s (25 ms) —
+                        # measured round-trip for enable+velocity is ~20 ms on
+                        # this Jetson; the 50 Hz loop period is 20 ms but the
+                        # watchdog is 100 ms, so 25 ms is safe.
+                        deadline = (
+                            time.monotonic() + CAN_DEFAULTS.refresh_capture_window_s
+                        )
                         _iter_frames = 0
                         while True:
                             remaining = deadline - time.monotonic()
@@ -1388,7 +1392,7 @@ class CubeMarsAK606v3CAN:
         try:
             msg = can.Message(
                 arbitration_id=self.motor_can_id,
-                data=bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]),
+                data=self._CAN_MIT_ENABLE,
                 is_extended_id=True,
             )
             self.bus.send(msg, timeout=0.1)
@@ -1412,7 +1416,7 @@ class CubeMarsAK606v3CAN:
         try:
             msg = can.Message(
                 arbitration_id=self.motor_can_id,
-                data=bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE]),
+                data=self._CAN_MIT_DISABLE,
                 is_extended_id=True,
             )
             self.bus.send(msg, timeout=0.1)

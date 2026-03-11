@@ -89,6 +89,7 @@ class CANDefaults:
     connection_stabilization_delay: float = 0.05  # Delay after CAN bus init
     max_retries: int = 3  # Max transmission retries on error
     feedback_rate_hz: int = 50  # Motor periodic feedback rate (from motor config)
+    refresh_capture_window_s: float = 0.025  # Per-iteration receive window in the refresh loop (s); covers one keepalive + command round-trip (~20 ms) within the 100 ms watchdog budget
 
 
 @dataclass(frozen=True)
@@ -177,6 +178,7 @@ class MotorLimits:
     soft_start_duration: float = 0.15  # Seconds to hold pre-spin current
     default_tendon_velocity_erpm: int = 10000  # Default velocity for tendon control
     default_velocity_demo_erpm: int = 8000  # Safe moderate velocity for demo/testing
+    max_temperature_celsius: int = 100  # Driver board thermal cutoff — firmware shuts down above this (CubeMars AK60-6 spec)
 
 
 @dataclass(frozen=True)

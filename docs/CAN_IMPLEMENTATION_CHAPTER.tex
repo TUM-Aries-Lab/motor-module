@@ -95,6 +95,8 @@ used for motion-capture validation, covering direction detection,
 CAN noise mitigation, and the sinusoidal sweep protocol.
 Section~\ref{sec:service} explains how the CAN interface initialises
 automatically at every system boot.
+Section~\ref{sec:testing} describes the automated hardware test suite used
+to verify the complete communication and control stack against physical hardware.
 A full parameter reference closes the document in
 Section~\ref{sec:summary}.
 
@@ -788,8 +790,8 @@ manufacturer's specification and are listed in Table~\ref{tab:errors}.
     3 & Over-voltage fault: supply voltage exceeds the allowed maximum \\
     4 & Under-voltage fault: supply voltage is below the minimum required for operation \\
     5 & Encoder fault: position sensor has reported an error or lost signal \\
-    6 & Hardware protection triggered: generalised hardware fault \\
-    7 & Reserved for future use \\
+    6 & MOSFET over-temperature fault: the motor driver board temperature exceeds the safe limit \\
+    7 & Motor lock-up: shaft is mechanically blocked or the rotor has stalled \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -1161,7 +1163,7 @@ communication interface for the AK60-6 motor, motivated by a physical
 incompatibility with UART, the scaling requirements of a multi-motor
 system, and the noise tolerance of differential signalling.
 
-Six software mechanisms were developed to make the interface work reliably
+The following mechanisms were developed to make the interface work reliably
 and usefully in practice:
 
 \begin{description}[leftmargin=4.5cm, style=nextline]
@@ -1221,6 +1223,14 @@ and usefully in practice:
     A systemd one-shot service unit (\texttt{can0.service}) runs the
     full bus-setup sequence automatically at every boot, eliminating the
     requirement for a manual administrator command before each session.
+
+  \item[Automated hardware tests]
+    A twelve-test pytest suite (\texttt{make test-hardware-can}) verifies
+    the complete CAN communication and control stack against physical
+    hardware, including bus connectivity, feedback reception, forward and
+    reverse spin, telemetry fields, and position commands.  All twelve
+    tests pass on the AK60-6~v3 evaluation unit.
+
 \end{description}
 
 Table~\ref{tab:summary} provides a concise reference of the key numerical
