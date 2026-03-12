@@ -342,7 +342,6 @@ class BaseMotor(abc.ABC):
         self,
         target_degrees: float,
         motor_speed_erpm: int,
-        step_delay: float = MOTOR_DEFAULTS.step_delay,
     ) -> None:
         """Drive to a target angle at a given speed, then hold.
 
@@ -351,7 +350,6 @@ class BaseMotor(abc.ABC):
 
         :param target_degrees: Target angle in degrees.
         :param motor_speed_erpm: Travel speed in ERPM.
-        :param step_delay: Delay between steps (unused in CAN mode).
         """
         current_pos = self._get_current_position_for_estimate()
         direction = 1 if target_degrees > current_pos else -1

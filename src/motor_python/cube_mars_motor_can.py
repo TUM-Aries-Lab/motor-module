@@ -9,46 +9,13 @@ import numpy as np
 from loguru import logger
 
 from motor_python.base_motor import BaseMotor, MotorState
+from motor_python.can_protocol import CANControlMode
+from motor_python.can_utils import get_can_state, reset_can_interface
 from motor_python.definitions import (
     CAN_DEFAULTS,
     MOTOR_DEFAULTS,
     MOTOR_LIMITS,
 )
-
-
-class CANControlMode:
-    """CAN extended ID control modes — CubeMars AK60-6 spec section 4.4.1.
-
-    Extended arb_id format: (mode << 8) | motor_id
-    E.g. for motor_id=0x03: duty=0x0003, velocity=0x0303, position=0x0403
-
-    Verified against spec table (motor ID 0x68 examples):
-      Duty cycle  0x0068 — data: int32(duty × 100 000)
-      Current     0x0168 — data: int32(amps × 1 000)
-      Brk current 0x0268 — data: int32(amps × 1 000)  (same payload as current)
-      Velocity    0x0368 — data: int32(ERPM direct)
-      Position    0x0468 — data: int32(deg × 10 000)
-      Pos-Vel     0x0668 — data: int32 pos + int16(ERPM/10) + int16(acc/10)
-      MIT         0x0868 — bit-packed (pos/vel/kp/kd/torque), see MIT protocol
-    """
-
-    DUTY_CYCLE = 0x00  # Duty cycle control  — PWM voltage fraction
-    CURRENT_LOOP = 0x01  # IQ current control  — direct torque
-    CURRENT_BRAKE = 0x02  # Brake current mode  — hold with current
-    VELOCITY_LOOP = 0x03  # Velocity loop        — ERPM setpoint
-    POSITION_LOOP = 0x04  # Position loop        — degree setpoint
-    SET_ORIGIN = 0x05  # Set origin          — define new zero
-    POSITION_VELOCITY = 0x06  # Pos + vel + acc profile
-    MIT_MODE = 0x08  # MIT impedance/actuator protocol (bit-packed 64-bit frame)
-    #                    Enable:  FF FF FF FF FF FF FF FF  (arb_id = motor_id)
-    #                    Disable: FF FF FF FF FF FF FF FE  (arb_id = motor_id)
-    #                    Payload encoding — all big-endian bit-fields (8 bytes total):
-    #                      [63:48] pos  uint16  range [-12.5, 12.5] rad   → 0..65535
-    #                      [47:36] vel  uint12  range [-45.0, 45.0] rad/s → 0..4095
-    #                      [35:24] kp   uint12  range [0, 500] Nm/rad     → 0..4095
-    #                      [23:12] kd   uint12  range [0, 5] Nms/rad      → 0..4095
-    #                      [11:0]  tau  uint12  range [-18, 18] Nm        → 0..4095
-    #                    See _pack_mit_frame() and set_mit_mode() for Python helpers.
 
 
 class CubeMarsAK606v3CAN(BaseMotor):
@@ -146,140 +113,6 @@ class CubeMarsAK606v3CAN(BaseMotor):
 
         self._connect()
 
-    @staticmethod
-    def _get_can_state(interface: str = "can0") -> dict:
-        """Parse CAN controller state from the kernel via `ip` command.
-
-        :param interface: CAN interface name (e.g. 'can0').
-        :return: Dict with keys 'state', 'tx_err', 'rx_err'.
-        """
-        import subprocess
-
-        try:
-            result = subprocess.run(
-                ["ip", "-details", "-statistics", "link", "show", interface],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            output = result.stdout
-            state = "UNKNOWN"
-            tx_err = rx_err = 0
-            for line in output.splitlines():
-                if "state" in line and "berr-counter" in line:
-                    for part in line.split():
-                        if part in (
-                            "ERROR-ACTIVE",
-                            "ERROR-PASSIVE",
-                            "ERROR-WARNING",
-                            "BUS-OFF",
-                        ):
-                            state = part
-                    if "tx" in line:
-                        idx = line.index("tx")
-                        tx_err = int(line[idx:].split()[1])
-                    if "rx" in line:
-                        idx = line.index("rx")
-                        rx_err = int(line[idx:].split()[1].rstrip(")"))
-            return {"state": state, "tx_err": tx_err, "rx_err": rx_err}
-        except Exception as e:
-            logger.debug(f"Could not read CAN state: {e}")
-            return {"state": "UNKNOWN", "tx_err": 0, "rx_err": 0}
-
-    @staticmethod
-    def _reset_can_interface(interface: str = "can0", bitrate: int = 1000000) -> bool:
-        """Fully reset the CAN interface by reloading the mttcan kernel module.
-
-        ``ip link set down/up`` does NOT reset TX/RX error counters on the
-        Jetson Orin Nano mttcan controller and causes a CAN bus disruption
-        that can push the motor into BUS-OFF (completely silent).  This method
-        instead:
-
-        1. Takes the interface down.
-        2. Unloads the mttcan module — the bus is silent during unload, giving
-           the motor's CAN controller time to see the 128×11 recessive bits
-           required to exit BUS-OFF automatically.
-        3. Reloads the module and brings the interface up with the same
-           settings as setup_can.sh (berr-reporting on, restart-ms 100,
-           txqueuelen 1000).
-
-        Requires passwordless ``sudo -n`` for ``ip link`` and ``modprobe``.
-        If sudo is not available the reset is skipped gracefully.
-
-        :param interface: CAN interface name.
-        :param bitrate: CAN bus bitrate.
-        :return: True if reset succeeded.
-        """
-        import subprocess
-
-        try:
-            devnull = subprocess.DEVNULL
-            # Step 1: bring interface down
-            result = subprocess.run(
-                ["sudo", "-n", "ip", "link", "set", interface, "down"],
-                capture_output=True,
-                stdin=devnull,
-                timeout=3,
-            )
-            if result.returncode != 0:
-                logger.warning(
-                    f"Cannot reset CAN (sudo -n failed): {result.stderr.decode().strip()}"
-                )
-                return False
-            # Step 2: unload mttcan — makes bus completely silent so the motor
-            # can exit BUS-OFF (needs 128×11 recessive bits, i.e. ~1.5 ms but
-            # firmware timers may need up to 500 ms).
-            subprocess.run(
-                ["sudo", "-n", "modprobe", "-r", "mttcan"],
-                capture_output=True,
-                stdin=devnull,
-                timeout=5,
-            )
-            time.sleep(0.5)  # motor BUS-OFF auto-recovery during silence
-            # Step 3: reload mttcan — resets Jetson hardware error counters
-            subprocess.run(
-                ["sudo", "-n", "modprobe", "mttcan"],
-                capture_output=True,
-                stdin=devnull,
-                timeout=5,
-            )
-            time.sleep(0.2)
-            # Step 4: bring up with proper settings (mirrors setup_can.sh)
-            subprocess.run(
-                [
-                    "sudo",
-                    "-n",
-                    "ip",
-                    "link",
-                    "set",
-                    interface,
-                    "up",
-                    "type",
-                    "can",
-                    "bitrate",
-                    str(bitrate),
-                    "berr-reporting",
-                    "on",
-                    "restart-ms",
-                    "100",
-                ],
-                capture_output=True,
-                stdin=devnull,
-                timeout=3,
-            )
-            subprocess.run(
-                ["sudo", "-n", "ip", "link", "set", interface, "txqueuelen", "1000"],
-                capture_output=True,
-                stdin=devnull,
-                timeout=3,
-            )
-            time.sleep(0.1)
-            logger.info(f"CAN interface {interface} fully reset (mttcan reloaded)")
-            return True
-        except Exception as e:
-            logger.warning(f"Failed to reset CAN interface: {e}")
-            return False
-
     def _connect(self) -> None:
         """Establish CAN bus connection to motor.
 
@@ -293,7 +126,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
         """
         try:
             # ── Pre-flight: ensure the CAN controller is healthy ──────────
-            bus_state = self._get_can_state(self.interface)
+            bus_state = get_can_state(self.interface)
             logger.info(
                 f"CAN bus state: {bus_state['state']}  "
                 f"(tx_err={bus_state['tx_err']} rx_err={bus_state['rx_err']})"
@@ -306,7 +139,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
                 )
                 for _ in range(5):
                     time.sleep(0.15)
-                    bus_state = self._get_can_state(self.interface)
+                    bus_state = get_can_state(self.interface)
                     if bus_state["state"] != "BUS-OFF":
                         break
                 logger.info(f"After BUS-OFF recovery: {bus_state['state']}")
