@@ -729,7 +729,13 @@ class CubeMarsAK606v3CAN(BaseMotor):
         CAN velocity uses wider ±320 000 ERPM limits (based on feedback
         range) compared to the UART ±100 000 default.  Re-clamp here.
         """
-        velocity_erpm = int(np.clip(velocity_erpm, -320000, 320000))
+        velocity_erpm = int(
+            np.clip(
+                velocity_erpm,
+                MOTOR_LIMITS.min_protocol_velocity_erpm,
+                MOTOR_LIMITS.max_protocol_velocity_erpm,
+            )
+        )
 
         # Pack as int32 directly (no scaling needed based on examples)
         # Example from doc: 5000 ERPM = 0x00001388
@@ -737,6 +743,22 @@ class CubeMarsAK606v3CAN(BaseMotor):
 
         self._start_refresh(CANControlMode.VELOCITY_LOOP, data)
         logger.info(f"Set velocity: {velocity_erpm} ERPM")
+
+    def _set_current_with_mode(
+        self, current_amps: float, mode: int, log_prefix: str
+    ) -> None:
+        """Format and send phase current commands safely."""
+        # Clamp to protocol limits (no redundant float cast needed)
+        current_amps_clipped = np.clip(
+            current_amps, MOTOR_LIMITS.min_current_amps, MOTOR_LIMITS.max_current_amps
+        )
+
+        # Convert to int32: amps * 1000
+        current_int = int(current_amps_clipped * 1000.0)
+        data = struct.pack(">i", current_int)
+
+        self._start_refresh(mode, data)
+        logger.info(f"{log_prefix}: {current_amps_clipped:.2f} A")
 
     def set_current(self, current_amps: float) -> None:
         """Command a specific motor torque via direct current control.
@@ -749,18 +771,9 @@ class CubeMarsAK606v3CAN(BaseMotor):
             Values outside this range are clamped automatically.
         :return: None
         """
-        # Clamp to protocol limits
-        current_amps = np.clip(current_amps, -60.0, 60.0)
-
-        # Convert to int32: amps * 1000
-        # Example from doc: -4.4 A = 0xFFFFEED8 = -4400
-        current_int = int(current_amps * 1000.0)
-
-        # Pack as big-endian int32
-        data = struct.pack(">i", current_int)
-
-        self._start_refresh(CANControlMode.CURRENT_LOOP, data)
-        logger.info(f"Set current: {current_amps:.2f} A")
+        self._set_current_with_mode(
+            current_amps, CANControlMode.CURRENT_LOOP, "Set current"
+        )
 
     def set_brake_current(self, current_amps: float) -> None:
         """Hold the motor shaft in place using brake current (mode 0x02).
@@ -779,11 +792,9 @@ class CubeMarsAK606v3CAN(BaseMotor):
         :param current_amps: Braking current in amps (-60 to 60 A).
         :return: None
         """
-        current_amps = float(np.clip(current_amps, -60.0, 60.0))
-        current_int = int(current_amps * 1000.0)
-        data = struct.pack(">i", current_int)
-        self._start_refresh(CANControlMode.CURRENT_BRAKE, data)
-        logger.info(f"Set brake current: {current_amps:.2f} A")
+        self._set_current_with_mode(
+            current_amps, CANControlMode.CURRENT_BRAKE, "Set brake current"
+        )
 
     def set_duty_cycle(self, duty: float) -> None:
         """Apply a raw PWM voltage to the motor windings.

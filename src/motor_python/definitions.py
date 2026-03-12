@@ -181,6 +181,10 @@ class MotorLimits:
     max_temperature_celsius: int = 100  # Driver board thermal cutoff — firmware shuts down above this (CubeMars AK60-6 spec)
     max_position_degrees: float = 3200.0  # Max observable canonical position clamp
     min_position_degrees: float = -3200.0  # Min observable canonical position clamp
+    max_protocol_velocity_erpm: int = 320000  # CAN Protocol feedback range limits
+    min_protocol_velocity_erpm: int = -320000  # CAN Protocol feedback range limits
+    max_current_amps: float = 60.0  # Protocol absolute maximum phase current limit
+    min_current_amps: float = -60.0  # Protocol absolute minimum phase current limit
 
 
 @dataclass(frozen=True)
