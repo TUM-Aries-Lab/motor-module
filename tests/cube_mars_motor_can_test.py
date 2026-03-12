@@ -11,7 +11,8 @@ from unittest.mock import MagicMock, patch
 import can
 import pytest
 
-from motor_python.cube_mars_motor_can import CANMotorFeedback, CubeMarsAK606v3CAN
+from motor_python.base_motor import MotorState
+from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
 from motor_python.definitions import TendonAction
 
 # ---------------------------------------------------------------------------
@@ -436,11 +437,11 @@ class TestFeedbackAndCommunication:
         pos = motor.get_position()
         assert pos is None
 
-    def test_get_status_logs_and_returns_feedback(self, motor, mock_bus):
-        """get_status() returns a CANMotorFeedback when feedback is available."""
+    def test_get_status_returns_feedback_when_available(self, motor, mock_bus):
+        """get_status() returns a MotorState when feedback is available."""
         mock_bus.recv.return_value = _make_feedback_msg()
         result = motor.get_status()
-        assert isinstance(result, CANMotorFeedback)
+        assert isinstance(result, MotorState)
 
 
 # ---------------------------------------------------------------------------

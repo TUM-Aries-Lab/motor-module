@@ -13,7 +13,8 @@ from collections.abc import Generator
 
 import pytest
 
-from motor_python.cube_mars_motor_can import CANMotorFeedback, CubeMarsAK606v3CAN
+from motor_python.base_motor import MotorState
+from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
 
 logger = logging.getLogger(__name__)
 pytestmark = pytest.mark.hardware
@@ -81,7 +82,7 @@ def test_receives_feedback(motor: CubeMarsAK606v3CAN) -> None:
     time.sleep(0.1)
     fb = motor._receive_feedback(timeout=_FEEDBACK_TIMEOUT)
     assert fb is not None, "No feedback received — check wiring, terminator, CAN ID"
-    assert isinstance(fb, CANMotorFeedback)
+    assert isinstance(fb, MotorState)
     assert -3200.0 <= fb.position_degrees <= 3200.0
     assert -60.0 <= fb.current_amps <= 60.0
 
@@ -101,7 +102,7 @@ def test_set_velocity_sends_and_gets_feedback(motor: CubeMarsAK606v3CAN) -> None
         time.sleep(0.3)
         fb = motor._receive_feedback(timeout=_FEEDBACK_TIMEOUT)
         assert fb is not None, "No feedback after velocity command"
-        assert isinstance(fb, CANMotorFeedback)
+        assert isinstance(fb, MotorState)
     finally:
         motor.stop()
 
@@ -194,7 +195,7 @@ def test_get_status_fields_valid(motor: CubeMarsAK606v3CAN) -> None:
     time.sleep(0.2)
     status = motor.get_status()
     assert status is not None, "No status feedback — check wiring"
-    assert isinstance(status, CANMotorFeedback)
+    assert isinstance(status, MotorState)
     assert -3200.0 <= status.position_degrees <= 3200.0
     assert -100_000 <= status.speed_erpm <= 100_000
     assert -60.0 <= status.current_amps <= 60.0

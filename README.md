@@ -11,10 +11,13 @@ Motor control for exosuit tendon systems using a CubeMars AK60-6 motor.
 ## Install
 
 ```bash
-uv install motor_python
+uv install motor.close()
 ```
 
-## CAN Setup (Jetson Orin Nano)
+Both motor classes inherit from `BaseMotor` which provides a unified API for
+both UART and CAN control.
+
+### Basic Setup (Jetson Orin Nano)
 
 ### One-time install (run once, then never again)
 
@@ -218,12 +221,14 @@ It's super easy to publish your own packages on PyPi. To build and publish this 
 
 | Method | Returns |
 |--------|---------|
-| `get_position()` | Current angle in degrees |
-| `get_speed()` | Current speed in ERPM |
-| `get_current()` | Phase current in Amps |
-| `get_temperature()` | Driver board temperature in °C |
-| `get_status()` | Full state — logs position / speed / current / temp / error |
-| `get_motor_data()` | All fields as a `dict` |
+| `get_position()` | Current angle in degrees (float) |
+| `get_speed()` | Current speed in ERPM (int) |
+| `get_current()` | Phase current in Amps (float) |
+| `get_temperature()` | Driver board temperature in °C (int) |
+| `get_status()` | Full state as a `MotorState` object |
+| `get_motor_data()` | All telemetry fields as a `dict` |
+
+*Note: All getters rely on the same underlying `MotorState` structure.*
 
 ## Known Firmware Limitations
 
