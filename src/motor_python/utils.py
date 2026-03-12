@@ -57,3 +57,13 @@ def setup_logger(
     logger.add(filepath_with_time, level=log_level, encoding=ENCODING, enqueue=True)
     logger.info(f"Logging to '{filepath_with_time}'.")
     return filepath_with_time
+
+
+def erpm_to_degrees_per_second(erpm: int | float) -> float:
+    """Convert Electrical RPM (ERPM) to degrees per second.
+
+    Formula: (ERPM / 60) * 360 = ERPM * 6
+    :param erpm: Electrical RPM
+    :return: Degrees per second
+    """
+    return abs(float(erpm)) * 6.0

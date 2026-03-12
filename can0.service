@@ -1,0 +1,25 @@
+[Unit]
+Description=CAN0 interface setup for CubeMars AK60-6 motor (1 Mbps, auto-restart)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# Load kernel modules
+ExecStart=/sbin/modprobe can
+ExecStart=/sbin/modprobe can_raw
+ExecStart=/sbin/modprobe mttcan
+
+# Bring interface down cleanly (ignore error if already down)
+ExecStart=/bin/bash -c 'ip link set can0 down 2>/dev/null || true'
+
+# Bring up at 1 Mbps with BUS-OFF auto-recovery (100 ms) and large TX queue
+ExecStart=/sbin/ip link set can0 up type can bitrate 1000000 berr-reporting on restart-ms 100
+ExecStart=/sbin/ip link set can0 txqueuelen 1000
+
+ExecStop=/sbin/ip link set can0 down
+
+[Install]
+WantedBy=multi-user.target

@@ -60,6 +60,39 @@ class MotorDefaults:
 
 
 @dataclass(frozen=True)
+class CANDefaults:
+    """CAN bus communication default settings for Jetson Orin Nano.
+
+    Hardware setup uses SN65HVD230 CAN transceiver:
+    - Jetson CAN_TX -> SN65HVD230 D (pin 1)
+    - Jetson CAN_RX -> SN65HVD230 R (pin 4)
+    - SN65HVD230 CANH (pin 7) -> Motor CANH
+    - SN65HVD230 CANL (pin 6) -> Motor CANL
+    - Common GND connection
+    - 3.3V power to SN65HVD230 Vcc (pin 3)
+    - 120Ω termination resistor across CANH/CANL
+
+    Motor CAN configuration (from CubeMars software):
+    - CAN Bitrate: 1 Mbps
+    - CAN ID: 3 (default, configurable per motor)
+    - Periodic Feedback: 50Hz
+    """
+
+    interface: str = "can0"  # SocketCAN interface name (can0 or can1 on Jetson)
+    bitrate: int = 1000000  # CAN bus bitrate in bits/sec (1 Mbps per motor config)
+    motor_can_id: int = 0x03  # Default motor CAN ID — primary / left motor (ID: 3)
+    motor_can_id_2: int = (
+        0x04  # Secondary motor CAN ID — right motor (ID: 4, arrives Wednesday)
+    )
+    controller_can_id: int = 0x00  # Controller/master CAN ID
+    receive_timeout: float = 0.5  # Timeout for receiving CAN messages (seconds)
+    connection_stabilization_delay: float = 0.05  # Delay after CAN bus init
+    max_retries: int = 3  # Max transmission retries on error
+    feedback_rate_hz: int = 50  # Motor periodic feedback rate (from motor config)
+    refresh_capture_window_s: float = 0.025  # Per-iteration receive window in the refresh loop (s); covers one keepalive + command round-trip (~20 ms) within the 100 ms watchdog budget
+
+
+@dataclass(frozen=True)
 class FrameBytes:
     """Motor protocol frame bytes."""
 
@@ -145,6 +178,15 @@ class MotorLimits:
     soft_start_duration: float = 0.15  # Seconds to hold pre-spin current
     default_tendon_velocity_erpm: int = 10000  # Default velocity for tendon control
     default_velocity_demo_erpm: int = 8000  # Safe moderate velocity for demo/testing
+    max_temperature_celsius: int = 100  # Driver board thermal cutoff — firmware shuts down above this (CubeMars AK60-6 spec)
+    max_position_degrees: float = 3200.0  # Max observable canonical position clamp
+    min_position_degrees: float = -3200.0  # Min observable canonical position clamp
+    max_protocol_velocity_erpm: int = 320000  # CAN Protocol feedback range limits
+    min_protocol_velocity_erpm: int = -320000  # CAN Protocol feedback range limits
+    max_current_amps: float = 60.0  # Protocol absolute maximum phase current limit
+    min_current_amps: float = -60.0  # Protocol absolute minimum phase current limit
+    max_16bit_velocity_erpm: int = 327670  # Scaled limit for 16-bit profile commands
+    min_16bit_velocity_erpm: int = -327670  # Scaled limit for 16-bit profile commands
 
 
 @dataclass(frozen=True)
@@ -179,6 +221,7 @@ class HardwareTestDefaults:
 
 # Instantiate frozen dataclasses for easy access
 MOTOR_DEFAULTS = MotorDefaults()
+CAN_DEFAULTS = CANDefaults()
 FRAME_BYTES = FrameBytes()
 CRC_CONSTANTS = CRCConstants()
 SCALE_FACTORS = ScaleFactors()

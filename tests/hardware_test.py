@@ -20,7 +20,7 @@ from motor_python.definitions import (
 
 logger = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.hardware
+pytestmark = pytest.mark.hardware_uart
 
 
 def get_status_with_retry(

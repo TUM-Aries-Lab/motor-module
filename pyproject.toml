@@ -25,6 +25,7 @@ dev = [
   "pyright>=1.1.407",
 ]
 hw = [
+  "python-can>=4.4.0",
 ]
 no_hw = [
 ]
@@ -42,7 +43,26 @@ lint.select = [
 lint.ignore = [
   "D203","D213","E501","N803","N806","D415","S101","E203","E731",
   "D107","PLR2004","S607","S605","S603",
+  "RUF002","RUF003",  # Unicode × and – in docstrings/comments are intentional
 ]
+
+[tool.ruff.lint.extend-per-file-ignores]
+# Lazy subprocess import inside methods is intentional
+# subprocess.run without check= is handled via try/except
+"src/motor_python/can_utils.py" = ["PLC0415", "PLW1510"]
+
+# Complexity limit – feedback/refresh loops are inherently complex
+# Too many returns and lazy imports for socket flags
+"src/motor_python/cube_mars_motor_can.py" = ["C901", "PLR0911", "PLC0415"]
+
+# Too many return statements in feedback parser
+"src/motor_python/motor_status_parser.py" = ["PLR0911"]
+
+# Test helpers may need >5 args for full fixture coverage
+# Pytest fixtures don't need public docstrings
+# Lazy mocks are acceptable in test fixtures
+"tests/*" = ["PLR0913", "D103", "PLC0415"]
+
 
 [tool.ruff.lint.isort]
 known-first-party = ["motor_python"]
@@ -53,9 +73,18 @@ quote-style = "double"
 indent-style = "space"
 line-ending = "lf"
 
+[tool.coverage.run]
+omit = [
+  "src/motor_python/examples.py",
+  "src/motor_python/examples_can.py",
+  "tests/can_test.py",
+  "src/motor_python/__main__.py",
+]
+
 [tool.pytest.ini_options]
 markers = [
-    "hardware: tests that require actual motor hardware (deselect with '-m \"not hardware\"')",
+    "hardware: CAN hardware tests — require motor on can0, NO UART cable (deselect with '-m \"not hardware\"')",
+    "hardware_uart: UART/serial hardware tests — require R-Link cable, incompatible with CAN tests",
 ]
 testpaths = ["tests"]
 pythonpath = ["src"]
