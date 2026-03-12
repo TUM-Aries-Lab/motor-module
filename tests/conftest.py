@@ -4,11 +4,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from loguru import logger
-
-# Suppress loguru DEBUG output from motor_python during tests.
-# Loguru uses its own sink and ignores pytest's log_level setting.
-logger.disable("motor_python")
 
 # Add the src directory to the path so that the motor_python package can be imported
 my_path = Path(__file__).parent

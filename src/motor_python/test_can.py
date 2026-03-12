@@ -6,6 +6,8 @@ from loguru import logger
 
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
 
+MOTOR_CAN_ID = 0x03
+
 
 def test_can_interface():
     """Test basic CAN interface connectivity."""
@@ -14,7 +16,9 @@ def test_can_interface():
     logger.info("=" * 60)
 
     try:
-        motor = CubeMarsAK606v3CAN(motor_can_id=0x03, interface="can0", bitrate=1000000)
+        motor = CubeMarsAK606v3CAN(
+            motor_can_id=MOTOR_CAN_ID, interface="can0", bitrate=1000000
+        )
         if motor.connected:
             logger.success("✓ CAN interface 'can0' initialized successfully")
             motor.close()
@@ -38,7 +42,7 @@ def test_motor_feedback():
     logger.info("Listening for motor feedback messages (50 Hz)...")
     logger.info("Make sure motor is powered on and configured for CAN!")
 
-    motor = CubeMarsAK606v3CAN(motor_can_id=0x03)
+    motor = CubeMarsAK606v3CAN(motor_can_id=MOTOR_CAN_ID)
 
     if not motor.connected:
         logger.error("✗ CAN interface not connected")
@@ -77,7 +81,7 @@ def test_communication_check():
     logger.info("TEST 3: Communication Check")
     logger.info("=" * 60)
 
-    motor = CubeMarsAK606v3CAN(motor_can_id=0x03)
+    motor = CubeMarsAK606v3CAN(motor_can_id=MOTOR_CAN_ID)
 
     if motor.check_communication():
         logger.success("✓ Motor communication verified")
@@ -103,7 +107,7 @@ def test_velocity_command():
         logger.info("Test skipped by user")
         return None
 
-    motor = CubeMarsAK606v3CAN(motor_can_id=0x03)
+    motor = CubeMarsAK606v3CAN(motor_can_id=MOTOR_CAN_ID)
 
     if not motor.check_communication():
         logger.error("✗ Motor not responding - skipping velocity test")
@@ -151,7 +155,7 @@ def test_position_command():
         logger.info("Test skipped by user")
         return None
 
-    motor = CubeMarsAK606v3CAN(motor_can_id=0x03)
+    motor = CubeMarsAK606v3CAN(motor_can_id=MOTOR_CAN_ID)
 
     if not motor.check_communication():
         logger.error("✗ Motor not responding - skipping position test")
