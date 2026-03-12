@@ -119,36 +119,38 @@ def test_low_velocity_blocked(motor: CubeMarsAK606v3CAN) -> None:
 
 
 @pytest.mark.flaky(reruns=2, reruns_delay=2)
-def test_motor_spins_forward(motor: CubeMarsAK606v3CAN) -> None:
-    """set_duty_cycle(0.30) → motor measurably spins forward (≥2000 ERPM) after 0.5 s.
+@pytest.mark.parametrize(
+    "duty_cycle, min_abs_speed, expected_sign",
+    [
+        (0.30, 2000, 1),
+        (-0.30, 2000, -1),
+    ],
+    ids=["forward", "reverse"],
+)
+def test_motor_spins_with_duty_cycle(
+    motor: CubeMarsAK606v3CAN, duty_cycle: float, min_abs_speed: int, expected_sign: int
+) -> None:
+    """set_duty_cycle() spins motor in requested direction after 0.5 s.
 
     Note: velocity-loop mode (0x0303) is not enabled in the current motor
     firmware configuration.  Duty-cycle mode (arb_id=0x03) is the only
-    confirmed working control mode — see docs/CAN_DEBUG_LOG.md Problem 6.
+    confirmed working control mode.
     """
     try:
         motor.enable_motor()
         time.sleep(0.2)
-        motor.set_duty_cycle(0.30)
+        motor.set_duty_cycle(duty_cycle)
         time.sleep(0.7)  # allow ramp-up
         speed = motor.get_speed()
         assert speed is not None, "No speed feedback — check wiring"
-        assert speed > 2000, f"Expected forward spin > 2000 ERPM, got {speed} ERPM"
-    finally:
-        motor.stop()
-
-
-@pytest.mark.flaky(reruns=2, reruns_delay=2)
-def test_motor_spins_in_reverse(motor: CubeMarsAK606v3CAN) -> None:
-    """set_duty_cycle(-0.30) → motor measurably spins in reverse (≤ -2000 ERPM) after 0.5 s."""
-    try:
-        motor.enable_motor()
-        time.sleep(0.2)
-        motor.set_duty_cycle(-0.30)
-        time.sleep(0.7)
-        speed = motor.get_speed()
-        assert speed is not None, "No speed feedback — check wiring"
-        assert speed < -2000, f"Expected reverse spin < -2000 ERPM, got {speed} ERPM"
+        if expected_sign > 0:
+            assert speed > min_abs_speed, (
+                f"Expected forward spin > {min_abs_speed} ERPM, got {speed} ERPM"
+            )
+        else:
+            assert speed < -min_abs_speed, (
+                f"Expected reverse spin < -{min_abs_speed} ERPM, got {speed} ERPM"
+            )
     finally:
         motor.stop()
 
@@ -236,11 +238,9 @@ def test_set_origin_zeros_position(motor: CubeMarsAK606v3CAN) -> None:
             motor._last_feedback.position_degrees if motor._last_feedback else None
         )
     assert position is not None, "No position feedback after set_origin"
-    # set_origin is confirmed working if position is within the motor's physical range.
-    # Exact value depends on where the rotor happens to sit; firmware on this unit
-    # does not reset the position counter in the feedback stream.
-    assert -3200.0 <= position <= 3200.0, (
-        f"Position out of physical range after set_origin: {position:.2f}°"
+    # set_origin sets the motor's current position to 0 effectively
+    assert -5.0 <= position <= 5.0, (
+        f"Position should be near 0 after set_origin, got {position:.2f}°"
     )
 
 
@@ -257,10 +257,8 @@ def test_set_position_moves_motor(motor: CubeMarsAK606v3CAN) -> None:
         time.sleep(3.0)
         position = motor.get_position()
         assert position is not None, "No position feedback after set_position"
-        # Position mode is not tuned on this firmware unit; we confirm the motor
-        # is alive and returned a valid position reading after the command.
-        assert -3200.0 <= position <= 3200.0, (
-            f"Position out of physical range: {position:.2f}°"
+        assert target - 5.0 <= position <= target + 5.0, (
+            f"Expected position near {target}°, got: {position:.2f}°"
         )
     finally:
         motor.stop()
@@ -285,10 +283,8 @@ def test_set_position_velocity_accel_moves_motor(motor: CubeMarsAK606v3CAN) -> N
         assert position is not None, (
             "No position feedback after set_position_velocity_accel"
         )
-        # Position mode is not tuned on this firmware unit; we confirm the motor
-        # is alive and returned a valid position reading after the command.
-        assert -3200.0 <= position <= 3200.0, (
-            f"Position out of physical range: {position:.2f}°"
+        assert target - 5.0 <= position <= target + 5.0, (
+            f"Expected position near {target}°, got: {position:.2f}°"
         )
     finally:
         motor.stop()
