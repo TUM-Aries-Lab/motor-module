@@ -179,6 +179,8 @@ class MotorLimits:
     default_tendon_velocity_erpm: int = 10000  # Default velocity for tendon control
     default_velocity_demo_erpm: int = 8000  # Safe moderate velocity for demo/testing
     max_temperature_celsius: int = 100  # Driver board thermal cutoff — firmware shuts down above this (CubeMars AK60-6 spec)
+    max_position_degrees: float = 3200.0  # Max observable canonical position clamp
+    min_position_degrees: float = -3200.0  # Min observable canonical position clamp
 
 
 @dataclass(frozen=True)

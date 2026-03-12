@@ -675,12 +675,16 @@ class CubeMarsAK606v3CAN(BaseMotor):
         position against any external load.  For a controlled-speed move
         use set_position_velocity_accel() or move_to_position_with_speed().
 
-        :param position_degrees: Target angle in degrees (-3200° to 3200°).
+        :param position_degrees: Target angle in degrees.
             Values outside this range are clamped automatically.
         :return: None
         """
         # Clamp to CAN protocol feedback limits
-        position_degrees = np.clip(position_degrees, -3200.0, 3200.0)
+        position_degrees = np.clip(
+            position_degrees,
+            MOTOR_LIMITS.min_position_degrees,
+            MOTOR_LIMITS.max_position_degrees,
+        )
 
         # Convert to int32: degrees * 10000
         # Example from doc: 600 degrees = 0x005B8D80 = 6000000
@@ -839,7 +843,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
         the target angle and holds it.  This is the preferred command for
         precise, smooth exosuit joint movements.
 
-        :param position_degrees: Target angle in degrees (-3200° to 3200°).
+        :param position_degrees: Target angle in degrees.
         :param velocity_erpm: Maximum travel speed in ERPM.  0 = firmware
             default (usually very fast — always set a value).
             Typical exosuit value: 8 000–15 000 ERPM.
@@ -847,7 +851,13 @@ class CubeMarsAK606v3CAN(BaseMotor):
             firmware default.  Lower values give smoother, gentler motion.
         :return: None
         """
-        position_degrees = float(np.clip(position_degrees, -3200.0, 3200.0))
+        position_degrees = float(
+            np.clip(
+                position_degrees,
+                MOTOR_LIMITS.min_position_degrees,
+                MOTOR_LIMITS.max_position_degrees,
+            )
+        )
         position_int = int(position_degrees * 10000.0)
 
         # Velocity and accel are signed 16-bit, scaled /10 per the CAN protocol spec.

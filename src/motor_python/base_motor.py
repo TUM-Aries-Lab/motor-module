@@ -20,6 +20,7 @@ from motor_python.definitions import (
     MOTOR_LIMITS,
     TendonAction,
 )
+from motor_python.utils import erpm_to_degrees_per_second
 
 # Error code descriptions from CubeMars CAN protocol spec (section 4.3.1)
 CAN_ERROR_CODES: dict[int, str] = {
@@ -325,8 +326,7 @@ class BaseMotor(abc.ABC):
 
         current_position = self._get_current_position_for_estimate()
 
-        # ERPM -> degrees/second: (ERPM / 60) * 360
-        degrees_per_second = abs(motor_speed_erpm) / 60.0 * 360.0
+        degrees_per_second = erpm_to_degrees_per_second(motor_speed_erpm)
         distance = abs(target_degrees - current_position)
         return distance / degrees_per_second
 
