@@ -9,7 +9,7 @@ import numpy as np
 from loguru import logger
 
 from motor_python.base_motor import BaseMotor, MotorState
-from motor_python.can_protocol import CANControlMode
+from motor_python.can_protocol import CANControlMode, CANOriginMode
 from motor_python.can_utils import get_can_state
 from motor_python.definitions import (
     CAN_DEFAULTS,
@@ -830,7 +830,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
             power cycle.
         :return: None
         """
-        origin_byte = 0x02 if permanent else 0x01
+        origin_byte = CANOriginMode.PERMANENT if permanent else CANOriginMode.TEMPORARY
         data = bytes([origin_byte])  # _send_can_command pads to 8 bytes
 
         self._send_can_command(CANControlMode.SET_ORIGIN, data)
@@ -874,8 +874,22 @@ class CubeMarsAK606v3CAN(BaseMotor):
         # Velocity and accel are signed 16-bit, scaled /10 per the CAN protocol spec.
         # Doc example: 10000 ERPM → raw 0x03E8 (1000), so raw = ERPM / 10.
         # Signs are preserved so direction is encoded correctly.
-        velocity_int = int(np.clip(velocity_erpm, -327670, 327670) // 10)
-        accel_int = int(np.clip(accel_erpm_per_sec, -327670, 327670) // 10)
+        velocity_int = int(
+            np.clip(
+                velocity_erpm,
+                MOTOR_LIMITS.min_16bit_velocity_erpm,
+                MOTOR_LIMITS.max_16bit_velocity_erpm,
+            )
+            // 10
+        )
+        accel_int = int(
+            np.clip(
+                accel_erpm_per_sec,
+                MOTOR_LIMITS.min_16bit_velocity_erpm,
+                MOTOR_LIMITS.max_16bit_velocity_erpm,
+            )
+            // 10
+        )
 
         # Pack: int32 + int16 + int16 = 8 bytes, big-endian
         data = struct.pack(">ihh", position_int, velocity_int, accel_int)

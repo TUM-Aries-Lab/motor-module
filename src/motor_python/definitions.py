@@ -185,6 +185,8 @@ class MotorLimits:
     min_protocol_velocity_erpm: int = -320000  # CAN Protocol feedback range limits
     max_current_amps: float = 60.0  # Protocol absolute maximum phase current limit
     min_current_amps: float = -60.0  # Protocol absolute minimum phase current limit
+    max_16bit_velocity_erpm: int = 327670  # Scaled limit for 16-bit profile commands
+    min_16bit_velocity_erpm: int = -327670  # Scaled limit for 16-bit profile commands
 
 
 @dataclass(frozen=True)

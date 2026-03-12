@@ -34,3 +34,10 @@ class CANControlMode:
     #                      [23:12] kd   uint12  range [0, 5] Nms/rad      → 0..4095
     #                      [11:0]  tau  uint12  range [-18, 18] Nm        → 0..4095
     #                    See _pack_mit_frame() and set_mit_mode() for Python helpers.
+
+
+class CANOriginMode:
+    """Byte payloads for the SET_ORIGIN command (0x05 mode)."""
+
+    TEMPORARY = 0x01  # Resets on next power cycle
+    PERMANENT = 0x02  # Saved to internal EEPROM
