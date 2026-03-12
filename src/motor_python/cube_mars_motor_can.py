@@ -10,7 +10,7 @@ from loguru import logger
 
 from motor_python.base_motor import BaseMotor, MotorState
 from motor_python.can_protocol import CANControlMode
-from motor_python.can_utils import get_can_state, reset_can_interface
+from motor_python.can_utils import get_can_state
 from motor_python.definitions import (
     CAN_DEFAULTS,
     MOTOR_DEFAULTS,
@@ -305,7 +305,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
         if len(data) < 8:
             data = data + bytes(8 - len(data))
         elif len(data) > 8:
-            data = data[:8]
+            raise ValueError(f"CAN payload too large: {len(data)} bytes (max 8)")
 
         try:
             arbitration_id = self._build_extended_id(mode)
