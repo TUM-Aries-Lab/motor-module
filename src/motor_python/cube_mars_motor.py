@@ -5,6 +5,7 @@ import time
 from enum import IntEnum
 from pathlib import Path
 
+import numpy as np
 import serial
 from loguru import logger
 
@@ -299,8 +300,14 @@ class CubeMarsAK606v3(BaseMotor):
         No artificial limits - motor can rotate continuously for spool-based cable systems.
 
         :param position_degrees: Target position in degrees (unlimited range)
+        :param position_degrees: Target position in degrees (clamped by hardware limits)
         :return: None
         """
+        position_degrees = np.clip(
+            position_degrees,
+            MOTOR_LIMITS.min_position_degrees,
+            MOTOR_LIMITS.max_position_degrees,
+        )
         value = int(position_degrees * SCALE_FACTORS.position)
         payload = struct.pack(">i", value)
         frame = self._build_frame(MotorCommand.CMD_SET_POSITION, payload)
@@ -348,6 +355,13 @@ class CubeMarsAK606v3(BaseMotor):
 
     def _send_velocity_command(self, velocity_erpm: int) -> None:
         """Send velocity command over UART."""
+        velocity_erpm = int(
+            np.clip(
+                velocity_erpm,
+                MOTOR_LIMITS.min_protocol_velocity_erpm,
+                MOTOR_LIMITS.max_protocol_velocity_erpm,
+            )
+        )
         payload = struct.pack(">i", velocity_erpm)
         frame = self._build_frame(MotorCommand.CMD_SET_VELOCITY, payload)
         self._send_frame(frame)
