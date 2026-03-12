@@ -49,6 +49,58 @@ See [docs/CAN_SETUP_GUIDE.md](docs/CAN_SETUP_GUIDE.md) for hardware wiring detai
 > sudo systemctl restart can0.service   # or: sudo ./setup_can.sh
 > ```
 
+## CAN Not Working? Step-by-step Recovery
+
+If the motor is silent (no `candump can0` output) or the script says
+"No CAN frames in 1.5 s", work through these steps in order:
+
+**Step 1 — Check the obvious**
+- Is the motor powered on? (LED on the motor should be lit)
+- Is the UART/R-Link cable unplugged? (it silently blocks all CAN commands)
+- Is the CAN cable plugged into the correct port on the Jetson?
+
+**Step 2 — Check the interface state**
+```bash
+ip -details link show can0
+```
+Look for `state ERROR-ACTIVE (berr-counter tx 0 rx 0)` — that's healthy.
+If you see `ERROR-PASSIVE` or `BUS-OFF` go to Step 3.
+
+**Step 3 — Reset the CAN interface**
+
+A simple `ip link set down/up` does NOT reset the hardware error counters on
+the Jetson Orin Nano mttcan controller. You must reload the kernel module:
+
+```bash
+sudo ip link set can0 down
+sudo modprobe -r mttcan
+sleep 0.5
+sudo modprobe mttcan
+sleep 0.2
+sudo ip link set can0 up type can bitrate 1000000 berr-reporting on restart-ms 100
+sudo ip link set can0 txqueuelen 1000
+```
+
+Or in one line:
+```bash
+sudo ip link set can0 down && sudo modprobe -r mttcan && sleep 0.5 && sudo modprobe mttcan && sleep 0.2 && sudo ip link set can0 up type can bitrate 1000000 berr-reporting on restart-ms 100 && sudo ip link set can0 txqueuelen 1000
+```
+
+**Step 4 — Power-cycle the motor**
+
+If the interface reset didn't help, the motor itself may have entered a fault
+state (common after `test_velocity_loop.py` fills the TX queue):
+1. Unplug motor power
+2. Wait 3 seconds
+3. Reconnect power
+4. Re-run Step 3
+
+**Step 5 — Verify traffic**
+```bash
+timeout 3 candump can0
+```
+You should see `0x2903` frames scrolling at ~50 Hz. If yes, the motor is ready.
+
 > **Confirmed working control modes:** duty cycle, position, position+velocity+acceleration,
 > current, brake current, and MIT impedance mode.
 > **Velocity loop (0x0303) is not functional on this unit — see [Known Firmware Limitations](#known-firmware-limitations) below.**

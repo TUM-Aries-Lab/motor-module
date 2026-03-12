@@ -40,8 +40,26 @@ Wiring / hardware assumptions
 
 Usage
 ------
-  sudo python scripts/test_velocity_loop.py          # default +/-1500 ERPM
-  sudo python scripts/test_velocity_loop.py 3000     # custom ERPM magnitude
+  .venv/bin/python scripts/test_velocity_loop.py           # default ±5000 ERPM
+  .venv/bin/python scripts/test_velocity_loop.py 3000      # custom ERPM magnitude
+
+CAN not working? (motor silent / TX buffer full)
+-------------------------------------------------
+  Running this script with 0x0303 fills the TX queue because the motor does not
+  ACK those frames, pushing the Jetson into ERROR-PASSIVE. To recover:
+
+  1. Unplug UART/R-Link cable from motor.
+  2. Power-cycle the motor (unplug power, wait 3 s, reconnect).
+  3. Reload the mttcan kernel module to reset hardware error counters:
+
+       sudo ip link set can0 down && sudo modprobe -r mttcan && sleep 0.5 && \\
+       sudo modprobe mttcan && sleep 0.2 && \\
+       sudo ip link set can0 up type can bitrate 1000000 berr-reporting on restart-ms 100 && \\
+       sudo ip link set can0 txqueuelen 1000
+
+  4. Verify recovery: ip -details link show can0
+     Expected: state ERROR-ACTIVE (berr-counter tx 0 rx 0)
+  5. Verify motor is on bus: timeout 3 candump can0  (should see 0x2903 frames)
 """
 
 from __future__ import annotations

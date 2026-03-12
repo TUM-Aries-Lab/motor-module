@@ -49,8 +49,24 @@ Motion sequence
   2.  -> 0 deg       velocity-scheduled return to gravity hang
 
 Run:
-    sudo ./setup_can.sh
     .venv/bin/python scripts/motion_capture_vel.py
+
+CAN not working? (motor silent / "No CAN frames" error)
+--------------------------------------------------------
+  1. Unplug UART/R-Link cable from motor (it blocks all CAN commands).
+  2. Power-cycle the motor (unplug power, wait 3 s, reconnect).
+  3. Reset the Jetson CAN interface (must reload kernel module to clear hw errors):
+
+       sudo ip link set can0 down && sudo modprobe -r mttcan && sleep 0.5 && \\
+       sudo modprobe mttcan && sleep 0.2 && \\
+       sudo ip link set can0 up type can bitrate 1000000 berr-reporting on restart-ms 100 && \\
+       sudo ip link set can0 txqueuelen 1000
+
+  4. Verify: timeout 3 candump can0   (should see 0x2903 frames scrolling)
+  5. Re-run this script.
+
+  Note: 'sudo systemctl restart can0.service' is NOT enough after ERROR-PASSIVE --
+  the mttcan reload (Step 3) is required to reset hardware TX error counters.
 """
 
 import csv
