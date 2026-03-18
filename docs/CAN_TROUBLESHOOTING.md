@@ -2,9 +2,29 @@
 
 Chronological record of what was tried, what failed, and **why**, so we don't repeat it.
 
+> **Important (current state):** This file contains historical troubleshooting
+> from earlier servo/duty experiments. The active Python CAN implementation is
+> now MIT-only (`mode_id=0x08`). For current bench steps, use:
+> - `docs/CAN_TESTING.md`
+> - `docs/CAN_TELEMETRY_API.md`
+> - `scripts/mit_mode_test.py`
+
 ---
 
-## ✅ Confirmed Working
+## Current Production Baseline (MIT-only)
+
+Use this as the authoritative command baseline for current software:
+
+| Action | Arb ID | Payload |
+|---|---|---|
+| Enable MIT | `motor_id` (for ID 3: `0x000003`) | `FF FF FF FF FF FF FF FF` |
+| MIT control command | `(0x08 << 8) | motor_id` (for ID 3: `0x000803`) | 8-byte MIT-packed payload (`KP/KD/Pos/Vel/Tau`) |
+| Disable MIT | `motor_id` (for ID 3: `0x000003`) | `FF FF FF FF FF FF FF FE` |
+| Recommended bench script | N/A | `.venv/bin/python scripts/mit_mode_test.py --motor-id 0x03` |
+
+---
+
+## ✅ Historical Results (pre-MIT switch)
 
 | Feature | Arb ID | Payload | Notes |
 |---|---|---|---|
@@ -146,13 +166,13 @@ This is confirmed to make the motor move toward the target.
 **How to detect:**
 1. Check PSU voltage: must be **24V** (nominal range 24–48V for AK60-6).
 2. Check PSU current draw: should be >0.3A when motor is enabled and commanded. If it stays at ~35 mA, the H-bridge is not driving.
-3. Send a 40% duty command and watch the feedback `speed_erpm` — if it stays at 0 after 0.5s, suspect under-voltage.
+3. Send an MIT command (`set_mit_mode` / `set_velocity`) and watch `speed_erpm` — if it stays at 0 after 0.5s, suspect under-voltage.
 
 **Fix:**
 1. Set PSU to **24V** (the AK60-6 nominal voltage).
 2. **Power-cycle the motor** (turn PSU off, wait 3s, turn back on). The motor controller latches the under-voltage fault and does NOT auto-recover when voltage is raised — you must power-cycle.
 3. Re-run `sudo ./setup_can.sh` to clear any accumulated CAN errors.
-4. Verify with `spin_test.py` — speed should reach ~7000 ERPM at 40% duty within 0.3s.
+4. Verify with `.venv/bin/python scripts/mit_mode_test.py --motor-id 0x03`.
 
 **Why this is insidious:**
 - The motor communicates perfectly on CAN — all diagnostics look clean.
@@ -172,9 +192,9 @@ This is confirmed to make the motor move toward the target.
 
 **Root cause:** Unknown — possibly a firmware configuration issue or the motor firmware version only supports duty-cycle CAN control. The motor may need additional configuration via the CubeMars PC software to enable current/velocity loop modes over CAN.
 
-**Workaround:** Use duty-cycle mode (`0x0003`) for all motor control. For position tracking, implement a software P-controller in duty-cycle mode (as done in `motion_capture_test.py`).
+**Historical workaround (at discovery time):** duty-cycle mode (`0x0003`).
 
-**Status:** Not critical — duty-cycle mode is sufficient for exosuit tendon control.
+**Current status:** superseded by MIT-only Python implementation (`mode_id=0x08`).
 
 ---
 

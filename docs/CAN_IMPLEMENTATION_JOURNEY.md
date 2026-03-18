@@ -1,5 +1,9 @@
 # CAN Implementation Journey — CubeMars AK60-6 on Jetson Orin Nano
 
+> **Historical implementation log.** This document includes earlier servo/duty
+> exploration phases. The current production Python driver is MIT-only
+> (Force Control Mode, `mode_id=0x08`).
+
 ## Hardware
 
 | Component | Details |

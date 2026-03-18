@@ -38,7 +38,7 @@ def run_velocity_control_can(
 
 
 def run_position_control_can(motor: CubeMarsAK606v3CAN) -> None:
-    """Run position control demo: 90°, -90°, 180° (with speed), back to 0°.
+    """Run position control demo: 90°, -90°, 180°, back to 0°.
 
     :param motor: CAN motor instance (must already be enabled).
     :return: None
@@ -53,11 +53,8 @@ def run_position_control_can(motor: CubeMarsAK606v3CAN) -> None:
     time.sleep(1.5)
     motor.get_status()
 
-    logger.info("Position control: move to 180° at 8000 ERPM (trapezoidal)...")
-    motor.set_position_velocity_accel(
-        position_degrees=180.0,
-        velocity_erpm=8000,
-    )
+    logger.info("Position control: move to 180°...")
+    motor.set_position(position_degrees=180.0)
     time.sleep(2.0)
     motor.get_status()
 

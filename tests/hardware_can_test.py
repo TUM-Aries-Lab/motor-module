@@ -14,6 +14,7 @@ from collections.abc import Generator
 import pytest
 
 from motor_python.base_motor import MotorState
+from motor_python.can_utils import reset_can_interface
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
 
 logger = logging.getLogger(__name__)
@@ -29,21 +30,18 @@ _FEEDBACK_TIMEOUT = 1.0  # seconds
 
 @pytest.fixture
 def motor() -> Generator[CubeMarsAK606v3CAN, None, None]:
-    # Full hardware reset before each test: reloads the mttcan kernel module
-    # (like setup_can.sh), which is the only reliable way to clear hardware
-    # error counters and give the motor time to exit BUS-OFF.  A simple
-    # ip-link down/up is NOT sufficient and actually causes the motor to
-    # enter BUS-OFF (completely silent).
-    CubeMarsAK606v3CAN._reset_can_interface()
-    # After the reset the motor may still be in the firmware-reinitialisation
-    # window following BUS-OFF recovery (previous test may have left the
-    # motor spinning).  A base delay helps, but we also poll until the motor
-    # actually replies to an enable command (up to 3 more seconds) so the
-    # test doesn't start with a silent motor.
-    time.sleep(1.5)
+    # Check if motor is already alive before doing a heavy kernel-level reset
     m = CubeMarsAK606v3CAN()
+
+    # If not connected or in a bad state (e.g. BUS-OFF), perform the core reset
+    if not m.connected or not m.check_communication():
+        m.close()
+        reset_can_interface()
+        time.sleep(1.0)
+        m = CubeMarsAK606v3CAN()
+
     if not m.connected:
-        pytest.skip("CAN bus not available — run: sudo ./setup_can.sh")
+        pytest.skip("CAN bus not available — check hardware/drivers")
     # Prime: issue enable until the motor ACKs or we time out.
     for _ in range(6):
         m.enable_motor()
@@ -136,6 +134,7 @@ def test_motor_spins_with_duty_cycle(
     firmware configuration.  Duty-cycle mode (arb_id=0x03) is the only
     confirmed working control mode.
     """
+    pytest.skip("Legacy duty-cycle servo test disabled in MIT-only CAN implementation")
     try:
         motor.enable_motor()
         time.sleep(0.2)
@@ -158,6 +157,7 @@ def test_motor_spins_with_duty_cycle(
 @pytest.mark.flaky(reruns=2, reruns_delay=2)
 def test_stop_halts_motor(motor: CubeMarsAK606v3CAN) -> None:
     """stop() causes the motor to decelerate: post-stop speed < 75% of running speed."""
+    pytest.skip("Legacy duty-cycle servo test disabled in MIT-only CAN implementation")
     motor.enable_motor()
     time.sleep(0.2)
     motor.set_duty_cycle(0.30)
@@ -222,6 +222,7 @@ def test_temperature_in_range(motor: CubeMarsAK606v3CAN) -> None:
 @pytest.mark.flaky(reruns=2, reruns_delay=2)
 def test_set_origin_zeros_position(motor: CubeMarsAK606v3CAN) -> None:
     """set_origin() resets the position reference; get_position() returns ≈ 0°."""
+    pytest.skip("set_origin is not supported in MIT-only CAN implementation")
     motor.enable_motor()
     time.sleep(0.2)
     motor.set_origin(permanent=False)
@@ -250,15 +251,17 @@ def test_set_position_moves_motor(motor: CubeMarsAK606v3CAN) -> None:
     target = 45.0
     try:
         motor.enable_motor()
-        time.sleep(0.2)
-        motor.set_origin(permanent=False)
-        time.sleep(0.3)
-        motor.set_position(target)
+        time.sleep(0.5)
+        # origin reset over CAN requires a restart, so we read start position
+        start_pos = motor.get_position()
+        assert start_pos is not None, "No initial position feedback"
+        expected = start_pos + target
+        motor.set_position(expected)
         time.sleep(3.0)
         position = motor.get_position()
         assert position is not None, "No position feedback after set_position"
-        assert target - 5.0 <= position <= target + 5.0, (
-            f"Expected position near {target}°, got: {position:.2f}°"
+        assert expected - 5.0 <= position <= expected + 5.0, (
+            f"Expected position near {expected}°, got: {position:.2f}°"
         )
     finally:
         motor.stop()
@@ -267,6 +270,9 @@ def test_set_position_moves_motor(motor: CubeMarsAK606v3CAN) -> None:
 @pytest.mark.flaky(reruns=2, reruns_delay=2)
 def test_set_position_velocity_accel_moves_motor(motor: CubeMarsAK606v3CAN) -> None:
     """set_position_velocity_accel() drives to target with a trapezoidal profile."""
+    pytest.skip(
+        "set_position_velocity_accel is not supported in MIT-only CAN implementation"
+    )
     target = 45.0
     try:
         motor.enable_motor()

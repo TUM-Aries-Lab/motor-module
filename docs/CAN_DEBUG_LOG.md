@@ -1,5 +1,8 @@
 # CAN Debugging Log — AK60-6 on Jetson Orin Nano
 
+> Historical debug notes from earlier integration stages. Current production
+> driver status is MIT-only (`mode_id=0x08`).
+
 Live notes from each debugging session.  Update this file every session.
 
 ---

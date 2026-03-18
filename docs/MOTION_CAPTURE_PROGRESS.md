@@ -3,6 +3,9 @@
 **File:** `motion_capture_test.py`  
 **Last updated:** 2026-03-03
 
+> Historical log from earlier duty/servo experiments. Current CAN driver status
+> is MIT-only (`mode_id=0x08`).
+
 ---
 
 ## Goal

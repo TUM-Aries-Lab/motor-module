@@ -3,11 +3,15 @@
 Class: `CubeMarsAK606v3CAN`  
 Module: `src/motor_python/cube_mars_motor_can.py`
 
+> **Current implementation status (2026-03-18): MIT-only over CAN.**
+> Legacy servo transport commands (`set_duty_cycle`, `set_brake_current`,
+> `set_origin`, `set_position_velocity_accel`) are intentionally disabled and
+> raise `NotImplementedError`.
+
 All methods below are safe to call while the motor is running.
-Telemetry reads are non-blocking instant reads from the feedback cached by the
-50 Hz background thread.  If no feedback has arrived yet (e.g. immediately after
-`enable_motor()`), a single blocking receive with a 50 ms timeout is used as
-a fallback.
+Telemetry getters return cached feedback when available and otherwise wait for
+new feedback up to the method timeout (`~0.2 s` for `get_position()`,
+`~0.5 s` for `get_status()`).
 
 ---
 
@@ -15,8 +19,8 @@ a fallback.
 
 ### `get_position() → float | None`
 
-Returns the current shaft angle in **degrees**, relative to the position recorded
-at the time the motor was enabled (the "home" origin).
+Returns the current shaft angle in **degrees** from the motor feedback frame.
+The absolute reference depends on the motor-side origin configuration.
 
 - Positive values: rotation in the forward direction
 - Negative values: rotation in the reverse direction
@@ -51,7 +55,7 @@ if temp is not None:
 Returns the winding current in **Amperes** (floating-point).
 
 Current is proportional to torque.  Positive = forward torque, negative = reverse.
-At rest (duty = 0) this reads approximately 0 A.
+At neutral MIT command (`kp=kd=tau=0`) this reads approximately 0 A.
 
 ```python
 cur = motor.get_current()
@@ -65,11 +69,11 @@ if cur is not None:
 
 Returns the shaft rotational speed in **electrical RPM** (ERPM) as an integer.
 
-To convert ERPM to mechanical RPM or angular degrees/second:
+To convert ERPM to mechanical RPM or mechanical angular speed:
 
 ```
 mechanical RPM  = ERPM / pole_pairs
-deg/s           = (ERPM / 60) × 360
+deg/s           = (ERPM / pole_pairs) × 6
 ```
 
 The AK60-6 has **21 pole pairs**, so:
@@ -112,57 +116,29 @@ if data:
 
 ## Control Methods
 
-### `set_duty_cycle(duty: float)`
-
-Apply a duty cycle between `-1.0` (full reverse) and `+1.0` (full forward).
-This is the **only confirmed working control mode** on the evaluation firmware.
-
-Practical safe limits: `±0.15` (15 % of supply voltage) for controlled arm motion.
-
-```python
-motor.set_duty_cycle(0.10)   # gentle forward
-time.sleep(2.0)
-motor.set_duty_cycle(0.0)    # coast
-```
-
----
-
 ### `set_current(current_amps: float)`
 
-Apply a torque-producing current in Amperes.  Positive = forward torque.
+MIT-only compatibility helper.
 
-Used internally for the **soft-start** pre-spin (3 A for 150 ms) before switching
-to velocity mode.
+The argument is currently interpreted as **torque feedforward in Nm** and routed
+to `set_mit_mode(..., kp=0, kd=0, torque_ff_nm=current_amps)`.
 
 ---
 
 ### `set_brake_current(current_amps: float)`
 
-Apply **regenerative braking** at the specified current level.
-
-Unlike `set_current()`, which produces torque in a chosen direction, brake current
-short-circuits the windings in a controlled manner that converts kinetic energy into
-heat and actively slows the shaft.
-
-Instruction type: `0x02` — arbitration ID for motor 3 = `0x00000203`.
-
-Payload encoding: `int32(current_amps × 1000)` big-endian — identical to
-regular current control.
-
-```python
-motor.set_brake_current(5.0)   # braking force equivalent to 5 A
-```
+Not implemented in MIT-only transport. Raises `NotImplementedError`.
 
 ---
 
 ### `set_velocity(velocity_erpm: int)`
 
-Command a shaft speed in electrical RPM.  Positive = forward, negative = reverse.
+MIT-backed helper. Converts ERPM to rad/s and calls:
 
-A soft-start pre-spin (3 A current for 150 ms) is applied automatically before
-switching to velocity PID to avoid current oscillations in the low-speed zone
-(< 5 000 ERPM).  Speeds below 5 000 ERPM are blocked by default — pass
-`allow_low_speed=True` to override.
+`set_mit_mode(pos_rad=0, vel_rad_s=..., kp=0, kd=default_velocity_kd, torque_ff_nm=0)`
+
+The BaseMotor safety check still blocks very low non-zero ERPM unless
+`allow_low_speed=True` is passed.
 
 ```python
 motor.set_velocity(10000)                      # 10 000 ERPM ≈ 476 mechanical RPM
@@ -174,10 +150,9 @@ motor.set_velocity(2000, allow_low_speed=True) # slow speed (noisy, use with cau
 
 ### `set_position(position_degrees: float)`
 
-Command a target absolute angle.  The motor moves at its firmware-default speed
-and holds the position against external load.
+MIT-backed helper. Converts degrees → radians and calls:
 
-For a controlled-speed move use `set_position_velocity_accel()` instead.
+`set_mit_mode(pos_rad=..., vel_rad_s=0, kp=default_position_kp, kd=default_position_kd, torque_ff_nm=0)`
 
 ```python
 motor.set_position(90.0)   # move to 90 degrees and hold
@@ -187,16 +162,13 @@ motor.set_position(90.0)   # move to 90 degrees and hold
 
 ### `set_position_velocity_accel(position_degrees, velocity_erpm, accel_erpm_per_sec)`
 
-Trapezoidal motion profile: accelerate to `velocity_erpm`, travel, decelerate into
-target, and hold.  Preferred for smooth exosuit joint movements.
+Not implemented in MIT-only transport. Raises `NotImplementedError`.
 
-- `position_degrees`: target in degrees (−3200 to +3200)
-- `velocity_erpm`: max travel speed (0 = firmware default, very fast)
-- `accel_erpm_per_sec`: max acceleration (0 = firmware default)
+---
 
-```python
-motor.set_position_velocity_accel(120.0, velocity_erpm=10000, accel_erpm_per_sec=5000)
-```
+### `set_duty_cycle(duty: float)`
+
+Not implemented in MIT-only transport. Raises `NotImplementedError`.
 
 ---
 
@@ -208,7 +180,8 @@ Impedance control via the MIT actuator protocol.  The output torque is:
 τ = kp × (pos_target − pos_actual) + kd × (vel_target − vel_actual) + tau_ff
 ```
 
-**Requires `enable_mit_mode()` before use — not `enable_motor()`.**
+`set_mit_mode()` auto-enables MIT mode if needed. Calling `enable_mit_mode()`
+explicitly is still recommended for clear startup sequencing.
 
 Use cases:
 
@@ -219,15 +192,15 @@ Use cases:
 | Pure torque | 0 | 0 | > 0 | 0 |
 | Passive float | 0 | 0 | 0 | 0 |
 
-Physical limits (automatically clamped):
+AK60-6 physical limits (automatically clamped):
 
 | Parameter | Range | Unit |
 |---|---|---|
-| `pos_rad` | −12.5 … +12.5 | rad |
-| `vel_rad_s` | −45 … +45 | rad/s |
+| `pos_rad` | −12.56 … +12.56 | rad |
+| `vel_rad_s` | −60 … +60 | rad/s |
 | `kp` | 0 … 500 | Nm/rad |
 | `kd` | 0 … 5 | Nms/rad |
-| `torque_ff_nm` | −18 … +18 | Nm |
+| `torque_ff_nm` | −12 … +12 | Nm |
 
 ```python
 motor.enable_mit_mode()
@@ -253,27 +226,23 @@ bytes than Servo mode — do not mix them.
 
 ### `stop()`
 
-Stops the background refresh thread and sends a zero-current command,
-causing the motor to coast to a halt.  Safe to call at any time.
+Stops the background refresh thread, sends a neutral MIT command
+(`kp=kd=tau=0`), then sends MIT disable.
 
 ---
 
 ### `enable_motor()` / `disable_motor()`
 
-Special 8-byte frames that activate / deactivate **Servo mode** (duty, current,
-velocity, position commands).  The motor ignores all control commands until
-`enable_motor()` has been called.
+Compatibility aliases in this MIT-only implementation:
 
-| | Byte sequence | Arb ID |
-|---|---|---|
-| Enable Servo | `FF FF FF FF FF FF FF FC` | `motor_id` |
-| Disable Servo | `FF FF FF FF FF FF FF FD` | `motor_id` |
+- `enable_motor()` calls `enable_mit_mode()`
+- `disable_motor()` calls `disable_mit_mode()`
 
 ---
 
 ## Error Codes (`CAN_ERROR_CODES`)
 
-Defined in `cube_mars_motor_can.py` as a module-level dict.
+Defined in `src/motor_python/base_motor.py` as `CAN_ERROR_CODES`.
 
 | Code | Description |
 |---|---|
@@ -290,16 +259,11 @@ Source: CubeMars CAN protocol specification, section 4.3.1.
 
 ---
 
-## Brake Current Mode vs. Current Control
+## Legacy Servo Modes
 
-| | `set_current()` | `set_brake_current()` |
-|---|---|---|
-| Instruction type byte | `0x01` | `0x02` |
-| Arbitration ID (motor 3) | `0x00000103` | `0x00000203` |
-| Effect | Applies torque (accelerates or decelerates) | Regenerative braking (always decelerates) |
-| Payload encoding | `int32(amps × 1000)` | `int32(amps × 1000)` |
-| Sign of value | Positive = forward torque | Magnitude only — always brakes |
-| Use case | Soft-start, torque control | Active deceleration under load |
+The current CAN implementation intentionally disables legacy servo transport
+modes (`duty/current/brake/position-velocity profile`) and only transmits
+Force Control Mode (`mode_id = 0x08`) frames.
 
 ---
 
@@ -321,24 +285,23 @@ All values are big-endian (most significant byte first).
 
 ## Control Payload Layout (from motor spec, section 4.4.1)
 
-| Mode | Byte 0–3 | Byte 4–7 | Arbitration ID (motor 3) |
-|---|---|---|---|
-| Duty cycle | `int32(duty × 100 000)` | `0x00000000` | `0x00000003` |
-| Current | `int32(amps × 1000)` | `0x00000000` | `0x00000103` |
-| Brake current | `int32(amps × 1000)` | `0x00000000` | `0x00000203` |
-| Velocity | `int32(ERPM)` | `0x00000000` | `0x00000303` |
-| Position | `int32(deg × 10000)` | `0x00000000` | `0x00000403` |
-| Position+Vel | `int32(deg × 10000)` | `int16(speed÷10)` + `int16(accel÷10)` | `0x00000603` |
-| MIT (all modes) | bit-packed (see below) | bit-packed | `0x00000803` |
+This implementation is MIT-only (Force Control Mode, mode ID `0x08`).
 
-**MIT 8-byte bit layout:**
+| Mode | Payload | Arbitration ID (motor 3) |
+|---|---|---|
+| MIT force control | bit-packed (manual layout below) | `0x00000803` |
 
-```
-Bits [63:48]  pos  uint16  [-12.5, 12.5] rad    → _pack_mit_frame()
-Bits [47:36]  vel  uint12  [-45,   45]   rad/s
-Bits [35:24]  kp   uint12  [0,    500]   Nm/rad
-Bits [23:12]  kd   uint12  [0,      5]   Nms/rad
-Bits [11: 0]  tau  uint12  [-18,   18]   Nm
-```
+**MIT 8-byte payload layout used here (CubeMars manual):**
 
-All payloads are padded to exactly 8 bytes, big-endian.
+| Byte | Bits | Field |
+|---|---|---|
+| `DATA[0]` | `7..0` | `kp[11:4]` |
+| `DATA[1]` | `7..4` | `kp[3:0]` |
+| `DATA[1]` | `3..0` | `kd[11:8]` |
+| `DATA[2]` | `7..0` | `kd[7:0]` |
+| `DATA[3]` | `7..0` | `pos[15:8]` |
+| `DATA[4]` | `7..0` | `pos[7:0]` |
+| `DATA[5]` | `7..0` | `vel[11:4]` |
+| `DATA[6]` | `7..4` | `vel[3:0]` |
+| `DATA[6]` | `3..0` | `tau[11:8]` |
+| `DATA[7]` | `7..0` | `tau[7:0]` |

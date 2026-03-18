@@ -4,6 +4,10 @@ Ad-hoc scripts for testing, diagnosing, and exercising the CubeMars AK60-6 motor
 These are **not** part of the main library or automated test suite — they are meant to be run
 manually on the bench with the motor physically connected.
 
+> **Current software status (2026-03-18): MIT-only CAN implementation.**
+> For routine validation use `scripts/mit_mode_test.py` first.
+> Duty/servo scripts in this folder are retained as historical diagnostics.
+
 ## Pre-conditions (all scripts)
 
 ```bash
@@ -20,7 +24,7 @@ source .venv/bin/activate
 
 ## Scripts
 
-### `spin_test.py`
+### `spin_test.py` (legacy)
 Raw CAN demo — spins the motor forward for 2 s, pauses, then reverses for 2 s using
 duty-cycle mode (arb_id 0x03). Prints live position/speed/current.
 
@@ -30,7 +34,7 @@ duty-cycle mode (arb_id 0x03). Prints live position/speed/current.
 
 ---
 
-### `motion_capture_test.py`
+### `motion_capture_test.py` (legacy)
 Full motion-capture validation run — duty-cycle P-controller sine sweep (90 ± 30° at 6 s
 period, 90 s total).  Logs telemetry to `data/logs/mocap_<timestamp>.csv`.
 
@@ -40,12 +44,24 @@ period, 90 s total).  Logs telemetry to `data/logs/mocap_<timestamp>.csv`.
 
 ---
 
-### `can_demo.py`
+### `can_demo.py` (legacy exploration)
 Exercises **every public method** of `CubeMarsAK606v3CAN` and prints PASS / FAIL / SKIP.
 Use this to verify which modes work on the current firmware build.
 
 ```bash
 .venv/bin/python scripts/can_demo.py
+```
+
+---
+
+### `mit_mode_test.py`
+Single-motor MIT protocol validation (CAN ID `0x03` by default). Exercises:
+`enable_mit_mode`, `set_mit_mode`, `disable_mit_mode`, plus MIT-backed helpers
+`set_position`, `set_velocity`, `set_current`, `stop`, and alias calls
+`enable_motor` / `disable_motor`.
+
+```bash
+.venv/bin/python scripts/mit_mode_test.py
 ```
 
 ---
@@ -149,11 +165,8 @@ make test-hardware-can   # includes TestCANDualMotor — skips if only one motor
 
 | Mode | Works? | Notes |
 |------|--------|-------|
-| Duty cycle (0x0003) | ✅ | Confirmed. Use for exosuit control. |
-| Current (0x0103) | ⚠️ | Sends/ACKs but Speed/Current fields stay 0 in feedback |
-| Velocity (0x0303) | ⚠️ | Same issue — no feedback response |
-| Position (0x0403) | ⚠️ | No physical movement observed |
-| MIT (0x0803) | ✅ | Sends and ACKs without raising |
+| MIT (0x0803) | ✅ | Current production path in Python API |
+| Duty/current/velocity/position servo frames | legacy | historical experiments only |
 
 > Root cause of Speed=0 feedback: PSU must be **24 V**. At 18.5 V the H-bridge quietly
 > locks out (error_code remains 0). See `docs/CAN_TROUBLESHOOTING.md` Problem 5.

@@ -104,32 +104,41 @@ timeout 3 candump can0
 ```
 You should see `0x2903` frames scrolling at ~50 Hz. If yes, the motor is ready.
 
-> **Confirmed working control modes:** duty cycle, position, position+velocity+acceleration,
-> current, brake current, and MIT impedance mode.
-> **Velocity loop (0x0303) is not functional on this unit — see [Known Firmware Limitations](#known-firmware-limitations) below.**
+> **Current CAN implementation is MIT-only (Force Control Mode, `mode_id=0x08`).**
+> Legacy servo transport modes (`duty/current/brake/profile`) are intentionally disabled.
 > See [docs/CAN_TELEMETRY_API.md](docs/CAN_TELEMETRY_API.md) for the full API reference.
 
 ## Quick Start — CAN
 
-### Spin Test (verify motor is alive)
+### MIT Bench Test (recommended)
 
-The fastest way to confirm CAN communication. Spins the motor forward
-for 2 s, pauses, then reverses for 2 s using raw duty-cycle commands.
+Use the MIT-only validation script for current CAN implementation:
 
 ```bash
 sudo ./setup_can.sh
-python spin_test.py
+.venv/bin/python scripts/mit_mode_test.py --motor-id 0x03
 ```
 
-### Motion Capture Test (arm sweep with logging)
+### Legacy Spin Test (archived duty workflow)
 
-Moves an attached arm through a waypoint sequence (0° → 90° → 120° → 80° → 0°)
-five times using a PID controller in duty-cycle mode. Logs position, velocity,
-current, and temperature to CSV at 20 Hz and generates angle/velocity plots.
+Historical quick check from pre-MIT bring-up. Spins the motor forward
+for 2 s, pauses, then reverses for 2 s using raw duty-cycle commands.
+
+> Legacy bench script from the pre-MIT-only phase.
 
 ```bash
 sudo ./setup_can.sh
-python motion_capture_test.py
+.venv/bin/python scripts/spin_test.py
+```
+
+### Motion Capture Test (legacy duty-cycle workflow)
+
+Historical script from the earlier duty-cycle control phase.
+Current production CAN control is MIT-only; keep this section for archived runs.
+
+```bash
+sudo ./setup_can.sh
+.venv/bin/python scripts/motion_capture_test.py
 ```
 
 Output: `data/logs/mocap_<timestamp>.csv` + `data/logs/mocap_<timestamp>.png`
@@ -152,16 +161,12 @@ from motor_python.definitions import TendonAction
 
 with Motor(motor_can_id=0x03) as motor:
     motor.enable_motor()
-    motor.set_duty_cycle(0.15)                           # 15% duty ≈ 1800 ERPM (works on all firmware)
+    motor.set_velocity(velocity_erpm=8000)               # velocity loop via MIT parameters
     motor.control_exosuit_tendon(TendonAction.PULL)      # high-level: pull tendon
     motor.control_exosuit_tendon(TendonAction.STOP)
-    motor.set_position_velocity_accel(90.0, 8000, 4000)  # smooth move to 90°
+    motor.set_position(90.0)                             # position loop via MIT parameters
     motor.set_mit_mode(pos_rad=1.57, kp=100, kd=2)       # impedance control
 ```
-
-> **Note:** `set_velocity()` sends `0x0303` frames which are not acknowledged by the motor
-> firmware on this unit. Use `set_duty_cycle()` for speed control instead — see
-> [Known Firmware Limitations](#known-firmware-limitations).
 
 ### Quick Start — UART (testing only)
 
@@ -189,25 +194,25 @@ It's super easy to publish your own packages on PyPi. To build and publish this 
 
 | Method | Description |
 |--------|-------------|
-| `enable_motor()` | Power on — enter Servo mode (required before any command) |
-| `disable_motor()` | Power off — motor coasts |
+| `enable_motor()` | Compatibility alias for `enable_mit_mode()` |
+| `disable_motor()` | Compatibility alias for `disable_mit_mode()` |
 | `check_communication()` | Verify motor is responding over CAN |
 | `close()` | Stop + release CAN bus (also called automatically by `with` statement) |
 
-### Control (Servo mode)
+### Control (MIT-only CAN implementation)
 
 | Method | Description |
 |--------|-------------|
-| `set_velocity(velocity_erpm, allow_low_speed=False)` | Continuous spin at given ERPM |
-| `set_position(position_degrees)` | Move to angle and hold |
-| `set_position_velocity_accel(pos, vel, accel)` | Smooth trapezoidal profile move |
-| `set_current(current_amps)` | Direct torque via IQ current |
-| `set_brake_current(current_amps)` | Regenerative hold against external load |
-| `set_duty_cycle(duty)` | Raw PWM fraction −1.0 … +1.0 |
-| `set_origin(permanent=False)` | Define current angle as new zero |
+| `set_velocity(velocity_erpm, allow_low_speed=False)` | Velocity loop using MIT fields |
+| `set_position(position_degrees)` | Position loop using default MIT gains |
+| `set_current(current_amps)` | Interpreted as MIT torque feedforward (Nm) |
+| `set_brake_current(current_amps)` | Not implemented (raises) |
+| `set_duty_cycle(duty)` | Not implemented (raises) |
+| `set_origin(permanent=False)` | Not implemented (raises) |
+| `set_position_velocity_accel(pos, vel, accel)` | Not implemented (raises) |
 | `move_to_position_with_speed(target, speed_erpm)` | Velocity-drive to target then hold |
-| `control_exosuit_tendon(action, velocity_erpm)` | High-level: `TendonAction.PULL / RELEASE / STOP` |
-| `stop()` | Zero current, coast to stop |
+| `control_exosuit_tendon(action, velocity_erpm)` | High-level tendon helper via `set_velocity()` |
+| `stop()` | Neutral MIT command + MIT disable |
 
 ### Control (MIT impedance mode — CAN only)
 
@@ -232,118 +237,60 @@ It's super easy to publish your own packages on PyPi. To build and publish this 
 
 ## Known Firmware Limitations
 
-### Velocity loop (0x0303) — not functional on this unit
+The Python CAN driver now intentionally uses **MIT mode only** (`mode_id=0x08`).
 
-The CubeMars protocol spec documents a velocity loop mode (arb_id `0x0303`,
-payload `int32_be(ERPM)`). On this AK60-6 v3 unit the motor's CAN controller
-**does not acknowledge `0x0303` frames at the bus level** — no ACK bit is
-pulled, so the Jetson retries indefinitely, fills its TX queue, and enters
-ERROR-PASSIVE.
-
-This was tested exhaustively on 2026-03-11 (`scripts/test_velocity_loop.py`):
-- Raw CAN, no library, exact spec encoding ✓
-- Enable keepalive on `0x03` before each `0x0303` command ✓
-- Tested at 1 500 ERPM and 5 000 ERPM ✓
-- Unfiltered socket open to catch replies on any arb_id ✓
-- **Result: zero ACKs, zero motion, bus enters ERROR-PASSIVE after ~1.7 s**
-
-**Workaround:** use `set_duty_cycle()` for open-loop speed control:
-
-```python
-ERPM_PER_PHYS_DEG_S = 18.0   # calibrated 2026-03-10
-MAX_VEL_ERPM       = 3000
-MAX_DUTY           = 0.25    # 25% max PWM
-
-def erpm_to_duty(erpm: int) -> float:
-    duty = erpm / MAX_VEL_ERPM * MAX_DUTY
-    return max(-MAX_DUTY, min(MAX_DUTY, duty))
-
-motor.set_duty_cycle(erpm_to_duty(desired_erpm))
-```
-
-Feedback (position, ERPM, current, temperature) is still available via the
-`0x2903` reply that each duty-cycle frame triggers.
+- Legacy servo transport calls are disabled:
+  - `set_duty_cycle`
+  - `set_brake_current`
+  - `set_origin`
+  - `set_position_velocity_accel`
+- `enable_motor()` / `disable_motor()` are compatibility aliases to
+  `enable_mit_mode()` / `disable_mit_mode()`.
 
 ## Velocity Safety
 
-**`set_velocity()` is non-functional on this unit** (see above). For
-`set_duty_cycle()` speed control keep duty below `0.25` (25%).
+`set_velocity()` is implemented through MIT helper mapping.
+
+- Base safety still blocks very low non-zero ERPM by default.
+- Use `allow_low_speed=True` only when needed for controlled bench tuning.
 
 ```python
-motor.set_duty_cycle(0.15)    # ~1800 ERPM equivalent
-motor.set_duty_cycle(-0.15)   # reverse
-motor.stop()                  # always works
+motor.set_velocity(6000, allow_low_speed=True)
+motor.stop()
 ```
 
 ## Position Control
 
-**Range: Unlimited** — motor can rotate continuously for spool-based cable systems.
-No artificial position limits. Suitable for applications requiring multiple rotations to wind cable.
+`set_position(degrees)` is MIT-backed and uses default position gains from
+`CAN_DEFAULTS` (`mit_position_kp`, `mit_position_kd`).
 
 ## Exosuit Integration
 
-This section describes how to drive the tendon spool motor from an IMU or other
-external sensor for use in the lower exosuit.
-
-### Signal chain
-
-```
-IMU joint angular velocity (deg/s)
-    × ERPM_PER_PHYS_DEG_S          →  desired ERPM
-    ÷ MAX_VEL_ERPM × MAX_DUTY      →  duty fraction
-    → set_duty_cycle(duty)         →  CAN frame on arb_id=0x03
-    ← 0x2903 feedback reply        →  pos / ERPM / current / temp
-```
+For tendon control, use MIT-backed velocity helper or direct `set_mit_mode`.
 
 ### Minimal example
 
 ```python
 from motor_python import Motor
 
-ERPM_PER_PHYS_DEG_S = 18.0   # calibrated: 5000 ERPM ≈ 278 deg/s (2026-03-10)
-MAX_VEL_ERPM       = 3000    # ERPM ceiling for duty mapping
-MAX_DUTY           = 0.25    # hard limit — do not exceed
-
-def joint_vel_to_duty(joint_vel_dps: float) -> float:
-    """Convert IMU joint angular velocity (deg/s) to motor duty cycle."""
-    erpm = joint_vel_dps * ERPM_PER_PHYS_DEG_S
-    duty = erpm / MAX_VEL_ERPM * MAX_DUTY
-    return max(-MAX_DUTY, min(MAX_DUTY, duty))
-
 with Motor(motor_can_id=0x03) as motor:
-    motor.enable_motor()
+    motor.enable_mit_mode()
     while True:
-        joint_vel_dps = read_imu()   # your IMU read function (deg/s)
-        motor.set_duty_cycle(joint_vel_to_duty(joint_vel_dps))
+        joint_vel_dps = read_imu()  # your IMU read function
+        desired_erpm = int(joint_vel_dps * 18.0)
+        motor.set_velocity(desired_erpm, allow_low_speed=True)
 ```
 
 ### Key notes for exosuit use
 
 | Topic | Detail |
 |-------|--------|
-| **Do NOT use `set_velocity()`** | Sends `0x0303` — not acknowledged by this firmware |
-| **Use `set_duty_cycle()`** | Open-loop speed control, works on all firmware versions |
-| **Calibration** | `ERPM_PER_PHYS_DEG_S = 18.0` — re-calibrate if motor or cable changes |
-| **Direction** | Positive duty = tendon pull. Verify before first run. |
-| **Watchdog** | Each `set_duty_cycle()` call feeds the 100 ms CAN watchdog. Loop must run at ≥ 10 Hz. |
-| **Feedback** | Every duty frame triggers a `0x2903` reply — use for spool position and safety checks. |
-| **Safety guard** | Clamp duty to ±0.25; abort if feedback ERPM exceeds expected maximum. |
-
-### Optional: Jetson-side closed-loop speed correction
-
-If open-loop duty is not accurate enough, add a lightweight P correction
-using the ERPM feedback from each `0x2903` reply:
-
-```python
-KP = 0.00003   # tune empirically — start small
-
-desired_erpm = joint_vel_dps * ERPM_PER_PHYS_DEG_S
-actual_erpm  = motor.get_speed()              # from last 0x2903 reply
-error        = desired_erpm - actual_erpm
-base_duty    = desired_erpm / MAX_VEL_ERPM * MAX_DUTY
-duty         = max(-MAX_DUTY, min(MAX_DUTY, base_duty + error * KP))
-motor.set_duty_cycle(duty)
-```
+| Protocol | MIT force control (`mode_id=0x08`) |
+| Velocity helper | `set_velocity()` maps ERPM to MIT `vel_rad_s` |
+| Position helper | `set_position()` maps degrees to MIT `pos_rad` |
+| Torque helper | `set_current(x)` currently interpreted as `torque_ff_nm=x` |
+| Stop behavior | `stop()` sends neutral MIT command and disables MIT mode |
+| Feedback | Use `get_status()` / getters (pos, ERPM, current, temperature, fault) |
 
 ## Run
 
@@ -362,9 +309,9 @@ make test-hardware   # All tests (unit + hardware, requires motor connected)
 ## Project Structure
 
 ```
-spin_test.py                       # CAN smoke test (duty cycle fwd/rev)
-motion_capture_test.py             # Arm sweep with PID, CSV + plot output
-can_demo.py                        # Exercises all CubeMarsAK606v3CAN methods
+spin_test.py                       # Legacy CAN smoke test (duty cycle fwd/rev)
+motion_capture_test.py             # Legacy arm sweep script (duty PID, CSV + plot)
+can_demo.py                        # Legacy API exploration script
 setup_can.sh                       # Manual CAN setup (use can0.service instead)
 can0.service                       # Systemd service — auto-starts can0 at boot
 src/motor_python/

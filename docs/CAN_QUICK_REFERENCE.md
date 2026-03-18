@@ -1,5 +1,8 @@
 # Quick Reference: CAN Setup on Jetson Orin Nano
 
+> **Current CAN driver status (2026-03-18): MIT-only (Force Control Mode, mode ID `0x08`).**
+> Legacy servo transport modes are intentionally disabled in the Python API.
+
 ## Hardware Wiring (SN65HVD230 Transceiver)
 
 ```
@@ -44,7 +47,8 @@ from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
 
 # Single motor
 motor = CubeMarsAK606v3CAN(motor_can_id=0x03)
-motor.set_velocity(velocity_erpm=10000)
+motor.enable_mit_mode()
+motor.set_mit_mode(pos_rad=0.0, vel_rad_s=3.0, kp=0.0, kd=2.0, torque_ff_nm=0.0)
 motor.stop()
 motor.close()
 
@@ -62,15 +66,17 @@ motor2 = CubeMarsAK606v3CAN(motor_can_id=0x04)
 
 ## CAN Protocol Format
 
-**Extended CAN IDs (29-bit)**: `00 00 0M XX` where M=mode, XX=motor ID
-- Mode 01: Current control
-- Mode 03: Velocity control  
-- Mode 04: Position control
+**Extended CAN IDs (29-bit)**: `00 00 08 XX` where `XX` is motor ID.
 
-**Command Payloads** (8 bytes, big-endian):
-- Current: int32 milliamps (A × 1000)
-- Velocity: int32 ERPM (direct value)
-- Position: int32 (degrees × 10000)
+**MIT command payload (8 bytes):**
+- `DATA[0]`: KP high 8 bits
+- `DATA[1]`: KP low 4 bits + KD high 4 bits
+- `DATA[2]`: KD low 8 bits
+- `DATA[3]`: Position high 8 bits
+- `DATA[4]`: Position low 8 bits
+- `DATA[5]`: Velocity high 8 bits
+- `DATA[6]`: Velocity low 4 bits + Torque high 4 bits
+- `DATA[7]`: Torque low 8 bits
 
 **Feedback** (8 bytes, auto-sent at configured rate):
 - Position: int16 (×0.1°), Speed: int16 (×10 ERPM)
@@ -93,7 +99,7 @@ motor2 = CubeMarsAK606v3CAN(motor_can_id=0x04)
 2. UART cable is **disconnected** from motor
 3. Run `sudo ./setup_can.sh`
 4. Verify: `ip -details link show can0` → should say `ERROR-ACTIVE (berr-counter tx 0 rx 0)`
-5. Run `python spin_test.py` → motor should spin, speed should reach ~7000 ERPM
+5. Run `python scripts/mit_mode_test.py --motor-id 0x03` and verify feedback updates
 
 ## Pin Reference (Jetson Orin Nano 40-pin Header)
 

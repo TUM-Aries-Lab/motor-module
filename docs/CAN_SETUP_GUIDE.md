@@ -2,6 +2,10 @@
 
 This guide explains how to set up CAN communication between the Jetson Orin Nano and the CubeMars AK60-6 motor using the SN65HVD230 CAN transceiver.
 
+> **Implementation status (2026-03-18):** the Python CAN driver is MIT-only
+> (Force Control Mode, `mode_id=0x08`). Legacy servo transport commands are
+> intentionally disabled in code.
+
 ## Hardware Requirements
 
 1. **Jetson Orin Nano Developer Kit**
@@ -193,10 +197,8 @@ Configure the motor using the CubeMars configuration software (Windows):
 ### CAN Protocol Details
 
 The motor uses **native CAN protocol** (not UART-over-CAN):
-- **Extended 29-bit CAN IDs** encode control mode: `00 00 0M XX`
-  - `M` = control mode (01=current, 03=velocity, 04=position, etc.)
-  - `XX` = motor CAN ID (e.g., 0x03)
-- **8-byte payloads** contain command data (int32 values)
+- **Extended 29-bit CAN IDs**: `00 00 08 XX` for MIT force-control commands.
+- **8-byte payloads** are MIT-packed: `KP, KD, Position, Velocity, Torque`.
 - **Periodic feedback** auto-transmitted at configured rate:
   - Byte 0-1: Position (int16, ×0.1° scale, -3200° to 3200°)
   - Byte 2-3: Speed (int16, ×10 ERPM scale, -320k to 320k)
@@ -206,11 +208,16 @@ The motor uses **native CAN protocol** (not UART-over-CAN):
 
 ### Command Data Formats
 
-| Command | CAN ID (for motor 0x68) | Data Format | Example |
-|---------|------------------------|-------------|----------|
-| Current | 0x00000168 | int32 (mA) | -4.4 A = 0xFFFFEED8 |
-| Velocity | 0x00000368 | int32 (ERPM) | 5000 = 0x00001388 |
-| Position | 0x00000468 | int32 (deg×10000) | 600° = 0x005B8D80 |
+MIT payload byte map (`mode_id=0x08`):
+
+- `DATA[0]`: `kp[11:4]`
+- `DATA[1]`: `kp[3:0] | kd[11:8]`
+- `DATA[2]`: `kd[7:0]`
+- `DATA[3]`: `pos[15:8]`
+- `DATA[4]`: `pos[7:0]`
+- `DATA[5]`: `vel[11:4]`
+- `DATA[6]`: `vel[3:0] | tau[11:8]`
+- `DATA[7]`: `tau[7:0]`
 
 ## Python Usage
 
@@ -226,18 +233,16 @@ motor = CubeMarsAK606v3CAN(motor_can_id=0x03, interface="can0", bitrate=1000000)
 if motor.check_communication():
     print("Motor is responding!")
 
-    # Velocity control
-    motor.set_velocity(velocity_erpm=10000)   # Pull tendon
-    motor.set_velocity(velocity_erpm=-8000)   # Release tendon
-    motor.stop()                              # Stop
+    # Explicit MIT mode command
+    motor.enable_mit_mode()
+    motor.set_mit_mode(pos_rad=0.0, vel_rad_s=3.0, kp=0.0, kd=2.0, torque_ff_nm=0.0)
+    motor.stop()
 
-    # Position control
-    motor.set_position(position_degrees=90.0)
-    current_pos = motor.get_position()
-
-    # Tendon control helper
-    motor.control_exosuit_tendon(action="pull", velocity_erpm=10000)
-    motor.control_exosuit_tendon(action="stop")
+    # MIT-backed helper methods
+    motor.set_position(position_degrees=20.0)
+    motor.set_velocity(velocity_erpm=6000, allow_low_speed=True)
+    motor.set_current(current_amps=1.0)  # interpreted as torque feedforward (Nm)
+    motor.stop()
 
 # Clean shutdown
 motor.close()
@@ -302,7 +307,7 @@ motor_right.set_velocity(velocity_erpm=10000)
 1. Set PSU to **24V**
 2. **Power-cycle the motor** (the fault latches — raising voltage alone does NOT recover)
 3. Reset CAN: `sudo ./setup_can.sh`
-4. Verify with `python spin_test.py`
+4. Verify with `.venv/bin/python scripts/mit_mode_test.py --motor-id 0x03`
 
 ### Bus-Off State
 
@@ -370,8 +375,9 @@ out, making this a very difficult problem to diagnose from software alone.
 **Pre-flight power check (do this EVERY session):**
 ```bash
 # 1. Verify PSU reads 24.0V ± 0.5V on the display
-# 2. Enable motor and send a 40% duty command, then check current:
-#    - Expected: >0.3A (motor is driving)
+# 2. Run MIT smoke test and observe PSU current during velocity/torque steps:
+#    .venv/bin/python scripts/mit_mode_test.py --motor-id 0x03 --step-seconds 0.8
+#    - Expected: >0.3A under active command (motor drive engaged)
 #    - Bad:       ~0.035A (only logic power — H-bridge locked out)
 # 3. If current is low: set PSU to 24V, power-cycle the motor, retry
 ```
