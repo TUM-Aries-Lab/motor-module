@@ -222,10 +222,10 @@ Only duty-cycle mode reliably drives the motor. This may be a firmware configura
 | `src/motor_python/examples_can.py` | Usage examples |
 | `src/motor_python/test_can.py` | Unit test suite (5 tests) |
 | `setup_can.sh` | Automated CAN interface setup script |
-| `quick_test.py` | Feedback reception test |
-| `simple_test.py` | Minimal enable/velocity/disable test |
-| `test_our_implementation.py` | Full integration test |
-| `test_servo_mode.py` | TMotorCANControl library servo mode test |
+| `scripts/quick_test.py` | Feedback reception test |
+| `scripts/simple_test.py` | Minimal enable/velocity/disable test |
+| `tests/manual_our_implementation_test.py` | Full integration test (manual) |
+| `tests/manual_servo_mode_test.py` | TMotorCANControl library servo mode test (manual) |
 | `docs/CAN_SETUP_GUIDE.md` | Full hardware + software setup guide |
 | `docs/CAN_QUICK_REFERENCE.md` | Quick reference card |
 | `docs/CAN_TESTING.md` | Testing methodology |
@@ -245,7 +245,7 @@ Only duty-cycle mode reliably drives the motor. This may be a firmware configura
 | Current mode (0x01) — torque control | ❌ No feedback (needs CubeMars config?) |
 | Position mode (0x04) — position loop | ❌ ACKs but doesn't move |
 | spin_test.py — forward/reverse demo | ✅ ~7200 ERPM at 40% duty |
-| motion_capture_test.py — sine sweep | ✅ Duty-cycle P-controller |
+| scripts/motion_capture_test.py — sine sweep | ✅ Duty-cycle P-controller |
 | Code pushed to `CAN_implementation` branch | ✅ |
 
 ---

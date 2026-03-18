@@ -1,6 +1,6 @@
 # Motion Capture Validation — Progress Log
 
-**File:** `motion_capture_test.py`  
+**File:** `scripts/motion_capture_test.py`  
 **Last updated:** 2026-03-03
 
 > Historical log from earlier duty/servo experiments. Current CAN driver status
@@ -155,8 +155,8 @@ The duty→direction mapping is **only valid** when `fw_pos ∈ [30, 140]°`.
 
 | File | Purpose |
 |------|---------|
-| `motion_capture_test.py` | Main test script |
-| `spin_test.py` | Reference: confirmed working 40% duty sweep |
+| `scripts/motion_capture_test.py` | Main test script |
+| `scripts/spin_test.py` | Reference: confirmed working 40% duty sweep |
 | `data/logs/mocap_*.csv` | Output logs |
 | `src/motor_python/cube_mars_motor_can.py` | Driver class (keepalive removed — not used by test) |
 | `docs/MOTION_CAPTURE_PROGRESS.md` | This file |
@@ -168,5 +168,5 @@ The duty→direction mapping is **only valid** when `fw_pos ∈ [30, 140]°`.
 ```bash
 cd /home/aries-orin-1/lower_exosuit/motor/motor-module
 sudo ./setup_can.sh
-.venv/bin/python motion_capture_test.py
+.venv/bin/python scripts/motion_capture_test.py
 ```

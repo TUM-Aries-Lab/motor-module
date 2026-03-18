@@ -1,3 +1,8 @@
+# This file is tracked in-repo and installed once with:
+#   sudo cp can0.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now can0.service
+# After installation, systemd uses this unit on every boot and on manual restart.
 [Unit]
 Description=CAN0 interface setup for CubeMars AK60-6 motor (1 Mbps, auto-restart)
 After=network.target

@@ -126,19 +126,23 @@ Useful as a first-boot sanity check.
 
 ---
 
-### `test_our_implementation.py`
-Tests the `CubeMarsAK606v3CAN` class API directly: enable, feedback, velocity over 30
-iterations.  Good for iterating on the driver code.
+### `tests/manual_our_implementation_test.py`
+Manual integration script for the `CubeMarsAK606v3CAN` class API: enable,
+feedback, velocity over 30 iterations. Good for iterating on the driver code.
 
 ```bash
-.venv/bin/python scripts/test_our_implementation.py
+.venv/bin/python tests/manual_our_implementation_test.py
 ```
 
 ---
 
-### `test_servo_mode.py`
+### `tests/manual_servo_mode_test.py`
 Legacy test using the third-party `TMotorCANControl` library's servo mode.
 **Not for regular use** — kept for historical reference only.
+
+```bash
+.venv/bin/python tests/manual_servo_mode_test.py
+```
 
 ---
 

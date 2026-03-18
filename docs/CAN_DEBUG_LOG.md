@@ -205,7 +205,8 @@ quick_test.py Phase 1:
 
 ### Lesson learned
 When a UART cable is physically connected to the AK60-6, the motor **completely suppresses
-CAN feedback** — it will ACK CAN frames at the physical layer (so berr-counter stays 0) but
+CAN feedback** - it still sends CAN-level acknowledge bits (ACK) on received frames
+(so berr-counter stays 0) but
 it will not transmit any feedback frames. Removing the UART cable immediately restores normal
 50 Hz CAN broadcast.
 

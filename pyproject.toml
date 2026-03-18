@@ -62,6 +62,8 @@ lint.ignore = [
 # Pytest fixtures don't need public docstrings
 # Lazy mocks are acceptable in test fixtures
 "tests/*" = ["PLR0913", "D103", "PLC0415"]
+"tests/manual_our_implementation_test.py" = ["T201"]
+"tests/manual_servo_mode_test.py" = ["T201"]
 
 
 [tool.ruff.lint.isort]

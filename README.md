@@ -11,7 +11,7 @@ Motor control for exosuit tendon systems using a CubeMars AK60-6 motor.
 ## Install
 
 ```bash
-uv install motor.close()
+uv pip install -e .
 ```
 
 Both motor classes inherit from `BaseMotor` which provides a unified API for
@@ -33,12 +33,14 @@ auto-recovery. No more `sudo ./setup_can.sh` before every run.
 
 ```bash
 # Just run your script directly:
-python motion_capture_test.py
-python can_demo.py
+python scripts/motion_capture_test.py
+python scripts/can_demo.py
 ```
 
 To check status: `systemctl status can0.service`
 If you ever need to reset manually: `sudo systemctl restart can0.service`
+The tracked `can0.service` file in this repo is copied once to
+`/etc/systemd/system/can0.service` during setup and then used by systemd at boot.
 
 See [docs/CAN_SETUP_GUIDE.md](docs/CAN_SETUP_GUIDE.md) for hardware wiring details.
 
@@ -309,9 +311,9 @@ make test-hardware   # All tests (unit + hardware, requires motor connected)
 ## Project Structure
 
 ```
-spin_test.py                       # Legacy CAN smoke test (duty cycle fwd/rev)
-motion_capture_test.py             # Legacy arm sweep script (duty PID, CSV + plot)
-can_demo.py                        # Legacy API exploration script
+scripts/spin_test.py               # Legacy CAN smoke test (duty cycle fwd/rev)
+scripts/motion_capture_test.py     # Legacy arm sweep script (duty PID, CSV + plot)
+scripts/can_demo.py                # Legacy API exploration script
 setup_can.sh                       # Manual CAN setup (use can0.service instead)
 can0.service                       # Systemd service — auto-starts can0 at boot
 src/motor_python/
@@ -323,6 +325,8 @@ src/motor_python/
 tests/
     cube_mars_motor_test.py        # Unit tests (mocked serial)
     hardware_test.py               # Integration tests (real motor)
+    manual_our_implementation_test.py
+    manual_servo_mode_test.py
 docs/
     CAN_SETUP_GUIDE.md             # CAN hardware wiring guide
     CAN_TROUBLESHOOTING.md         # Known CAN issues and fixes
