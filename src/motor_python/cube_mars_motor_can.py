@@ -493,7 +493,13 @@ class CubeMarsAK606v3CAN(BaseMotor):
     # ------------------------------------------------------------------
 
     def enable_mit_mode(self) -> None:
-        """Enable Force Control Mode using manual-defined MIT enable bytes."""
+        """Enable MIT operation using this driver's compatibility sequence.
+
+        Note: the CubeMars manual section 4.2 documents MIT command frames
+        (mode ID 0x08) but does not explicitly define a dedicated enable frame.
+        This method keeps the existing project behavior by sending the legacy
+        all-0xFF frame on ``arb_id=motor_id`` before MIT commands.
+        """
         if not self.connected:
             logger.warning("Cannot enable MIT mode - CAN bus not connected")
             return

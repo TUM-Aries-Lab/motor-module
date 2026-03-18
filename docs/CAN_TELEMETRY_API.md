@@ -194,6 +194,10 @@ Use cases:
 
 AK60-6 physical limits (automatically clamped):
 
+Manual nuance: the sample C snippet in section 4.2 is labeled
+`AK10-9 as an example` and uses AK10-9 constants there. This driver uses the
+AK60-6 range table values below.
+
 | Parameter | Range | Unit |
 |---|---|---|
 | `pos_rad` | −12.56 … +12.56 | rad |
@@ -214,13 +218,16 @@ motor.disable_mit_mode()
 
 ### `enable_mit_mode()` / `disable_mit_mode()`
 
-Switch into and out of MIT impedance mode.  MIT uses different enable/disable
-bytes than Servo mode — do not mix them.
+Driver compatibility helpers used by this repository before/after MIT commands.
 
-| | Byte sequence | Arb ID |
+Manual note: section 4.2 defines Force Control command frames on
+`(0x08 << 8) | motor_id` with the 8-byte MIT payload, but does not explicitly
+list a dedicated enable/disable frame sequence.
+
+| Driver helper action | Byte sequence | Arb ID |
 |---|---|---|
-| Enable MIT | `FF FF FF FF FF FF FF FF` | `motor_id` |
-| Disable MIT | `FF FF FF FF FF FF FF FE` | `motor_id` |
+| `enable_mit_mode()` | `FF FF FF FF FF FF FF FF` | `motor_id` |
+| `disable_mit_mode()` | `FF FF FF FF FF FF FF FE` | `motor_id` |
 
 ---
 

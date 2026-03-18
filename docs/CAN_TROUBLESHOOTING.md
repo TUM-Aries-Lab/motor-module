@@ -22,6 +22,10 @@ Use this as the authoritative command baseline for current software:
 | Disable MIT | `motor_id` (for ID 3: `0x000003`) | `FF FF FF FF FF FF FF FE` |
 | Recommended bench script | N/A | `.venv/bin/python scripts/mit_mode_test.py --motor-id 0x03` |
 
+Note: CubeMars manual section 4.2 explicitly documents the `0x08` MIT command
+frame and payload map. The enable/disable byte sequences above are kept as
+implementation compatibility behavior in this repo.
+
 ---
 
 ## ✅ Historical Results (pre-MIT switch)
