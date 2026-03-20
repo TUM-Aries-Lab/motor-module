@@ -93,7 +93,7 @@ class CANDefaults:
     motor_pole_pairs: int = 21  # AK60-6 pole-pair count for ERPM↔rad/s conversions
     mit_position_kp: float = 20.0  # Default stiffness for set_position() in MIT mode
     mit_position_kd: float = 1.0  # Default damping for set_position() in MIT mode
-    mit_velocity_kd: float = 2.0  # Default damping for set_velocity() in MIT mode
+    mit_velocity_kd: float = 0.2  # Conservative default damping for MIT velocity mode to reduce start-up torque spikes
 
 
 @dataclass(frozen=True)

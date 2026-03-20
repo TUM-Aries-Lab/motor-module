@@ -103,9 +103,9 @@ for i in range(5):
             print(f"    Temp:     {feedback.temperature_celsius}°C")
             print(f"    Error:    {feedback.error_code}")
     else:
-        # Re-trigger: send a zero-current command to get another response
-        motor.set_current(0.0)
-        print(f"  Attempt {i+1}/5: sent heartbeat command, waiting for response...")
+        # Re-trigger with explicit MIT keepalive.
+        motor.send_keepalive()
+        print(f"  Attempt {i+1}/5: sent MIT keepalive, waiting for response...")
 
 if got == 0:
     print("\n  *** DIAGNOSIS: no feedback received ***")

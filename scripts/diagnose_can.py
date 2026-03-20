@@ -11,6 +11,7 @@ Tests each phase of the connection sequence independently:
 Run:
     python scripts/diagnose_can.py --motor-id 0x03 --interface can0
 """
+# ruff: noqa: T201, PLC0415
 
 import argparse
 import subprocess
@@ -68,6 +69,18 @@ def build_driver_filters(motor_id: int) -> list[dict[str, int | bool]]:
         {"can_id": 0x0080 | motor_id, "can_mask": CAN_MASK_EXTENDED, "extended": True},
         {"can_id": motor_id + 1, "can_mask": CAN_MASK_STANDARD, "extended": False},
     ]
+
+
+def drain_bus(bus: can.BusABC, max_duration_s: float = 0.05, max_frames: int = 2048) -> int:
+    """Drain queued frames with bounded work to avoid infinite loops."""
+    drained = 0
+    deadline = time.monotonic() + max_duration_s
+    while drained < max_frames and time.monotonic() < deadline:
+        frame = bus.recv(timeout=0.0)
+        if frame is None:
+            break
+        drained += 1
+    return drained
 
 
 def get_can_state(interface: str) -> dict[str, int | str]:
@@ -134,12 +147,18 @@ def test_raw_recv_no_filter(config: DiagnosticConfig) -> dict[str, float | int |
     print(f"{'-' * 60}")
     bus = can.interface.Bus(channel=config.interface, interface="socketcan")
     frames: dict[int, int] = {}
+    error_frames: dict[int, int] = {}
     first_motor_at = None
     t0 = time.monotonic()
     deadline = t0 + config.raw_duration
     while time.monotonic() < deadline:
         msg = bus.recv(timeout=0.1)
         if msg is None:
+            continue
+        if msg.is_error_frame:
+            error_frames[msg.arbitration_id] = (
+                error_frames.get(msg.arbitration_id, 0) + 1
+            )
             continue
         frames[msg.arbitration_id] = frames.get(msg.arbitration_id, 0) + 1
         if msg.arbitration_id in feedback_ids and first_motor_at is None:
@@ -150,6 +169,12 @@ def test_raw_recv_no_filter(config: DiagnosticConfig) -> dict[str, float | int |
     motor_frames = sum(cnt for aid, cnt in frames.items() if aid in feedback_ids)
     flood_0088 = frames.get(IMU_FLOOD_STD_ID, 0)
     print(f"  Total frames received : {total}")
+    print(f"  Error frames          : {sum(error_frames.values())}")
+    if error_frames:
+        print(
+            "  Error IDs             : "
+            f"{[(hex(k), v) for k, v in sorted(error_frames.items())]}"
+        )
     print(
         "  Motor feedback frames : "
         f"{motor_frames}  (IDs: {[hex(k) for k in sorted(frames) if k in feedback_ids]})"
@@ -167,6 +192,7 @@ def test_raw_recv_no_filter(config: DiagnosticConfig) -> dict[str, float | int |
         "total": total,
         "motor": motor_frames,
         "flood_0088": flood_0088,
+        "error_frames": sum(error_frames.values()),
         "first_motor_ms": first_motor_at * 1000 if first_motor_at else None,
     }
 
@@ -180,6 +206,7 @@ def test_raw_recv_with_filter(config: DiagnosticConfig) -> dict[str, float | int
         channel=config.interface,
         interface="socketcan",
         can_filters=build_driver_filters(config.motor_id),
+        ignore_rx_error_frames=True,
     )
     frames: dict[int, int] = {}
     first_frame_at = None
@@ -214,11 +241,11 @@ def test_enable_and_response(config: DiagnosticConfig) -> dict[str, float | list
         channel=config.interface,
         interface="socketcan",
         can_filters=build_driver_filters(config.motor_id),
+        ignore_rx_error_frames=True,
     )
     results = []
     for i in range(config.enable_attempts):
-        while bus.recv(timeout=0.01):
-            pass
+        _ = drain_bus(bus, max_duration_s=0.08, max_frames=4096)
 
         msg = can.Message(
             arbitration_id=config.motor_id,
@@ -226,7 +253,13 @@ def test_enable_and_response(config: DiagnosticConfig) -> dict[str, float | list
             is_extended_id=True,
         )
         t_send = time.monotonic()
-        bus.send(msg)
+        try:
+            bus.send(msg, timeout=0.1)
+        except can.CanError as exc:
+            results.append({"ok": False, "latency_ms": None, "pos": None})
+            print(f"  [{i + 1}] FAIL  send error: {exc}")
+            time.sleep(0.3)
+            continue
 
         reply = None
         deadline = t_send + 1.0
@@ -272,6 +305,7 @@ def test_get_status_loop(config: DiagnosticConfig) -> dict[str, float]:
 
     results = []
     for i in range(config.status_attempts):
+        motor = None
         try:
             motor = CubeMarsAK606v3CAN(
                 motor_can_id=config.motor_id,
@@ -290,10 +324,15 @@ def test_get_status_loop(config: DiagnosticConfig) -> dict[str, float]:
                 results.append({"ok": False, "pos": None})
                 print(f"  [{i + 1}] FAIL  get_status() returned None")
             motor.disable_motor()
-            motor.close()
         except Exception as exc:
             results.append({"ok": False, "pos": None})
             print(f"  [{i + 1}] FAIL  exception: {exc}")
+        finally:
+            if motor is not None:
+                try:
+                    motor.close()
+                except Exception as exc:
+                    print(f"  [{i + 1}] WARN  close() failed: {exc}")
         time.sleep(0.5)
 
     ok_count = sum(1 for result in results if result["ok"])
@@ -387,17 +426,29 @@ def main(config: DiagnosticConfig) -> None:
     test3 = test_enable_and_response(config)
     test4 = test_get_status_loop(config)
 
+    raw_mode = (
+        "broadcasting"
+        if test1["motor"] > 0
+        else ("none" if test1["total"] == 0 else "response-only / other-IDs")
+    )
+    filtered_mode = (
+        "broadcasting"
+        if test2["total"] > 0
+        else ("none" if test1["error_frames"] > 0 else "response-only (normal)")
+    )
+
     print(f"\n{'=' * 60}")
     print("  SUMMARY")
     print(f"{'=' * 60}")
     print(f"  Bus state             : {state['state']}")
     print(
         f"  Raw motor frames      : {test1['motor']} in {config.raw_duration:g}s  "
-        f"({'broadcasting' if test1['motor'] > 0 else 'response-only (normal)'})"
+        f"({raw_mode})"
     )
+    print(f"  Raw error frames      : {test1['error_frames']} in {config.raw_duration:g}s")
     print(
         f"  Filtered frames       : {test2['total']} in {config.filtered_duration:g}s  "
-        f"({'broadcasting' if test2['total'] > 0 else 'response-only (normal)'})"
+        f"({filtered_mode})"
     )
     print(f"  Enable->response      : {test3['success_rate'] * 100:.0f}%")
     print(f"  Full driver get_status: {test4['success_rate'] * 100:.0f}%")

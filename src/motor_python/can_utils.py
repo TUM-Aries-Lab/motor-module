@@ -70,10 +70,9 @@ def reset_can_interface(interface: str = "can0", bitrate: int = 1000000) -> bool
         "sudo rmmod mttcan",
         "sleep 0.5",  # Let bus stay recessive so nodes can recover
         "sudo modprobe mttcan",
-        # Set up txqueuelen to handle bursts like our continuous position commands
-        f"sudo ip link set {interface} type can bitrate {bitrate}",
+        # Keep runtime reset behavior aligned with setup_can.sh.
+        f"sudo ip link set {interface} up type can bitrate {bitrate} berr-reporting on restart-ms 100",
         f"sudo ip link set {interface} txqueuelen 1000",
-        f"sudo ip link set {interface} up",
     ]
     try:
         for cmd in cmds:

@@ -40,6 +40,10 @@ def _make_feedback_msg(
     msg = MagicMock()
     msg.arbitration_id = 0x2900 | motor_id
     msg.data = data
+    msg.is_error_frame = False
+    msg.is_remote_frame = False
+    msg.is_rx = True
+    msg.is_extended_id = True
     return msg
 
 
@@ -51,6 +55,16 @@ def mock_bus():
         bus.recv.return_value = None
         mock_cls.return_value = bus
         yield bus
+
+
+@pytest.fixture(autouse=True)
+def mock_can_state():
+    """Keep unit tests independent from host machine CAN controller state."""
+    with patch(
+        "motor_python.cube_mars_motor_can.get_can_state",
+        return_value={"state": "ERROR-ACTIVE", "tx_err": 0, "rx_err": 0},
+    ):
+        yield
 
 
 @pytest.fixture
@@ -78,27 +92,95 @@ class TestInit:
 
 
 class TestMITEnableDisable:
-    def test_enable_mit_mode_sends_all_ff(self, motor, mock_bus):
+    def test_enable_mit_mode_handshakes_via_mit_id(self, motor, mock_bus):
+        mock_bus.recv.return_value = _make_feedback_msg()
         motor.enable_mit_mode()
-        sent = mock_bus.send.call_args_list[-1][0][0]
-        assert sent.arbitration_id == motor.motor_can_id
-        assert list(sent.data) == [0xFF] * 8
+        first = mock_bus.send.call_args_list[0][0][0]
+        assert (
+            first.arbitration_id == (CANControlMode.MIT_MODE << 8) | motor.motor_can_id
+        )
+        assert motor._mit_enabled is True
 
-    def test_disable_mit_mode_sends_ff_fe(self, motor, mock_bus):
+    def test_disable_mit_mode_sends_ff_fd(self, motor, mock_bus):
         motor.disable_mit_mode()
         sent = mock_bus.send.call_args_list[-1][0][0]
         assert sent.arbitration_id == motor.motor_can_id
-        assert list(sent.data) == [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE]
+        assert list(sent.data) == [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD]
 
     def test_enable_motor_is_alias_for_mit_enable(self, motor, mock_bus):
+        mock_bus.recv.return_value = _make_feedback_msg()
         motor.enable_motor()
-        sent = mock_bus.send.call_args_list[-1][0][0]
-        assert sent.arbitration_id == motor.motor_can_id
-        assert list(sent.data) == [0xFF] * 8
+        first = mock_bus.send.call_args_list[0][0][0]
+        assert (
+            first.arbitration_id == (CANControlMode.MIT_MODE << 8) | motor.motor_can_id
+        )
+
+
+class TestTransportRecovery:
+    def test_send_raw_reconnects_once_on_tx_buffer_full(self, motor, mock_bus):
+        mock_bus.send.side_effect = [can.CanError("Transmit buffer full"), None]
+
+        with patch.object(
+            motor, "_recover_bus_if_needed", return_value=True
+        ) as recover:
+            ok = motor._send_raw(
+                arbitration_id=motor.motor_can_id,
+                data=bytes([0x00] * 8),
+                capture_response=False,
+            )
+
+        assert ok is True
+        assert recover.call_count >= 1
+
+    def test_enable_mit_mode_recovers_existing_transport_fault(self, motor, mock_bus):
+        motor._transport_fault = "previous send failure"
+        mock_bus.recv.return_value = _make_feedback_msg()
+
+        with patch.object(
+            motor, "_reconnect_transport", return_value=True
+        ) as reconnect:
+            motor.enable_mit_mode()
+
+        reconnect.assert_called_once()
+        assert motor._transport_fault is None
+
+    def test_send_raw_recovers_on_no_such_device_error(self, motor, mock_bus):
+        mock_bus.send.side_effect = [can.CanError("No such device or address"), None]
+
+        with patch.object(
+            motor, "_reconnect_transport", return_value=True
+        ) as reconnect:
+            ok = motor._send_raw(
+                arbitration_id=motor.motor_can_id,
+                data=bytes([0x00] * 8),
+                capture_response=False,
+            )
+
+        assert ok is True
+        reconnect.assert_called_once()
+
+    def test_send_raw_recovers_on_attribute_error(self, motor, mock_bus):
+        mock_bus.send.side_effect = [
+            AttributeError("'NoneType' object has no attribute 'send'"),
+            None,
+        ]
+
+        with patch.object(
+            motor, "_reconnect_transport", return_value=True
+        ) as reconnect:
+            ok = motor._send_raw(
+                arbitration_id=motor.motor_can_id,
+                data=bytes([0x00] * 8),
+                capture_response=False,
+            )
+
+        assert ok is True
+        reconnect.assert_called_once()
 
 
 class TestMITCommandPath:
     def test_set_mit_mode_uses_force_control_id_and_payload(self, motor, mock_bus):
+        mock_bus.recv.return_value = _make_feedback_msg()
         motor.set_mit_mode(
             pos_rad=1.0, vel_rad_s=2.0, kp=30.0, kd=1.5, torque_ff_nm=3.0
         )
@@ -119,7 +201,7 @@ class TestMITCommandPath:
             if call[0][0].arbitration_id == mit_arb_id
         ]
         assert mit_msgs, "Expected at least one MIT command frame"
-        assert bytes(mit_msgs[0].data) == expected
+        assert any(bytes(msg.data) == expected for msg in mit_msgs)
 
     def test_set_position_uses_default_mit_gains(self, motor):
         with patch.object(motor, "set_mit_mode") as mit:
@@ -143,6 +225,16 @@ class TestMITCommandPath:
         assert kwargs["vel_rad_s"] == pytest.approx(expected_vel)
         assert kwargs["kp"] == 0.0
         assert kwargs["kd"] == CAN_DEFAULTS.mit_velocity_kd
+
+    def test_set_velocity_uses_constructor_velocity_kd_override(self, mock_bus):
+        motor = CubeMarsAK606v3CAN(mit_velocity_kd=0.5)
+        try:
+            with patch.object(motor, "set_mit_mode") as mit:
+                motor.set_velocity(velocity_erpm=6000, allow_low_speed=True)
+            kwargs = mit.call_args.kwargs
+            assert kwargs["kd"] == pytest.approx(0.5)
+        finally:
+            motor.close()
 
     def test_set_current_maps_to_torque_feedforward(self, motor):
         with patch.object(motor, "set_mit_mode") as mit:
@@ -204,3 +296,19 @@ class TestFeedbackAndCommunication:
             mock_cls.side_effect = can.CanError("no interface")
             m = CubeMarsAK606v3CAN()
             assert m.check_communication() is False
+
+    def test_parse_feedback_ignores_error_frames(self, motor):
+        msg = _make_feedback_msg()
+        msg.is_error_frame = True
+        assert motor._parse_feedback_msg(msg) is None
+
+    def test_parse_feedback_ignores_non_rx_loopback(self, motor):
+        msg = _make_feedback_msg()
+        msg.is_rx = False
+        assert motor._parse_feedback_msg(msg) is None
+
+    def test_parse_feedback_keeps_full_uint8_error_code(self, motor):
+        msg = _make_feedback_msg(error_code=9)
+        feedback = motor._parse_feedback_msg(msg)
+        assert feedback is not None
+        assert feedback.error_code == 9
