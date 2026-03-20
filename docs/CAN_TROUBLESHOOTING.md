@@ -17,9 +17,9 @@ Use this as the authoritative command baseline for current software:
 
 | Action | Arb ID | Payload |
 |---|---|---|
-| Enable MIT | `motor_id` (for ID 3: `0x000003`) | `FF FF FF FF FF FF FF FF` |
+| Enable MIT | `motor_id` (for ID 3: `0x000003`) | `FF FF FF FF FF FF FF FC` |
 | MIT control command | `(0x08 << 8) | motor_id` (for ID 3: `0x000803`) | 8-byte MIT-packed payload (`KP/KD/Pos/Vel/Tau`) |
-| Disable MIT | `motor_id` (for ID 3: `0x000003`) | `FF FF FF FF FF FF FF FE` |
+| Disable MIT | `motor_id` (for ID 3: `0x000003`) | `FF FF FF FF FF FF FF FD` |
 | Recommended bench script | N/A | `.venv/bin/python scripts/mit_mode_test.py --motor-id 0x03` |
 
 Note: CubeMars manual section 4.2 explicitly documents the `0x08` MIT command
@@ -37,7 +37,7 @@ implementation compatibility behavior in this repo.
 | Duty cycle | `0x000003` | `struct.pack('>i', int(duty*100_000)) + bytes(4)` | `spin_test.py` uses this |
 | Velocity | `0x000303` | `struct.pack('>i', erpm) + bytes(4)` | ⚠️ **No feedback received** (see Problem 6) |
 | Current | `0x000103` | `struct.pack('>i', mA) + bytes(4)` | ⚠️ **No feedback received** (see Problem 6) |
-| Feedback reception | listen on `0x2903` | 8 bytes: pos/spd/cur/tmp/err | Works **only with CAN filter** (see below) |
+| Feedback reception | listen on `0x2900 | motor_id` (e.g. `0x2903`) | 8 bytes: pos/spd/cur/tmp/err | Works **only with CAN filter** (see below) |
 
 ---
 
@@ -68,14 +68,19 @@ implementation compatibility behavior in this repo.
 ### Problem 1 — `0x0088` flood swamps `bus.recv()`
 **Symptom:** `_get_feedback()` always returns `None` even though the motor broadcasts 50 Hz feedback.
 
-**Root cause:** An unknown device on the CAN bus (possibly the IMU) transmits standard 11-bit frames on ID `0x0088` at **~30,000 frames/second**. Every call to `bus.recv(timeout=...)` returns a `0x0088` frame before the motor's `0x2903` feedback arrives.
+**Root cause:** An unknown device on the CAN bus (possibly the IMU) transmits standard 11-bit frames on ID `0x0088` at **~30,000 frames/second**. Every call to `bus.recv(timeout=...)` returns a `0x0088` frame before the motor's feedback (`0x2900 | motor_id`) arrives.
+
+**Important update (2026-03-20):** on Jetson `mttcan`, the same visible
+`0x88` pattern can also come from **CAN error frames** (`msg.is_error_frame=True`)
+when the interface is in `ERROR-PASSIVE` / `BUS-OFF`. Treat `0x88` as ambiguous
+until you inspect `msg.is_error_frame` and bus state.
 
 **Fix applied (confirmed working):**
 ```python
 bus = can.interface.Bus(
     channel="can0",
     interface="socketcan",
-    can_filters=[{"can_id": 0x2903, "can_mask": 0x1FFFFFFF, "extended": True}],
+    can_filters=[{"can_id": (0x2900 | motor_id), "can_mask": 0x1FFFFFFF, "extended": True}],
 )
 ```
 This drops `0x0088` in the kernel before it reaches userspace.
@@ -87,15 +92,15 @@ This drops `0x0088` in the kernel before it reaches userspace.
 ---
 
 ### Problem 2 — UART cable connected silences CAN control
-**Symptom:** Motor broadcasts 50 Hz feedback normally. All commands are ACK'd (no bus errors). But speed = 0, position never changes regardless of what is sent.
+**Symptom:** Commands do nothing; depending on firmware you may see either no feedback, or stale/limited feedback.
 
-**Root cause:** The CubeMars motor has two interfaces: UART and CAN. **UART has higher priority.** When a UART cable is physically connected to the motor, it ignores ALL incoming CAN control commands while continuing to broadcast its status.
+**Root cause:** The CubeMars motor has two interfaces: UART and CAN. **UART has higher priority.** When a UART cable is physically connected, CAN control is blocked; firmware variants differ on whether feedback continues or is fully suppressed.
 
 **How to detect:**
 ```bash
 ip -details link show can0 | grep berr
-# берр-counter tx 128+ and ERROR-PASSIVE = UART is connected (commands not ACK'd)
-# berr-counter tx 0 and ERROR-ACTIVE = bus is clean
+# tx_err climbing toward 128 / ERROR-PASSIVE often means no ACK from motor
+# but this is not UART-specific (power/wiring/termination can cause the same pattern)
 ```
 
 Also: after `set_origin`, if position does **not** reset to ~0° in feedback, UART is likely still plugged in.

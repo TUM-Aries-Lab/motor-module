@@ -62,7 +62,59 @@ Single-motor MIT protocol validation (CAN ID `0x03` by default). Exercises:
 
 ```bash
 .venv/bin/python scripts/mit_mode_test.py
+# If can0 is already configured and you don't want auto sudo reset:
+.venv/bin/python scripts/mit_mode_test.py --skip-preflight
+# Include velocity/current API sections (can spin the motor):
+.venv/bin/python scripts/mit_mode_test.py --include-spin-tests
 ```
+
+---
+
+### `verify_set_velocity.py`
+Focused validation for the `set_velocity()` API only.
+It runs a short `+ERPM -> 0 -> -ERPM -> 0` sequence (or forward-only),
+checks feedback sign/magnitude against the command, and prints strict PASS/FAIL.
+
+```bash
+.venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03
+# Skip automatic CAN reset if your interface is already configured:
+.venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03 --preflight-mode skip
+# Forward-only check:
+.venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03 --forward-only
+# Firmware-compatibility debug knobs:
+.venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03 --helper-policy fcfd --allow-legacy-feedback-ids
+.venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03 --feedback-can-id 0x2903
+# Reduce velocity-loop aggressiveness if the bus drops under load:
+.venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03 --velocity-kd 0.12
+```
+
+---
+
+### `mit_position_steps.py`
+Single-motor MIT position stepping sequence for controller bring-up.
+Default run sends `set_position()` targets every 30° for 120 seconds, bouncing
+between `-90°` and `+90°`.
+
+- Default profile is **helper** (stable `set_position()` stepping).
+- Optional `--mode snappy` uses fast MIT `kp/kd` stepping.
+- Optional `--mode smooth` enables speed/acceleration-limited interpolation.
+- Start target is auto-aligned to live feedback position to avoid a large first jump.
+- Use `--mode helper` for original stable `set_position()` stepping behavior.
+
+```bash
+.venv/bin/python scripts/mit_position_steps.py --motor-id 0x03
+# quieter profile example:
+.venv/bin/python scripts/mit_position_steps.py --motor-id 0x03 --mode smooth --max-speed-deg-s 25 --max-accel-deg-s2 70
+# faster/snappier with extra damping:
+.venv/bin/python scripts/mit_position_steps.py --motor-id 0x03 --mode snappy --kp 75 --kd 3.4 --dwell-seconds 0.4
+# keep first large error safe, then stay snappy:
+.venv/bin/python scripts/mit_position_steps.py --motor-id 0x03 --mode snappy --kp 75 --kd 3.4 --kp-far-cap 40 --far-error-deg 25
+# If can0 is already configured and you don't want auto sudo reset:
+.venv/bin/python scripts/mit_position_steps.py --motor-id 0x03 --skip-preflight
+```
+
+> `verify_set_velocity.py` and `mit_position_steps.py` now use the same kernel-level
+> reset path as `setup_can.sh` for auto preflight (`berr-reporting on`, `restart-ms 100`).
 
 ---
 
@@ -89,6 +141,8 @@ is reliable under rapid reconnection and heavy use.
 ### `diagnose_can.py`
 Step-by-step diagnostic that tests each phase of the CAN connection independently:
 CAN bus state → raw listen → filtered listen → enable/response → rapid cycles.
+The script now reports **error-frame volume** explicitly, so `0x88` noise is
+distinguished between real data frames and CAN error frames.
 
 ```bash
 .venv/bin/python scripts/diagnose_can.py

@@ -226,8 +226,8 @@ list a dedicated enable/disable frame sequence.
 
 | Driver helper action | Byte sequence | Arb ID |
 |---|---|---|
-| `enable_mit_mode()` | `FF FF FF FF FF FF FF FF` | `motor_id` |
-| `disable_mit_mode()` | `FF FF FF FF FF FF FF FE` | `motor_id` |
+| `enable_mit_mode()` | `FF FF FF FF FF FF FF FC` | `motor_id` |
+| `disable_mit_mode()` | `FF FF FF FF FF FF FF FD` | `motor_id` |
 
 ---
 

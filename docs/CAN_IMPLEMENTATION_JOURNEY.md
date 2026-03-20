@@ -126,7 +126,7 @@ Healthy output shows `state ERROR-ACTIVE (berr-counter tx 0 rx 0)`.
 The motor has **two interfaces: UART and CAN**. UART has higher priority.
 
 - When a UART / R-Link cable is connected, the motor **ignores all CAN control commands**.
-- The motor continues to broadcast its 50 Hz feedback via CAN even while UART is active.
+- Firmware behavior differs: some versions still broadcast limited feedback, others suppress CAN feedback entirely while UART is connected.
 - CAN commands are transmitted but receive no ACK, causing the Jetson's CAN interface to accumulate TX errors and enter BUS-OFF state.
 - This is **silent** — Python scripts run to completion without error, motor shaft does not move, `Speed=0 ERPM, Cur=0.00A` in all feedback.
 - The Jetson's CAN controller can accumulate **116+ million bus errors and 966+ BUS-OFF crashes** in a single session before the problem is noticed.
@@ -177,7 +177,7 @@ The motor supports two CAN protocols:
 | Mode | Enable/Disable | Control |
 |---|---|---|
 | **Servo mode** | `0xFFFFFFFFFFFFFFFC` / `0xFFFFFFFFFFFFFFFD` | Velocity, position, current, duty cycle |
-| **MIT mode** | `0xFFFFFFFFFFFFFFFF` / `0xFFFFFFFFFFFFFFFE` | Impedance control (KP, KD, torque feedforward) |
+| **MIT mode** | `0xFFFFFFFFFFFFFFFC` / `0xFFFFFFFFFFFFFFFD` (`legacy`: `0xFFFFFFFFFFFFFFFF` / `0xFFFFFFFFFFFFFFFE`) | Impedance control (KP, KD, torque feedforward) |
 
 The motor was configured for Servo mode in CubeMars software.
 
