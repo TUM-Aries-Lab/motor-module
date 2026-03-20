@@ -176,7 +176,7 @@ class MotorLimits:
 
     max_velocity_electrical_rpm: int = 100000
     min_velocity_electrical_rpm: int = -100000
-    min_safe_velocity_erpm: int = 5000  # Minimum safe magnitude (|v| >= 5000 or v == 0)
+
     max_movement_time: float = 5.0  # Maximum movement time cap in seconds
     soft_start_current_ma: int = 3000  # Gentle current (mA) to pre-spin past noisy zone
     soft_start_duration: float = 0.15  # Seconds to hold pre-spin current

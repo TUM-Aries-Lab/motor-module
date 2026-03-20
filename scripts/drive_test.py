@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """Comprehensive motor drive test - try various duty formats, levels, and modes."""
-import can
-import time
 import struct
 import sys
+import time
+
+import can
 
 sys.stdout.reconfigure(line_buffering=True)
 
 MOTOR_ID = 0x03
 FEEDBACK_ID = 0x2903
 
-bus = can.Bus(channel='can0', interface='socketcan')
+bus = can.Bus(channel="can0", interface="socketcan")
 
 def drain(max_iter=100):
     for _ in range(max_iter):

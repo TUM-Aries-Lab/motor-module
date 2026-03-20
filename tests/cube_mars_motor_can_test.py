@@ -216,7 +216,7 @@ class TestMITCommandPath:
 
     def test_set_velocity_routes_through_mit_velocity_mode(self, motor):
         with patch.object(motor, "set_mit_mode") as mit:
-            motor.set_velocity(velocity_erpm=6000, allow_low_speed=True)
+            motor.set_velocity(velocity_erpm=6000)
 
         mit.assert_called_once()
         kwargs = mit.call_args.kwargs
@@ -230,7 +230,7 @@ class TestMITCommandPath:
         motor = CubeMarsAK606v3CAN(mit_velocity_kd=0.5)
         try:
             with patch.object(motor, "set_mit_mode") as mit:
-                motor.set_velocity(velocity_erpm=6000, allow_low_speed=True)
+                motor.set_velocity(velocity_erpm=6000)
             kwargs = mit.call_args.kwargs
             assert kwargs["kd"] == pytest.approx(0.5)
         finally:

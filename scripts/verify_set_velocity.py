@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from motor_python.base_motor import MotorState
 from motor_python.can_utils import get_can_state, reset_can_interface
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
-from motor_python.definitions import CAN_DEFAULTS, MOTOR_LIMITS
+from motor_python.definitions import CAN_DEFAULTS
 
 SEPARATOR = "=" * 78
 HEALTHY_TX_ERR_MAX = 96
@@ -90,8 +90,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--velocity-erpm",
         type=int,
-        default=6000,
-        help="Test velocity magnitude in ERPM (default: 6000)",
+        default=3000,
+        help="Test velocity magnitude in ERPM (default: 1000)",
     )
     parser.add_argument(
         "--velocity-kd",
@@ -102,8 +102,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--phase-seconds",
         type=float,
-        default=2.0,
-        help="Duration for each non-zero phase (default: 2.0)",
+        default=120.0,
+        help="Duration for the script (default: 2.0)",
     )
     parser.add_argument(
         "--neutral-seconds",
@@ -145,11 +145,6 @@ def parse_args() -> argparse.Namespace:
         help="Abort after this many consecutive missing feedback samples (default: 10)",
     )
     parser.add_argument(
-        "--allow-low-speed",
-        action="store_true",
-        help="Allow non-zero commands below BaseMotor's low-speed safety floor.",
-    )
-    parser.add_argument(
         "--forward-only",
         action="store_true",
         help="Only verify the positive direction (+ERPM, then neutral).",
@@ -179,14 +174,6 @@ def validate_args(args: argparse.Namespace) -> None:  # noqa: C901
         raise ValueError("--velocity-kd must be >= 0")
     if int(args.velocity_erpm) == 0:
         raise ValueError("--velocity-erpm must be non-zero")
-    if (
-        not args.allow_low_speed
-        and 0 < abs(int(args.velocity_erpm)) < MOTOR_LIMITS.min_safe_velocity_erpm
-    ):
-        raise ValueError(
-            f"--velocity-erpm below safe floor ({MOTOR_LIMITS.min_safe_velocity_erpm} ERPM). "
-            "Use --allow-low-speed to override."
-        )
 
 
 def _is_can_state_healthy(state: dict[str, int | str]) -> bool:
@@ -238,7 +225,7 @@ def read_status(motor: CubeMarsAK606v3CAN, timeout: float) -> MotorState | None:
     return motor._last_feedback
 
 
-def _command_phase(motor: CubeMarsAK606v3CAN, command_erpm: int, *, allow_low_speed: bool) -> None:
+def _command_phase(motor: CubeMarsAK606v3CAN, command_erpm: int) -> None:
     """Send one phase command."""
     if command_erpm == 0:
         motor.set_mit_mode(
@@ -249,7 +236,7 @@ def _command_phase(motor: CubeMarsAK606v3CAN, command_erpm: int, *, allow_low_sp
             torque_ff_nm=0.0,
         )
         return
-    motor.set_velocity(command_erpm, allow_low_speed=allow_low_speed)
+    motor.set_velocity(command_erpm)
 
 
 def _mean(values: list[float]) -> float | None:
@@ -278,10 +265,9 @@ def run_phase(  # noqa: PLR0913
     min_sign_match_ratio: float,
     min_informative_samples: int,
     max_missed_feedback: int,
-    allow_low_speed: bool,
 ) -> PhaseResult:
     """Execute a velocity phase and evaluate speed feedback quality."""
-    _command_phase(motor, command_erpm, allow_low_speed=allow_low_speed)
+    _command_phase(motor, command_erpm)
 
     period_s = 1.0 / sample_hz
     t_end = time.monotonic() + duration_s
@@ -434,7 +420,6 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
                 min_sign_match_ratio=args.min_sign_match_ratio,
                 min_informative_samples=args.min_informative_samples,
                 max_missed_feedback=args.max_missed_feedback,
-                allow_low_speed=args.allow_low_speed,
             )
             results.append(result)
             print_phase_result(result)

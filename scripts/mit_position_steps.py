@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""MIT position-step exercise for one AK60-6 motor.
+"""MIT position step script for long motion-capture runs.
 
-Default behavior:
-- Move in 30-degree position steps
-- Run for 120 seconds
-- Bounce between -90 and +90 degrees
+This script avoids MIT position-limit lockups by stepping back-and-forth
+(ping-pong) inside a safe command window.
 
-Run:
-    sudo ./setup_can.sh
-    .venv/bin/python scripts/mit_position_steps.py --motor-id 0x03
+Primary controls:
+- --angle-deg       : step size per tick
+- --duration        : total runtime
+- --velocity-deg-s  : movement speed used for each segment
+
+Example:
+    .venv/bin/python scripts/mit_position_steps.py --motor-id 0x03 --angle-deg 30 --duration 180 --velocity-deg-s 20
 """
-# ruff: noqa: T201, S110
+# ruff: noqa: T201
 
 from __future__ import annotations
 
@@ -18,7 +20,13 @@ import argparse
 import math
 import sys
 import time
-from itertools import cycle
+from pathlib import Path
+
+# Allow running as plain `python scripts/mit_position_steps.py` from repo root.
+if __package__ in {None, ""}:
+    repo_src = Path(__file__).resolve().parents[1] / "src"
+    if str(repo_src) not in sys.path:
+        sys.path.insert(0, str(repo_src))
 
 from motor_python.base_motor import MotorState
 from motor_python.can_utils import get_can_state, reset_can_interface
@@ -27,6 +35,24 @@ from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
 SEPARATOR = "=" * 72
 HEALTHY_TX_ERR_MAX = 96
 HEALTHY_RX_ERR_MAX = 64
+MIT_POSITION_LIMIT_DEG = math.degrees(12.56)
+MIN_TRAVEL_EPS_DEG = 0.5
+
+# ---------------------------------------------------------------------------
+# Quick settings (edit here if you prefer code-based tuning)
+# ---------------------------------------------------------------------------
+DEFAULT_ANGLE_DEG = 90.0
+DEFAULT_DURATION_S = 180.0
+DEFAULT_VELOCITY_DEG_S = 100.0
+DEFAULT_TICK_PAUSE_S = 0.02
+DEFAULT_CONTROL_HZ = 20.0
+DEFAULT_SWEEP_MIN_DEG = -650.0
+DEFAULT_SWEEP_MAX_DEG = 650.0
+
+
+def _clamp(value: float, min_value: float, max_value: float) -> float:
+    """Clamp value into [min_value, max_value]."""
+    return max(min_value, min(max_value, value))
 
 
 def _is_can_state_healthy(state: dict[str, int | str]) -> bool:
@@ -61,111 +87,74 @@ def _ensure_can_ready(interface: str, bitrate: int) -> None:
 
     if not _is_can_state_healthy(after):
         raise RuntimeError(
-            "CAN bus still unhealthy after reset (error frames dominate). "
+            "CAN bus still unhealthy after reset. "
             "Check wiring/termination/power/UART disconnect before retrying."
         )
 
 
-def _build_targets(
-    min_deg: float, max_deg: float, step_deg: float, start_deg: float
-) -> list[float]:
-    """Build a bouncing target list (min -> max -> min) with fixed steps."""
-    if step_deg <= 0:
-        raise ValueError("--step-deg must be > 0")
-    if max_deg <= min_deg:
-        raise ValueError("--max-deg must be greater than --min-deg")
-
-    positions: list[float] = []
-    pos = min_deg
-    while pos <= max_deg + 1e-9:
-        positions.append(round(pos, 6))
-        pos += step_deg
-
-    if len(positions) < 2:
-        raise ValueError("Need at least two targets; adjust min/max/step")
-
-    # Bounce back without duplicating endpoints.
-    targets = positions + positions[-2:0:-1]
-
-    # Rotate so sequence starts close to the desired start angle.
-    start_index = min(range(len(targets)), key=lambda idx: abs(targets[idx] - start_deg))
-    return targets[start_index:] + targets[:start_index]
-
-
-def _read_status(motor: CubeMarsAK606v3CAN, timeout: float = 0.25) -> MotorState | None:
-    """Get the freshest available motor status sample."""
+def _read_status(motor: CubeMarsAK606v3CAN, timeout: float = 0.10) -> MotorState | None:
+    """Get freshest available motor status sample."""
     status = motor._receive_feedback(timeout=timeout)
     if status is None:
         status = motor.get_status()
     return status
 
 
-def _print_step_line(
-    elapsed_s: float, step_index: int, target_deg: float, status: MotorState | None
+def _print_tick_line(
+    elapsed_s: float,
+    tick_index: int,
+    cmd_target_deg: float,
+    direction: int,
+    status: MotorState | None,
 ) -> None:
-    """Print one concise step result line."""
+    """Print one concise tick summary line."""
+    arrow = ">" if direction > 0 else "<"
     if status is None:
         print(
-            f"t={elapsed_s:6.1f}s  step={step_index:04d}  target={target_deg:7.2f} deg  feedback=none"
+            f"t={elapsed_s:6.2f}s  tick={tick_index:04d}  dir={arrow}  "
+            f"target={cmd_target_deg:8.2f} deg  feedback=none"
         )
         return
 
     print(
-        f"t={elapsed_s:6.1f}s  step={step_index:04d}  target={target_deg:7.2f} deg  "
-        f"pos={status.position_degrees:7.2f} deg  vel={status.speed_erpm:7d} ERPM  "
+        f"t={elapsed_s:6.2f}s  tick={tick_index:04d}  dir={arrow}  "
+        f"target={cmd_target_deg:8.2f} deg  "
+        f"pos={status.position_degrees:8.2f} deg  "
+        f"vel={status.speed_erpm:7d} ERPM  "
         f"cur={status.current_amps:6.2f} A  err={status.error_code}"
     )
 
 
-def _compute_transition_seconds(
-    delta_deg: float,
-    min_transition_s: float,
-    max_speed_deg_s: float,
-    max_accel_deg_s2: float,
-) -> float:
-    """Compute smoothstep transition time from speed/acceleration constraints."""
-    delta_abs = abs(delta_deg)
-    if delta_abs <= 1e-9:
-        return 0.0
-
-    # For smoothstep s(u)=3u^2-2u^3:
-    # max|velocity| ~= 1.5 * delta / T
-    # max|accel|    ~= 6.0 * delta / T^2
-    t_speed = (1.5 * delta_abs / max_speed_deg_s) if max_speed_deg_s > 0 else 0.0
-    t_accel = (
-        (6.0 * delta_abs / max_accel_deg_s2) ** 0.5 if max_accel_deg_s2 > 0 else 0.0
-    )
-    return max(min_transition_s, t_speed, t_accel)
-
-
-def _move_smooth(  # noqa: PLR0913
+def _move_segment(  # noqa: PLR0913
     motor: CubeMarsAK606v3CAN,
+    *,
     start_deg: float,
-    target_deg: float,
-    transition_s: float,
+    delta_deg: float,
+    velocity_deg_s: float,
     control_hz: float,
     deadline: float,
 ) -> tuple[float, MotorState | None]:
-    """Move from start_deg to target_deg with smoothstep interpolation."""
-    if transition_s <= 0:
-        motor.set_position(target_deg)
-        return target_deg, _read_status(motor, timeout=0.15)
+    """Move one segment with smooth interpolation and bounded velocity."""
+    segment_time = abs(delta_deg) / max(velocity_deg_s, 1e-9)
+    if segment_time <= 1e-9:
+        return start_deg, _read_status(motor, timeout=0.05)
 
-    period_s = 1.0 / max(control_hz, 1.0)
-    steps = max(1, round(transition_s * control_hz))
-    last_status: MotorState | None = None
-    cmd_pos = start_deg
+    steps = max(1, round(segment_time * control_hz))
+    period_s = segment_time / steps
+
     next_tick = time.monotonic()
+    cmd_deg = start_deg
+    last_status: MotorState | None = None
 
-    for i in range(1, steps + 1):
+    for step in range(1, steps + 1):
         if time.monotonic() >= deadline:
-            return cmd_pos, last_status
+            break
 
-        u = i / steps
+        u = step / steps
         smooth_u = (3.0 * u * u) - (2.0 * u * u * u)
-        cmd_pos = start_deg + ((target_deg - start_deg) * smooth_u)
-        motor.set_position(cmd_pos)
+        cmd_deg = start_deg + (delta_deg * smooth_u)
 
+        motor.set_position(cmd_deg)
         last_status = _read_status(motor, timeout=min(0.08, period_s))
         if last_status is not None and last_status.error_code != 0:
             raise RuntimeError(
@@ -173,68 +162,27 @@ def _move_smooth(  # noqa: PLR0913
             )
 
         next_tick += period_s
-        wait_s = next_tick - time.monotonic()
-        if wait_s > 0:
-            time.sleep(wait_s)
+        sleep_s = next_tick - time.monotonic()
+        if sleep_s > 0:
+            time.sleep(sleep_s)
 
-    return target_deg, last_status
-
-
-def _move_snappy(  # noqa: PLR0913
-    motor: CubeMarsAK606v3CAN,
-    target_deg: float,
-    kp: float,
-    kd: float,
-    settle_timeout_s: float,
-    pos_tolerance_deg: float,
-    deadline: float,
-) -> tuple[float, MotorState | None]:
-    """Move quickly to target_deg using direct MIT position impedance command."""
-    motor.set_mit_mode(
-        pos_rad=math.radians(target_deg),
-        vel_rad_s=0.0,
-        kp=kp,
-        kd=kd,
-        torque_ff_nm=0.0,
-    )
-
-    step_start = time.monotonic()
-    last_status: MotorState | None = None
-    while time.monotonic() - step_start < settle_timeout_s:
-        if time.monotonic() >= deadline:
-            break
-
-        last_status = _read_status(motor, timeout=0.08)
-        if last_status is not None:
-            if last_status.error_code != 0:
-                raise RuntimeError(
-                    f"Motor fault code {last_status.error_code}: {last_status.error_description}"
-                )
-
-            pos_ok = abs(last_status.position_degrees - target_deg) <= pos_tolerance_deg
-            speed_ok = abs(last_status.speed_erpm) <= 1400
-            if pos_ok and speed_ok:
-                break
-        time.sleep(0.02)
-
-    return target_deg, last_status
+    return cmd_deg, last_status
 
 
 def parse_args() -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(
-        description="MIT position-step runner (default: 30 deg steps for 120 s)"
+        description=(
+            "Long-run MIT position stepping (ping-pong in safe window). "
+            "Tune angle, duration, velocity."
+        )
     )
-    parser.add_argument(
-        "--interface",
-        default="can0",
-        help="SocketCAN interface (default: can0)",
-    )
+    parser.add_argument("--interface", default="can0", help="SocketCAN interface")
     parser.add_argument(
         "--motor-id",
-        type=lambda x: int(x, 0),
+        type=lambda value: int(value, 0),
         default=0x03,
-        help="Motor CAN ID (default: 0x03)",
+        help="Motor CAN ID in decimal or hex (default: 0x03)",
     )
     parser.add_argument(
         "--bitrate",
@@ -243,106 +191,64 @@ def parse_args() -> argparse.Namespace:
         help="CAN bitrate (default: 1000000)",
     )
     parser.add_argument(
-        "--duration-seconds",
+        "--angle-deg",
         type=float,
-        default=120.0,
-        help="Total runtime (default: 120)",
+        default=DEFAULT_ANGLE_DEG,
+        help=(
+            "Tick angle in degrees. Sign selects initial direction "
+            f"(default: {DEFAULT_ANGLE_DEG})"
+        ),
     )
     parser.add_argument(
-        "--step-deg",
+        "--duration",
         type=float,
-        default=30.0,
-        help="Position step size in degrees (default: 30)",
+        default=DEFAULT_DURATION_S,
+        help=f"Total run duration in seconds (default: {DEFAULT_DURATION_S})",
     )
     parser.add_argument(
-        "--dwell-seconds",
+        "--velocity-deg-s",
         type=float,
-        default=0.5,
-        help="Time to hold each target in seconds (default: 0.5)",
+        default=DEFAULT_VELOCITY_DEG_S,
+        help=(
+            "Movement speed for each tick segment in deg/s "
+            f"(default: {DEFAULT_VELOCITY_DEG_S})"
+        ),
+    )
+    parser.add_argument(
+        "--tick-pause",
+        type=float,
+        default=DEFAULT_TICK_PAUSE_S,
+        help=(
+            "Pause after each tick in seconds (set 0 for continuous stepping, "
+            f"default: {DEFAULT_TICK_PAUSE_S})"
+        ),
+    )
+    parser.add_argument(
+        "--control-hz",
+        type=float,
+        default=DEFAULT_CONTROL_HZ,
+        help=f"Position command update rate (default: {DEFAULT_CONTROL_HZ})",
     )
     parser.add_argument(
         "--min-deg",
         type=float,
-        default=-90.0,
-        help="Minimum target angle in degrees (default: -90)",
+        default=DEFAULT_SWEEP_MIN_DEG,
+        help=f"Lower bound of ping-pong window (default: {DEFAULT_SWEEP_MIN_DEG})",
     )
     parser.add_argument(
         "--max-deg",
         type=float,
-        default=90.0,
-        help="Maximum target angle in degrees (default: 90)",
+        default=DEFAULT_SWEEP_MAX_DEG,
+        help=f"Upper bound of ping-pong window (default: {DEFAULT_SWEEP_MAX_DEG})",
     )
     parser.add_argument(
         "--start-deg",
         type=float,
         default=None,
-        help="Start sequence near this angle (default: auto from live motor position)",
-    )
-    parser.add_argument(
-        "--mode",
-        choices=["helper", "snappy", "smooth"],
-        default="helper",
-        help="Motion mode: helper (stable), snappy, or smooth (default: helper)",
-    )
-    parser.add_argument(
-        "--kp",
-        type=float,
-        default=70.0,
-        help="MIT position stiffness for snappy mode (default: 70)",
-    )
-    parser.add_argument(
-        "--kd",
-        type=float,
-        default=3.0,
-        help="MIT damping for snappy mode (default: 3.0)",
-    )
-    parser.add_argument(
-        "--far-error-deg",
-        type=float,
-        default=25.0,
-        help="If target error exceeds this, apply far-error gain cap (default: 25)",
-    )
-    parser.add_argument(
-        "--kp-far-cap",
-        type=float,
-        default=38.0,
-        help="Max kp to use on large-error snappy steps (default: 38)",
-    )
-    parser.add_argument(
-        "--settle-timeout-seconds",
-        type=float,
-        default=0.45,
-        help="Max wait time per snappy step for settling (default: 0.45)",
-    )
-    parser.add_argument(
-        "--position-tolerance-deg",
-        type=float,
-        default=2.0,
-        help="Target tolerance for snappy settling check in degrees (default: 2.0)",
-    )
-    parser.add_argument(
-        "--max-speed-deg-s",
-        type=float,
-        default=40.0,
-        help="Max commanded transition speed in deg/s (default: 40)",
-    )
-    parser.add_argument(
-        "--max-accel-deg-s2",
-        type=float,
-        default=120.0,
-        help="Max commanded transition acceleration in deg/s^2 (default: 120)",
-    )
-    parser.add_argument(
-        "--min-transition-seconds",
-        type=float,
-        default=0.6,
-        help="Minimum per-step transition duration in seconds (default: 0.6)",
-    )
-    parser.add_argument(
-        "--control-hz",
-        type=float,
-        default=50.0,
-        help="Position command update rate during transitions (default: 50)",
+        help=(
+            "Optional start command angle in degrees. "
+            "If omitted, feedback is clamped into [min-deg, max-deg]."
+        ),
     )
     parser.add_argument(
         "--helper-policy",
@@ -358,93 +264,71 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-preflight",
         action="store_true",
-        help="Skip automatic `sudo ./setup_can.sh` preflight reset.",
+        help="Skip automatic preflight reset.",
     )
     return parser.parse_args()
 
 
-def main() -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915
-    """Run the MIT position-step sequence."""
+def main() -> int:
+    """Run long ping-pong MIT stepping sequence."""
     args = parse_args()
-    if args.duration_seconds <= 0:
-        print("FAIL: --duration-seconds must be > 0")
+
+    if abs(args.angle_deg) < 1e-9:
+        print("FAIL: --angle-deg must be non-zero")
         return 1
-    if args.dwell_seconds <= 0:
-        print("FAIL: --dwell-seconds must be > 0")
+    if args.duration <= 0:
+        print("FAIL: --duration must be > 0")
         return 1
-    if args.max_speed_deg_s <= 0:
-        print("FAIL: --max-speed-deg-s must be > 0")
-        return 1
-    if args.max_accel_deg_s2 <= 0:
-        print("FAIL: --max-accel-deg-s2 must be > 0")
-        return 1
-    if args.min_transition_seconds < 0:
-        print("FAIL: --min-transition-seconds must be >= 0")
+    if args.velocity_deg_s <= 0:
+        print("FAIL: --velocity-deg-s must be > 0")
         return 1
     if args.control_hz <= 0:
         print("FAIL: --control-hz must be > 0")
         return 1
-    if args.kp < 0:
-        print("FAIL: --kp must be >= 0")
+    if args.tick_pause < 0:
+        print("FAIL: --tick-pause must be >= 0")
         return 1
-    if args.kd < 0:
-        print("FAIL: --kd must be >= 0")
-        return 1
-    if args.far_error_deg <= 0:
-        print("FAIL: --far-error-deg must be > 0")
-        return 1
-    if args.kp_far_cap < 0:
-        print("FAIL: --kp-far-cap must be >= 0")
-        return 1
-    if args.settle_timeout_seconds <= 0:
-        print("FAIL: --settle-timeout-seconds must be > 0")
-        return 1
-    if args.position_tolerance_deg <= 0:
-        print("FAIL: --position-tolerance-deg must be > 0")
+
+    safe_min = _clamp(args.min_deg, -MIT_POSITION_LIMIT_DEG, MIT_POSITION_LIMIT_DEG)
+    safe_max = _clamp(args.max_deg, -MIT_POSITION_LIMIT_DEG, MIT_POSITION_LIMIT_DEG)
+    if safe_max <= safe_min:
+        print("FAIL: --max-deg must be greater than --min-deg after MIT clamping")
         return 1
 
     print(SEPARATOR)
-    print("AK60-6 MIT Position-Step Script")
+    print("AK60-6 MIT Position Steps (Long Ping-Pong)")
     print(SEPARATOR)
     print(f"Interface            : {args.interface}")
     print(f"Motor ID             : 0x{args.motor_id:02X}")
     print(f"Bitrate              : {args.bitrate}")
-    print(f"Duration             : {args.duration_seconds:.1f} s")
-    print(f"Step                 : {args.step_deg:.1f} deg")
-    print(f"Dwell                : {args.dwell_seconds:.2f} s")
-    print(f"Mode                 : {args.mode}")
-    if args.mode == "smooth":
-        print(f"Max speed            : {args.max_speed_deg_s:.1f} deg/s")
-        print(f"Max accel            : {args.max_accel_deg_s2:.1f} deg/s^2")
-        print(f"Min transition       : {args.min_transition_seconds:.2f} s")
-        print(f"Control rate         : {args.control_hz:.1f} Hz")
-    elif args.mode == "snappy":
-        print(f"Kp / Kd              : {args.kp:.1f} / {args.kd:.2f}")
-        print(f"Settle timeout       : {args.settle_timeout_seconds:.2f} s")
-        print(f"Position tolerance   : {args.position_tolerance_deg:.2f} deg")
-    else:
-        print("Profile              : original set_position() helper behavior")
-    print(f"Range                : [{args.min_deg:.1f}, {args.max_deg:.1f}] deg")
-    if args.start_deg is None:
-        print("Start near           : auto (live feedback)")
-    else:
-        print(f"Start near           : {args.start_deg:.1f} deg")
+    print(f"Step angle           : {args.angle_deg:.2f} deg")
+    print(f"Total duration       : {args.duration:.2f} s")
+    print(f"Step velocity        : {args.velocity_deg_s:.2f} deg/s")
+    print(f"Tick pause           : {args.tick_pause:.2f} s")
+    print(f"Control rate         : {args.control_hz:.1f} Hz")
+    print(f"Sweep window         : [{safe_min:.2f}, {safe_max:.2f}] deg")
     print(f"Helper policy        : {args.helper_policy}")
     print(f"Legacy feedback IDs  : {args.allow_legacy_feedback_ids}")
     print(f"Preflight            : {'skip' if args.skip_preflight else 'auto-reset if needed'}")
-    print("Targets cycle        : pending (computed after live feedback)")
     print("Safety               : keep load clear; be ready to cut power")
-    if args.skip_preflight:
-        state = get_can_state(args.interface)
+
+    if abs(safe_min - args.min_deg) > 0.1 or abs(safe_max - args.max_deg) > 0.1:
         print(
-            "CAN preflight skipped: "
-            f"state={state['state']} tx_err={state['tx_err']} rx_err={state['rx_err']}"
+            "WARN: sweep window clamped to MIT limits "
+            f"(requested [{args.min_deg:.2f}, {args.max_deg:.2f}] deg)."
         )
-    else:
-        _ensure_can_ready(args.interface, args.bitrate)
 
     motor: CubeMarsAK606v3CAN | None = None
     try:
+        if args.skip_preflight:
+            state = get_can_state(args.interface)
+            print(
+                "CAN preflight skipped: "
+                f"state={state['state']} tx_err={state['tx_err']} rx_err={state['rx_err']}"
+            )
+        else:
+            _ensure_can_ready(args.interface, args.bitrate)
+
         motor = CubeMarsAK606v3CAN(
             motor_can_id=args.motor_id,
             interface=args.interface,
@@ -463,98 +347,106 @@ def main() -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915
         print("PASS: communication OK")
 
         status0 = _read_status(motor, timeout=0.3)
-        live_start = status0.position_degrees if status0 is not None else 0.0
-        start_near = args.start_deg if args.start_deg is not None else live_start
-        targets = _build_targets(
-            min_deg=args.min_deg,
-            max_deg=args.max_deg,
-            step_deg=args.step_deg,
-            start_deg=start_near,
-        )
-        print(
-            f"Initial feedback pos : "
-            f"{(status0.position_degrees if status0 is not None else float('nan')):.2f} deg"
-        )
-        print(f"Start near (resolved): {start_near:.2f} deg")
-        print(f"Targets cycle        : {targets}")
+        feedback_start_deg = status0.position_degrees if status0 is not None else 0.0
 
-        print("\nStarting stepped motion...")
-        start = time.monotonic()
-        deadline = start + args.duration_seconds
-        step_index = 0
-        cmd_pos_deg = start_near
+        if args.start_deg is None:
+            current_cmd_deg = _clamp(feedback_start_deg, safe_min, safe_max)
+            if abs(current_cmd_deg - feedback_start_deg) > 0.1:
+                print(
+                    "WARN: feedback start angle is outside sweep window; "
+                    f"using clamped start {current_cmd_deg:.2f} deg "
+                    f"(feedback={feedback_start_deg:.2f} deg)."
+                )
+        else:
+            current_cmd_deg = _clamp(args.start_deg, safe_min, safe_max)
+            if abs(current_cmd_deg - args.start_deg) > 0.1:
+                print(
+                    f"WARN: --start-deg={args.start_deg:.2f} exceeds sweep window; "
+                    f"clamped to {current_cmd_deg:.2f} deg."
+                )
+
+        direction = 1 if args.angle_deg > 0 else -1
+        tick_magnitude_deg = abs(args.angle_deg)
+
+        print(f"Start position (cmd) : {current_cmd_deg:.2f} deg")
+        if status0 is not None:
+            print(f"Initial feedback pos : {status0.position_degrees:.2f} deg")
+        print(f"Initial direction    : {'positive' if direction > 0 else 'negative'}")
+
+        print("\nStarting ping-pong stepping...")
+        run_start = time.monotonic()
+        deadline = run_start + args.duration
+        tick_index = 0
+        turnarounds = 0
         last_status = status0
 
-        for target in cycle(targets):
-            now = time.monotonic()
-            if now >= deadline:
+        while time.monotonic() < deadline:
+            remaining_s = deadline - time.monotonic()
+            if remaining_s <= 0:
                 break
 
-            step_index += 1
-            if args.mode == "smooth":
-                transition_s = _compute_transition_seconds(
-                    delta_deg=target - cmd_pos_deg,
-                    min_transition_s=args.min_transition_seconds,
-                    max_speed_deg_s=args.max_speed_deg_s,
-                    max_accel_deg_s2=args.max_accel_deg_s2,
-                )
-                cmd_pos_deg, status = _move_smooth(
-                    motor=motor,
-                    start_deg=cmd_pos_deg,
-                    target_deg=target,
-                    transition_s=transition_s,
-                    control_hz=args.control_hz,
-                    deadline=deadline,
-                )
-            elif args.mode == "snappy":
-                transition_s = 0.0
-                current_est = (
-                    last_status.position_degrees
-                    if last_status is not None
-                    else cmd_pos_deg
-                )
-                err_deg = abs(target - current_est)
-                kp_cmd = (
-                    min(args.kp, args.kp_far_cap)
-                    if err_deg > args.far_error_deg
-                    else args.kp
-                )
-                cmd_pos_deg, status = _move_snappy(
-                    motor=motor,
-                    target_deg=target,
-                    kp=kp_cmd,
-                    kd=args.kd,
-                    settle_timeout_s=args.settle_timeout_seconds,
-                    pos_tolerance_deg=args.position_tolerance_deg,
-                    deadline=deadline,
-                )
-            else:
-                transition_s = 0.0
-                motor.set_position(target)
-                cmd_pos_deg = target
-                status = _read_status(motor, timeout=min(0.3, args.dwell_seconds))
-            elapsed = now - start
-            _print_step_line(elapsed, step_index, target, status)
-            if transition_s > 0.0:
-                print(f"  transition={transition_s:.2f}s")
-            elif args.mode == "snappy":
-                print(
-                    f"  snappy: kp={kp_cmd:.1f} kd={args.kd:.2f} "
-                    f"(err_est={err_deg:.1f} deg)"
-                )
+            max_delta_remaining = args.velocity_deg_s * remaining_s
+            if max_delta_remaining <= MIN_TRAVEL_EPS_DEG:
+                break
+
+            room_in_direction = (
+                safe_max - current_cmd_deg if direction > 0 else current_cmd_deg - safe_min
+            )
+            if room_in_direction < MIN_TRAVEL_EPS_DEG:
+                direction *= -1
+                turnarounds += 1
+                time.sleep(0.01)
+                continue
+
+            delta_mag = min(tick_magnitude_deg, max_delta_remaining, room_in_direction)
+            if delta_mag < MIN_TRAVEL_EPS_DEG:
+                break
+
+            delta_deg = direction * delta_mag
+            next_target_deg = current_cmd_deg + delta_deg
+
+            tick_index += 1
+            current_cmd_deg, status = _move_segment(
+                motor,
+                start_deg=current_cmd_deg,
+                delta_deg=delta_deg,
+                velocity_deg_s=args.velocity_deg_s,
+                control_hz=args.control_hz,
+                deadline=deadline,
+            )
 
             if status is not None and status.error_code != 0:
                 raise RuntimeError(
                     f"Motor fault code {status.error_code}: {status.error_description}"
                 )
-            last_status = status if status is not None else last_status
+            if status is not None:
+                last_status = status
 
-            sleep_until = min(deadline, time.monotonic() + args.dwell_seconds)
-            while time.monotonic() < sleep_until:
-                time.sleep(min(0.1, sleep_until - time.monotonic()))
+            _print_tick_line(
+                elapsed_s=time.monotonic() - run_start,
+                tick_index=tick_index,
+                cmd_target_deg=next_target_deg,
+                direction=direction,
+                status=last_status,
+            )
 
-        print("\nPASS: position-step run completed")
+            pause_deadline = min(deadline, time.monotonic() + args.tick_pause)
+            while time.monotonic() < pause_deadline:
+                time.sleep(min(0.05, pause_deadline - time.monotonic()))
+
+        if tick_index == 0:
+            print(
+                "FAIL: no ticks were sent. "
+                "Try smaller --angle-deg, lower --velocity-deg-s, or wider sweep window."
+            )
+            return 1
+
+        print("\nPASS: ping-pong run completed")
+        print(f"Ticks sent            : {tick_index}")
+        print(f"Turnarounds           : {turnarounds}")
+        print(f"Final command pos     : {current_cmd_deg:.2f} deg")
         return 0
+
     except KeyboardInterrupt:
         print("\nInterrupted by user")
         return 130
@@ -563,6 +455,10 @@ def main() -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915
         return 1
     finally:
         if motor is not None:
+            try:
+                motor.stop()
+            except Exception:
+                pass
             try:
                 motor.close()
             except Exception:

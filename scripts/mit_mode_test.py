@@ -268,7 +268,7 @@ def main() -> int:  # noqa: C901, PLR0912
 
         if args.include_spin_tests:
             section("5) set_velocity() helper (MIT-backed)")
-            motor.set_velocity(args.velocity_erpm, allow_low_speed=True)
+            motor.set_velocity(args.velocity_erpm)
             hold_and_log(motor, args.step_seconds, "set_velocity")
 
             section("6) set_current() helper (maps to MIT torque)")

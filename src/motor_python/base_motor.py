@@ -231,15 +231,10 @@ class BaseMotor(abc.ABC):
     # Concrete shared methods
     # ------------------------------------------------------------------
 
-    def set_velocity(self, velocity_erpm: int, allow_low_speed: bool = False) -> None:
+    def set_velocity(self, velocity_erpm: int) -> None:
         """Set motor velocity in electrical RPM.
 
-        Low speeds (<5000 ERPM) with high firmware acceleration cause current
-        oscillations and audible noise.  They are blocked by default.
-
         :param velocity_erpm: Target velocity in ERPM.  Negative = reverse.
-        :param allow_low_speed: Bypass the 5000 ERPM safety floor.
-        :raises ValueError: If |velocity| is in 1..4999 and allow_low_speed is False.
         """
         velocity_erpm_int = int(velocity_erpm)
 
@@ -247,15 +242,6 @@ class BaseMotor(abc.ABC):
         if velocity_erpm_int == 0:
             self.stop()
             return
-
-        # Block dangerously low speeds unless explicitly allowed
-        if not allow_low_speed:
-            if 0 < abs(velocity_erpm_int) < MOTOR_LIMITS.min_safe_velocity_erpm:
-                raise ValueError(
-                    f"Velocity {velocity_erpm_int} ERPM below safe threshold "
-                    f"({MOTOR_LIMITS.min_safe_velocity_erpm} ERPM min). "
-                    f"Use allow_low_speed=True to bypass."
-                )
 
         # Clamp to protocol limits — subclass may further narrow the range.
         velocity_erpm = int(
@@ -354,9 +340,7 @@ class BaseMotor(abc.ABC):
         current_pos = self._get_current_position_for_estimate()
         direction = 1 if target_degrees > current_pos else -1
 
-        self.set_velocity(
-            velocity_erpm=motor_speed_erpm * direction, allow_low_speed=True
-        )
+        self.set_velocity(velocity_erpm=motor_speed_erpm * direction)
 
         estimated_time = self._estimate_movement_time(target_degrees, motor_speed_erpm)
         time.sleep(min(estimated_time, MOTOR_LIMITS.max_movement_time))

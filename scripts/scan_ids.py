@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Scan CAN IDs 1-10 to find which motor ID the AK60-6 responds on."""
-import can
-import time
 import sys
+import time
+
+import can
 
 sys.stdout.reconfigure(line_buffering=True)  # flush each line
 
-bus = can.Bus(channel='can0', interface='socketcan')
+bus = can.Bus(channel="can0", interface="socketcan")
 
 # Flush stale (limited iterations to avoid hang)
 flushed = 0

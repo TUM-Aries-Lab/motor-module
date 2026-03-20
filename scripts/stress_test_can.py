@@ -169,7 +169,7 @@ def main():
           f"({total_pass/total_tests*100:.1f}%)")
 
     if total_pass == total_tests:
-        print(f"\n  ✓  ALL TESTS PASSED — CAN is rock-solid!")
+        print("\n  ✓  ALL TESTS PASSED — CAN is rock-solid!")
     else:
         failures = total_tests - total_pass
         print(f"\n  ✗  {failures} FAILURES detected — investigate above logs")

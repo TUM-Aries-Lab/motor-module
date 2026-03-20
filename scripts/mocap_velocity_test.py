@@ -60,7 +60,7 @@ from typing import Any
 from motor_python.base_motor import MotorState
 from motor_python.can_utils import get_can_state, reset_can_interface
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
-from motor_python.definitions import CAN_DEFAULTS, MOTOR_LIMITS
+from motor_python.definitions import CAN_DEFAULTS
 
 SEPARATOR = "=" * 84
 DEFAULT_SEQUENCE = "0:1.5,5000:2.5,7000:2.5,0:1.5,-5000:2.5,-7000:2.5,0:1.5"
@@ -348,11 +348,6 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--allow-low-speed",
-        action="store_true",
-        help="Allow non-zero commands below the 5000 ERPM safety floor.",
-    )
-    parser.add_argument(
         "--velocity-kd",
         type=float,
         default=CAN_DEFAULTS.mit_velocity_kd,
@@ -489,23 +484,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def validate_phases(phases: list[VelocityPhase], allow_low_speed: bool) -> None:
-    """Fail fast when the sequence violates the repo's low-speed safety rule."""
-    if allow_low_speed:
-        return
-
-    low_speed_phases = [
-        phase.command_erpm
-        for phase in phases
-        if 0 < abs(phase.command_erpm) < MOTOR_LIMITS.min_safe_velocity_erpm
-    ]
-    if low_speed_phases:
-        joined = ", ".join(str(value) for value in low_speed_phases)
-        raise ValueError(
-            f"Sequence contains low-speed phases below {MOTOR_LIMITS.min_safe_velocity_erpm} ERPM: {joined}. "
-            "Re-run with --allow-low-speed if this is intentional."
-        )
-
 
 def validate_args(args: argparse.Namespace) -> None:  # noqa: C901
     """Validate numeric runtime arguments."""
@@ -610,7 +588,6 @@ def command_velocity(
     motor: CubeMarsAK606v3CAN,
     phase: VelocityPhase,
     *,
-    allow_low_speed: bool,
     zero_mode: str,
 ) -> None:
     """Apply one phase command using the MIT velocity helper."""
@@ -628,7 +605,7 @@ def command_velocity(
             )
         return
 
-    motor.set_velocity(phase.command_erpm, allow_low_speed=allow_low_speed)
+    motor.set_velocity(phase.command_erpm)
 
 
 def _is_can_state_healthy(state: dict[str, Any]) -> bool:
@@ -1082,7 +1059,6 @@ def run_phase(
     command_velocity(
         motor,
         phase,
-        allow_low_speed=context.args.allow_low_speed,
         zero_mode=context.args.zero_mode,
     )
 
@@ -1217,7 +1193,6 @@ def main() -> int:
     args = parse_args()
     validate_args(args)
     parsed_phases = parse_sequence(args.sequence)
-    validate_phases(parsed_phases, args.allow_low_speed)
     phases = expand_transition_phases(
         parsed_phases,
         enable_auto_neutral=args.auto_neutral_on_sign_flip,

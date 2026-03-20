@@ -98,24 +98,15 @@ def test_check_communication_with_response(test_port, mock_response):
 # -- Velocity Safety --
 
 
-def test_low_velocity_blocked(test_port):
-    """Dangerously low velocities are blocked by default."""
-    with patch("motor_python.cube_mars_motor.serial.Serial") as mock_serial:
-        mock_serial.return_value = MagicMock()
-        motor = CubeMarsAK606v3(port=test_port)
-        with pytest.raises(ValueError, match="below safe threshold"):
-            motor.set_velocity(velocity_erpm=LOW_VELOCITY_ERPM)
-
-
-def test_low_velocity_allowed_with_flag(test_port):
-    """Low velocity works with allow_low_speed=True."""
+def test_low_velocity_accepted(test_port):
+    """Low velocity is accepted without restriction."""
     with patch("motor_python.cube_mars_motor.serial.Serial") as mock_serial:
         mock_instance = MagicMock()
         mock_instance.in_waiting = 0
         mock_serial.return_value = mock_instance
         motor = CubeMarsAK606v3(port=test_port)
         # Should not raise an exception
-        motor.set_velocity(velocity_erpm=LOW_VELOCITY_ERPM, allow_low_speed=True)
+        motor.set_velocity(velocity_erpm=LOW_VELOCITY_ERPM)
         # Verify that serial write was called (command was sent)
         assert mock_instance.write.called, "set_velocity should send command to motor"
 

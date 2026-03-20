@@ -399,7 +399,8 @@ _WARN_INTERVAL = 1.0                  # seconds between repeated warnings for sa
 
 def _check_safety_warn(fw_delta: float, phys: float) -> None:
     """Print a non-fatal warning when within SAFETY_WARN_MARGIN of any limit.
-    Rate-limited to _WARN_INTERVAL seconds per limit to avoid log floods."""
+    Rate-limited to _WARN_INTERVAL seconds per limit to avoid log floods.
+    """
     now = time.monotonic()
 
     def _emit(key: str, msg: str) -> None:
@@ -576,7 +577,7 @@ def sine_sweep_ff(
         f"\n  >> PENDULUM  +/-{SINE_AMP} deg around 0 deg  "
         f"period={SINE_PERIOD}s  duration={SINE_DURATION}s"
     )
-    print(f"     Mode: pure feedforward -- NO position loop")
+    print("     Mode: pure feedforward -- NO position loop")
     print(f"     Peak v_ff = {peak_vel} ERPM  (ERPM_PER_PHYS_DEG_S={ERPM_PER_PHYS_DEG_S})")
 
     while True:
@@ -776,9 +777,7 @@ def print_summary(csv_path: Path) -> None:
         vels  = [abs(int(r["vel_cmd_erpm"])) for r in lrows]
         n = len(lrows)
         print(
-            "  {:<18s}  {:>5d}  {:>7.2f} deg  {:>6.2f} deg  {:>9d}  {:>10d}".format(
-                lbl, n, sum(errs) / n, max(errs), max(erpms), max(vels)
-            )
+            f"  {lbl:<18s}  {n:>5d}  {sum(errs) / n:>7.2f} deg  {max(errs):>6.2f} deg  {max(erpms):>9d}  {max(vels):>10d}"
         )
     print("=" * 76)
     dur = float(rows[-1]["time_s"]) - float(rows[0]["time_s"])

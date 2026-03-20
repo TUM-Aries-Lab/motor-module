@@ -122,7 +122,7 @@ def main() -> None:
         # ── 8. set_velocity — ACK-ONLY on this firmware ────────────────────
         section("8. set_velocity()  [ACK-ONLY — no shaft rotation on this firmware]")
         print("  Sending velocity command (5000 ERPM) — expect no movement ...")
-        motor.set_velocity(velocity_erpm=5000, allow_low_speed=True)
+        motor.set_velocity(velocity_erpm=5000)
         time.sleep(0.5)
         fb_vel = motor.get_status()
         if fb_vel:

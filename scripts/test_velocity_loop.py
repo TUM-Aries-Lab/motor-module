@@ -133,7 +133,8 @@ def send_raw(bus: can.BusABC, arb_id: int, data: bytes) -> bool:
 
 def recv_feedback(bus: can.BusABC, deadline_s: float) -> list[tuple[int, Feedback | None]]:
     """Collect ALL extended frames until deadline_s.  Returns (arb_id, Feedback|None).
-    Feedback is decoded when arb_id == ARB_FEEDBACK; otherwise None with arb_id logged."""
+    Feedback is decoded when arb_id == ARB_FEEDBACK; otherwise None with arb_id logged.
+    """
     replies: list[tuple[int, Feedback | None]] = []
     while True:
         remaining = deadline_s - time.monotonic()
@@ -230,7 +231,7 @@ def main() -> None:
     print("  CubeMars AK60-6 v3 — velocity loop (0x0303) test")
     print(f"  Motor 0x{MOTOR_ID:02X}  interface={INTERFACE}  test_erpm=±{erpm_mag}")
     print("=" * 60)
-    print(f"\n  arb_id map:")
+    print("\n  arb_id map:")
     print(f"    keepalive / enable : 0x{ARB_ENABLE:04X}")
     print(f"    velocity command   : 0x{ARB_VELOCITY:04X}  ← under test")
     print(f"    feedback replies   : 0x{ARB_FEEDBACK:04X}")

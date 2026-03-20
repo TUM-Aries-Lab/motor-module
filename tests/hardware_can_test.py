@@ -105,12 +105,6 @@ def test_set_velocity_sends_and_gets_feedback(motor: CubeMarsAK606v3CAN) -> None
         motor.stop()
 
 
-def test_low_velocity_blocked(motor: CubeMarsAK606v3CAN) -> None:
-    """Velocities below the safe threshold raise ValueError (safety guard)."""
-    with pytest.raises(ValueError, match="below safe threshold"):
-        motor.set_velocity(velocity_erpm=100)
-
-
 # ---------------------------------------------------------------------------
 # 4. Motor actually spins — forward and reverse
 # ---------------------------------------------------------------------------

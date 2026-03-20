@@ -75,7 +75,7 @@ def main() -> None:
 
         print(f"\nTesting velocity control ({args.velocity_erpm} ERPM)...")
         for i in range(30):
-            motor.set_velocity(args.velocity_erpm, allow_low_speed=False)
+            motor.set_velocity(args.velocity_erpm)
             feedback = motor._receive_feedback(timeout=0.1)
             time.sleep(0.05)
 
@@ -87,7 +87,7 @@ def main() -> None:
                 )
 
         print("\nStopping motor...")
-        motor.set_velocity(0, allow_low_speed=True)
+        motor.set_velocity(0)
         time.sleep(0.5)
 
         print("Disabling motor...")

@@ -91,30 +91,39 @@ checks feedback sign/magnitude against the command, and prints strict PASS/FAIL.
 ---
 
 ### `mit_position_steps.py`
-Single-motor MIT position stepping sequence for controller bring-up.
-Default run sends `set_position()` targets every 30° for 120 seconds, bouncing
-between `-90°` and `+90°`.
-
-- Default profile is **helper** (stable `set_position()` stepping).
-- Optional `--mode snappy` uses fast MIT `kp/kd` stepping.
-- Optional `--mode smooth` enables speed/acceleration-limited interpolation.
-- Start target is auto-aligned to live feedback position to avoid a large first jump.
-- Use `--mode helper` for original stable `set_position()` stepping behavior.
+Long-run MIT position stepping script (ping-pong inside a safe angle window) so it can run for motion capture without hitting MIT position limits.
+Primary knobs are still `--angle-deg`, `--duration`, and `--velocity-deg-s`.
 
 ```bash
-.venv/bin/python scripts/mit_position_steps.py --motor-id 0x03
-# quieter profile example:
-.venv/bin/python scripts/mit_position_steps.py --motor-id 0x03 --mode smooth --max-speed-deg-s 25 --max-accel-deg-s2 70
-# faster/snappier with extra damping:
-.venv/bin/python scripts/mit_position_steps.py --motor-id 0x03 --mode snappy --kp 75 --kd 3.4 --dwell-seconds 0.4
-# keep first large error safe, then stay snappy:
-.venv/bin/python scripts/mit_position_steps.py --motor-id 0x03 --mode snappy --kp 75 --kd 3.4 --kp-far-cap 40 --far-error-deg 25
-# If can0 is already configured and you don't want auto sudo reset:
-.venv/bin/python scripts/mit_position_steps.py --motor-id 0x03 --skip-preflight
+# 3-minute mocap run (default behavior):
+.venv/bin/python scripts/mit_position_steps.py --motor-id 0x03 --duration 180 --angle-deg 30 --velocity-deg-s 20
+
+# faster stepping:
+.venv/bin/python scripts/mit_position_steps.py --motor-id 0x03 --duration 180 --angle-deg 45 --velocity-deg-s 30
+
+# custom sweep window (stays away from MIT hard limits):
+.venv/bin/python scripts/mit_position_steps.py --motor-id 0x03 --duration 180 --angle-deg 30 --velocity-deg-s 20 --min-deg -600 --max-deg 600
+
+# If can0 is already configured and you don't want auto reset:
+.venv/bin/python scripts/mit_position_steps.py --motor-id 0x03 --duration 180 --angle-deg 30 --velocity-deg-s 20 --skip-preflight
 ```
 
-> `verify_set_velocity.py` and `mit_position_steps.py` now use the same kernel-level
-> reset path as `setup_can.sh` for auto preflight (`berr-reporting on`, `restart-ms 100`).
+> `mit_position_steps.py` uses the same kernel-level reset path as `setup_can.sh`
+> for auto preflight (`berr-reporting on`, `restart-ms 100`).
+
+---
+
+### `reset_degree.py`
+MIT-only practical reset helper: smoothly recenters the motor to a target degree
+(default `0`) in MIT command space.
+
+```bash
+.venv/bin/python scripts/reset_degree.py --motor-id 0x03 --target-deg 0
+# slower and gentler reset:
+.venv/bin/python scripts/reset_degree.py --motor-id 0x03 --target-deg 0 --velocity-deg-s 10 --control-hz 15
+# if can0 is already configured:
+.venv/bin/python scripts/reset_degree.py --motor-id 0x03 --target-deg 0 --skip-preflight
+```
 
 ---
 
@@ -171,11 +180,18 @@ and records the feedback to characterise which modes the firmware supports.
 ---
 
 ### `simple_test.py`
-Minimal smoke-test: enable → set_velocity(5000) → disable.
-Useful as a first-boot sanity check.
+Minimal velocity spin helper for one motor: command one ERPM for one duration, then stop.
+Use this when you only want to change speed and spin time quickly.
 
 ```bash
+# default quick run
 .venv/bin/python scripts/simple_test.py
+
+# set only speed and duration
+.venv/bin/python scripts/simple_test.py --velocity-erpm 4500 --duration 1.8
+
+# reverse direction
+.venv/bin/python scripts/simple_test.py --velocity-erpm -3000 --duration 1.2
 ```
 
 ---

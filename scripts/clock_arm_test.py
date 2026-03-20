@@ -159,16 +159,15 @@ def move_to(
                 motor.set_duty_cycle(0.0)
                 print()  # newline after \r
                 return pos, True
+        # MOVE phase: check for settle.
+        elif abs(error) < SETTLE_DEG and abs(speed) < SETTLE_ERPM:
+            if settled_at is None:
+                settled_at = tick
+            elif tick - settled_at >= SETTLE_TIME:
+                hold_end = tick + HOLD_TIME
+                print(f"\n    ✓  Settled at {pos:+.2f}°  (err={error:+.2f}°)  — holding {HOLD_TIME}s")
         else:
-            # MOVE phase: check for settle.
-            if abs(error) < SETTLE_DEG and abs(speed) < SETTLE_ERPM:
-                if settled_at is None:
-                    settled_at = tick
-                elif tick - settled_at >= SETTLE_TIME:
-                    hold_end = tick + HOLD_TIME
-                    print(f"\n    ✓  Settled at {pos:+.2f}°  (err={error:+.2f}°)  — holding {HOLD_TIME}s")
-            else:
-                settled_at = None
+            settled_at = None
 
         time.sleep(max(loop_dt - (time.monotonic() - tick), 0.005))
 
@@ -216,7 +215,7 @@ def run_phase(
         })
 
     # Return to origin after each phase.
-    print(f"\n  Returning to 0°...", flush=True)
+    print("\n  Returning to 0°...", flush=True)
     move_to(motor, 0.0, f"{label}:return", "ret", writer, t0)
     pos_after = motor.get_position()
     if pos_after is not None:
