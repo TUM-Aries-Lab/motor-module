@@ -20,7 +20,7 @@ from motor_python.definitions import (
 
 logger = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.hardware
+pytestmark = pytest.mark.hardware_uart
 
 
 def get_status_with_retry(
@@ -253,18 +253,10 @@ class TestExosuitSafety:
     """Test velocity safety thresholds and tendon control."""
 
     @pytest.mark.flaky(reruns=3, reruns_delay=1)
-    def test_low_velocity_blocked(self, motor: CubeMarsAK606v3) -> None:
-        """Velocities below 5000 ERPM raise ValueError by default."""
-        with pytest.raises(ValueError, match="below safe threshold"):
-            motor.set_velocity(velocity_erpm=100)
-
-    @pytest.mark.flaky(reruns=3, reruns_delay=1)
-    def test_low_velocity_allowed_with_flag(self, motor: CubeMarsAK606v3) -> None:
-        """Low velocity permitted when explicitly bypassed (no actual send)."""
-        # Only verify the flag doesn't raise - don't actually send to motor
-        # because low speeds cause oscillations/noise with firmware accel settings
+    def test_low_velocity_accepted(self, motor: CubeMarsAK606v3) -> None:
+        """Low velocity is accepted without restriction."""
         try:
-            motor.set_velocity(velocity_erpm=100, allow_low_speed=True)
+            motor.set_velocity(velocity_erpm=100)
         finally:
             motor.stop()
 

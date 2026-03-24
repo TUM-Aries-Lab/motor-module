@@ -75,15 +75,22 @@ def test_check_communication_no_response(test_port):
 
 def test_check_communication_with_response(test_port, mock_response):
     """check_communication returns True when motor responds."""
-    with patch("motor_python.cube_mars_motor.serial.Serial") as mock_serial:
+    with patch("motor_python.cube_mars_motor.serial.Serial"):
         mock_instance = MagicMock()
         mock_instance.in_waiting = 10
-        # Protocol frame: AA (start) | 05 (length) | 45 (CMD_GET_STATUS) | 00 00 00 00 (4-byte payload) | 12 34 (CRC16) | BB (end)
-        # Total: 1 + 1 + 5 (cmd + payload) + 2 + 1 = 10 bytes
-        # CRC is calculated over: length + cmd + payload bytes
-        mock_instance.read.return_value = b"\xaa\x05\x45\x00\x00\x00\x00\x12\x34\xbb"
-        mock_serial.return_value = mock_instance
         motor = CubeMarsAK606v3(port=test_port)
+        # Mock get_status directly instead of trying to perfectly spoof 70 bytes of payload
+        from motor_python.base_motor import MotorState
+
+        motor.get_status = MagicMock(
+            return_value=MotorState(
+                position_degrees=0.0,
+                speed_erpm=0,
+                current_amps=0.0,
+                temperature_celsius=0,
+                error_code=0,
+            )
+        )
         assert motor.check_communication()
         assert motor.communicating
 
@@ -91,24 +98,15 @@ def test_check_communication_with_response(test_port, mock_response):
 # -- Velocity Safety --
 
 
-def test_low_velocity_blocked(test_port):
-    """Dangerously low velocities are blocked by default."""
-    with patch("motor_python.cube_mars_motor.serial.Serial") as mock_serial:
-        mock_serial.return_value = MagicMock()
-        motor = CubeMarsAK606v3(port=test_port)
-        with pytest.raises(ValueError, match="below safe threshold"):
-            motor.set_velocity(velocity_erpm=LOW_VELOCITY_ERPM)
-
-
-def test_low_velocity_allowed_with_flag(test_port):
-    """Low velocity works with allow_low_speed=True."""
+def test_low_velocity_accepted(test_port):
+    """Low velocity is accepted without restriction."""
     with patch("motor_python.cube_mars_motor.serial.Serial") as mock_serial:
         mock_instance = MagicMock()
         mock_instance.in_waiting = 0
         mock_serial.return_value = mock_instance
         motor = CubeMarsAK606v3(port=test_port)
         # Should not raise an exception
-        motor.set_velocity(velocity_erpm=LOW_VELOCITY_ERPM, allow_low_speed=True)
+        motor.set_velocity(velocity_erpm=LOW_VELOCITY_ERPM)
         # Verify that serial write was called (command was sent)
         assert mock_instance.write.called, "set_velocity should send command to motor"
 
@@ -226,15 +224,15 @@ def test_set_position_zero(test_port):
         motor.set_position(position_degrees=0.0)
 
 
-def test_get_position_returns_bytes(test_port):
-    """get_position returns bytes from motor."""
+def test_get_position_returns_float(test_port):
+    """get_position returns float from motor (or None if unavailable)."""
     with patch("motor_python.cube_mars_motor.serial.Serial") as mock_serial:
         mock_instance = MagicMock()
         mock_instance.in_waiting = 0
         mock_serial.return_value = mock_instance
         motor = CubeMarsAK606v3(port=test_port)
         result = motor.get_position()
-        assert isinstance(result, bytes)
+        assert result is None or isinstance(result, float)
 
 
 def test_move_to_position_with_speed(test_port):
