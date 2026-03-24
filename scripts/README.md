@@ -72,11 +72,14 @@ Single-motor MIT protocol validation (CAN ID `0x03` by default). Exercises:
 
 ### `verify_set_velocity.py`
 Focused validation for the `set_velocity()` API only.
-It runs a short `+ERPM -> 0 -> -ERPM -> 0` sequence (or forward-only),
-checks feedback sign/magnitude against the command, and prints strict PASS/FAIL.
+It runs `start_ERPM -> 0 -> opposite_ERPM -> 0` (or start-direction only),
+checks feedback sign/magnitude against the command, prints strict PASS/FAIL,
+and logs each fresh feedback sample to CSV for mocap overlay.
 
 ```bash
 .venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03
+# Signed range: -5000..5000 (starts in given direction, then reverses unless --forward-only)
+.venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03 --velocity-erpm -5000
 # Skip automatic CAN reset if your interface is already configured:
 .venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03 --preflight-mode skip
 # Forward-only check:
@@ -86,6 +89,8 @@ checks feedback sign/magnitude against the command, and prints strict PASS/FAIL.
 .venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03 --feedback-can-id 0x2903
 # Reduce velocity-loop aggressiveness if the bus drops under load:
 .venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03 --velocity-kd 0.12
+# explicit CSV output path:
+.venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03 --csv-path data/csv_logs/verify_overlay.csv
 ```
 
 ---
@@ -93,6 +98,7 @@ checks feedback sign/magnitude against the command, and prints strict PASS/FAIL.
 ### `mit_position_steps.py`
 Long-run MIT position stepping script (ping-pong inside a safe angle window) so it can run for motion capture without hitting MIT position limits.
 Primary knobs are still `--angle-deg`, `--duration`, and `--velocity-deg-s`.
+Each command/feedback sample is also logged to CSV for direct comparison with mocap data.
 
 ```bash
 # 3-minute mocap run (default behavior):
@@ -106,6 +112,8 @@ Primary knobs are still `--angle-deg`, `--duration`, and `--velocity-deg-s`.
 
 # If can0 is already configured and you don't want auto reset:
 .venv/bin/python scripts/mit_position_steps.py --motor-id 0x03 --duration 180 --angle-deg 30 --velocity-deg-s 20 --skip-preflight
+# explicit CSV output path:
+.venv/bin/python scripts/mit_position_steps.py --motor-id 0x03 --duration 180 --angle-deg 30 --velocity-deg-s 20 --csv-path data/csv_logs/mit_overlay.csv
 ```
 
 > `mit_position_steps.py` uses the same kernel-level reset path as `setup_can.sh`

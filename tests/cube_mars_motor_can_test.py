@@ -177,6 +177,20 @@ class TestTransportRecovery:
         assert ok is True
         reconnect.assert_called_once()
 
+    def test_recover_bus_allows_warning_state_when_tx_is_viable(self, motor):
+        with (
+            patch.object(
+                motor,
+                "_read_can_state",
+                return_value={"state": "ERROR-WARNING", "tx_err": 0, "rx_err": 102},
+            ),
+            patch.object(motor, "_reconnect_transport") as reconnect,
+        ):
+            ok = motor._recover_bus_if_needed(reason="transmit")
+
+        assert ok is True
+        reconnect.assert_not_called()
+
 
 class TestMITCommandPath:
     def test_set_mit_mode_uses_force_control_id_and_payload(self, motor, mock_bus):

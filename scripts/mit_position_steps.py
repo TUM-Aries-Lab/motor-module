@@ -17,10 +17,13 @@ Example:
 from __future__ import annotations
 
 import argparse
+import csv
 import math
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 # Allow running as plain `python scripts/mit_position_steps.py` from repo root.
 if __package__ in {None, ""}:
@@ -41,13 +44,38 @@ MIN_TRAVEL_EPS_DEG = 0.5
 # ---------------------------------------------------------------------------
 # Quick settings (edit here if you prefer code-based tuning)
 # ---------------------------------------------------------------------------
-DEFAULT_ANGLE_DEG = 90.0
+DEFAULT_ANGLE_DEG = 50.0
 DEFAULT_DURATION_S = 180.0
 DEFAULT_VELOCITY_DEG_S = 100.0
-DEFAULT_TICK_PAUSE_S = 0.02
+DEFAULT_TICK_PAUSE_S = 0.5
 DEFAULT_CONTROL_HZ = 20.0
 DEFAULT_SWEEP_MIN_DEG = -650.0
 DEFAULT_SWEEP_MAX_DEG = 650.0
+
+CSV_FIELDNAMES = [
+    "wall_time_iso",
+    "wall_time_epoch_s",
+    "elapsed_s",
+    "tick_index",
+    "direction",
+    "command_position_deg",
+    "segment_target_deg",
+    "feedback_received",
+    "feedback_position_deg",
+    "feedback_speed_erpm",
+    "feedback_current_amps",
+    "feedback_temperature_c",
+    "feedback_error_code",
+    "feedback_error_description",
+]
+
+
+def _resolve_csv_path(csv_path_arg: str | None, *, prefix: str) -> Path:
+    """Resolve CSV path from CLI arg or generate a timestamped default path."""
+    if csv_path_arg:
+        return Path(csv_path_arg).expanduser().resolve()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return (Path("data/csv_logs") / f"{prefix}_{timestamp}.csv").resolve()
 
 
 def _clamp(value: float, min_value: float, max_value: float) -> float:
@@ -133,6 +161,12 @@ def _move_segment(  # noqa: PLR0913
     velocity_deg_s: float,
     control_hz: float,
     deadline: float,
+    tick_index: int,
+    direction: int,
+    segment_target_deg: float,
+    run_start: float,
+    log_sample: Callable[[float, int, int, float, float, MotorState | None], None]
+    | None = None,
 ) -> tuple[float, MotorState | None]:
     """Move one segment with smooth interpolation and bounded velocity."""
     segment_time = abs(delta_deg) / max(velocity_deg_s, 1e-9)
@@ -159,6 +193,15 @@ def _move_segment(  # noqa: PLR0913
         if last_status is not None and last_status.error_code != 0:
             raise RuntimeError(
                 f"Motor fault code {last_status.error_code}: {last_status.error_description}"
+            )
+        if log_sample is not None:
+            log_sample(
+                time.monotonic() - run_start,
+                tick_index,
+                direction,
+                cmd_deg,
+                segment_target_deg,
+                last_status,
             )
 
         next_tick += period_s
@@ -266,6 +309,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip automatic preflight reset.",
     )
+    parser.add_argument(
+        "--csv-path",
+        default=None,
+        help=(
+            "Output CSV path for command/feedback logging "
+            "(default: data/csv_logs/mit_position_steps_<timestamp>.csv)"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -295,6 +346,8 @@ def main() -> int:
         print("FAIL: --max-deg must be greater than --min-deg after MIT clamping")
         return 1
 
+    csv_path = _resolve_csv_path(args.csv_path, prefix="mit_position_steps")
+
     print(SEPARATOR)
     print("AK60-6 MIT Position Steps (Long Ping-Pong)")
     print(SEPARATOR)
@@ -307,6 +360,7 @@ def main() -> int:
     print(f"Tick pause           : {args.tick_pause:.2f} s")
     print(f"Control rate         : {args.control_hz:.1f} Hz")
     print(f"Sweep window         : [{safe_min:.2f}, {safe_max:.2f}] deg")
+    print(f"CSV log              : {csv_path}")
     print(f"Helper policy        : {args.helper_policy}")
     print(f"Legacy feedback IDs  : {args.allow_legacy_feedback_ids}")
     print(f"Preflight            : {'skip' if args.skip_preflight else 'auto-reset if needed'}")
@@ -319,7 +373,15 @@ def main() -> int:
         )
 
     motor: CubeMarsAK606v3CAN | None = None
+    csv_file = None
+    csv_writer: csv.DictWriter | None = None
+    run_start = 0.0
     try:
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        csv_file = csv_path.open("w", newline="", encoding="utf-8")
+        csv_writer = csv.DictWriter(csv_file, fieldnames=CSV_FIELDNAMES)
+        csv_writer.writeheader()
+
         if args.skip_preflight:
             state = get_can_state(args.interface)
             print(
@@ -380,6 +442,55 @@ def main() -> int:
         turnarounds = 0
         last_status = status0
 
+        def log_sample(
+            elapsed_s: float,
+            tick: int,
+            move_direction: int,
+            command_position_deg: float,
+            segment_target_deg: float,
+            status: MotorState | None,
+        ) -> None:
+            if csv_writer is None or csv_file is None:
+                return
+            now_epoch = time.time()
+            row = {
+                "wall_time_iso": datetime.fromtimestamp(now_epoch).isoformat(
+                    timespec="milliseconds"
+                ),
+                "wall_time_epoch_s": f"{now_epoch:.6f}",
+                "elapsed_s": f"{elapsed_s:.6f}",
+                "tick_index": tick,
+                "direction": 1 if move_direction >= 0 else -1,
+                "command_position_deg": f"{command_position_deg:.6f}",
+                "segment_target_deg": f"{segment_target_deg:.6f}",
+                "feedback_received": int(status is not None),
+                "feedback_position_deg": (
+                    "" if status is None else f"{status.position_degrees:.6f}"
+                ),
+                "feedback_speed_erpm": "" if status is None else status.speed_erpm,
+                "feedback_current_amps": (
+                    "" if status is None else f"{status.current_amps:.6f}"
+                ),
+                "feedback_temperature_c": (
+                    "" if status is None else status.temperature_celsius
+                ),
+                "feedback_error_code": "" if status is None else status.error_code,
+                "feedback_error_description": (
+                    "" if status is None else status.error_description
+                ),
+            }
+            csv_writer.writerow(row)
+            csv_file.flush()
+
+        log_sample(
+            elapsed_s=0.0,
+            tick=0,
+            move_direction=direction,
+            command_position_deg=current_cmd_deg,
+            segment_target_deg=current_cmd_deg,
+            status=status0,
+        )
+
         while time.monotonic() < deadline:
             remaining_s = deadline - time.monotonic()
             if remaining_s <= 0:
@@ -413,6 +524,11 @@ def main() -> int:
                 velocity_deg_s=args.velocity_deg_s,
                 control_hz=args.control_hz,
                 deadline=deadline,
+                tick_index=tick_index,
+                direction=direction,
+                segment_target_deg=next_target_deg,
+                run_start=run_start,
+                log_sample=log_sample,
             )
 
             if status is not None and status.error_code != 0:
@@ -445,6 +561,7 @@ def main() -> int:
         print(f"Ticks sent            : {tick_index}")
         print(f"Turnarounds           : {turnarounds}")
         print(f"Final command pos     : {current_cmd_deg:.2f} deg")
+        print(f"CSV saved             : {csv_path}")
         return 0
 
     except KeyboardInterrupt:
@@ -454,6 +571,11 @@ def main() -> int:
         print(f"\nFAIL: {exc}")
         return 1
     finally:
+        if csv_file is not None:
+            try:
+                csv_file.close()
+            except Exception:
+                pass
         if motor is not None:
             try:
                 motor.stop()

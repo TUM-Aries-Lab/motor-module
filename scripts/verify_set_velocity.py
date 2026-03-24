@@ -17,8 +17,12 @@ Run:
 from __future__ import annotations
 
 import argparse
+import csv
 import time
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Callable
 
 from motor_python.base_motor import MotorState
 from motor_python.can_utils import get_can_state, reset_can_interface
@@ -28,6 +32,33 @@ from motor_python.definitions import CAN_DEFAULTS
 SEPARATOR = "=" * 78
 HEALTHY_TX_ERR_MAX = 96
 HEALTHY_RX_ERR_MAX = 64
+VERIFY_VELOCITY_MIN_ERPM = -5000
+VERIFY_VELOCITY_MAX_ERPM = 5000
+
+CSV_FIELDNAMES = [
+    "wall_time_iso",
+    "wall_time_epoch_s",
+    "elapsed_s",
+    "phase_index",
+    "phase_command_erpm",
+    "phase_duration_s",
+    "sample_index",
+    "command_erpm",
+    "feedback_position_deg",
+    "feedback_speed_erpm",
+    "feedback_current_amps",
+    "feedback_temperature_c",
+    "feedback_error_code",
+    "feedback_error_description",
+]
+
+
+def _resolve_csv_path(csv_path_arg: str | None, *, prefix: str) -> Path:
+    """Resolve CSV path from CLI arg or generate a timestamped default path."""
+    if csv_path_arg:
+        return Path(csv_path_arg).expanduser().resolve()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return (Path("data/csv_logs") / f"{prefix}_{timestamp}.csv").resolve()
 
 
 @dataclass(frozen=True)
@@ -90,8 +121,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--velocity-erpm",
         type=int,
-        default=3000,
-        help="Test velocity magnitude in ERPM (default: 1000)",
+        default=1000,
+        help="Test start velocity in ERPM (range: -5000..5000, default: 1000)",
     )
     parser.add_argument(
         "--velocity-kd",
@@ -103,7 +134,7 @@ def parse_args() -> argparse.Namespace:
         "--phase-seconds",
         type=float,
         default=120.0,
-        help="Duration for the script (default: 2.0)",
+        help="Duration for each velocity phase in seconds (default: 120.0)",
     )
     parser.add_argument(
         "--neutral-seconds",
@@ -147,7 +178,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--forward-only",
         action="store_true",
-        help="Only verify the positive direction (+ERPM, then neutral).",
+        help="Only verify the commanded start direction (--velocity-erpm sign), then neutral.",
+    )
+    parser.add_argument(
+        "--csv-path",
+        default=None,
+        help=(
+            "Output CSV path for feedback logging "
+            "(default: data/csv_logs/verify_set_velocity_<timestamp>.csv)"
+        ),
     )
     return parser.parse_args()
 
@@ -172,7 +211,12 @@ def validate_args(args: argparse.Namespace) -> None:  # noqa: C901
         raise ValueError("--max-missed-feedback must be >= 1")
     if args.velocity_kd < 0:
         raise ValueError("--velocity-kd must be >= 0")
-    if int(args.velocity_erpm) == 0:
+    velocity_cmd = int(args.velocity_erpm)
+    if velocity_cmd < VERIFY_VELOCITY_MIN_ERPM or velocity_cmd > VERIFY_VELOCITY_MAX_ERPM:
+        raise ValueError(
+            f"--velocity-erpm must be in [{VERIFY_VELOCITY_MIN_ERPM}, {VERIFY_VELOCITY_MAX_ERPM}]"
+        )
+    if velocity_cmd == 0:
         raise ValueError("--velocity-erpm must be non-zero")
 
 
@@ -258,6 +302,7 @@ def _sign(value: float) -> int:
 def run_phase(  # noqa: PLR0913
     motor: CubeMarsAK606v3CAN,
     *,
+    phase_index: int,
     command_erpm: int,
     duration_s: float,
     sample_hz: float,
@@ -265,6 +310,8 @@ def run_phase(  # noqa: PLR0913
     min_sign_match_ratio: float,
     min_informative_samples: int,
     max_missed_feedback: int,
+    run_start: float,
+    sample_logger: Callable[[dict[str, str | int]], None] | None = None,
 ) -> PhaseResult:
     """Execute a velocity phase and evaluate speed feedback quality."""
     _command_phase(motor, command_erpm)
@@ -274,6 +321,7 @@ def run_phase(  # noqa: PLR0913
     speeds: list[int] = []
     missed = 0
     last_feedback_ts = float(getattr(motor, "_last_feedback_monotonic", 0.0))
+    sample_index = 0
 
     while time.monotonic() < t_end:
         transport_fault = getattr(motor, "_transport_fault", None)
@@ -302,6 +350,29 @@ def run_phase(  # noqa: PLR0913
             )
 
         speeds.append(status.speed_erpm)
+        sample_index += 1
+        if sample_logger is not None:
+            now_epoch = time.time()
+            sample_logger(
+                {
+                    "wall_time_iso": datetime.fromtimestamp(now_epoch).isoformat(
+                        timespec="milliseconds"
+                    ),
+                    "wall_time_epoch_s": f"{now_epoch:.6f}",
+                    "elapsed_s": f"{(time.monotonic() - run_start):.6f}",
+                    "phase_index": phase_index,
+                    "phase_command_erpm": command_erpm,
+                    "phase_duration_s": f"{duration_s:.6f}",
+                    "sample_index": sample_index,
+                    "command_erpm": command_erpm,
+                    "feedback_position_deg": f"{status.position_degrees:.6f}",
+                    "feedback_speed_erpm": status.speed_erpm,
+                    "feedback_current_amps": f"{status.current_amps:.6f}",
+                    "feedback_temperature_c": status.temperature_celsius,
+                    "feedback_error_code": status.error_code,
+                    "feedback_error_description": status.error_description,
+                }
+            )
         time.sleep(period_s)
 
     abs_threshold = abs(min_informative_erpm)
@@ -358,14 +429,16 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
     args = parse_args()
     validate_args(args)
 
-    velocity_mag = abs(int(args.velocity_erpm))
-    sequence: list[tuple[int, float]] = [(velocity_mag, args.phase_seconds)]
+    velocity_cmd = int(args.velocity_erpm)
+    sequence: list[tuple[int, float]] = [(velocity_cmd, args.phase_seconds)]
     if args.neutral_seconds > 0:
         sequence.append((0, args.neutral_seconds))
     if not args.forward_only:
-        sequence.append((-velocity_mag, args.phase_seconds))
+        sequence.append((-velocity_cmd, args.phase_seconds))
         if args.neutral_seconds > 0:
             sequence.append((0, args.neutral_seconds))
+
+    csv_path = _resolve_csv_path(args.csv_path, prefix="verify_set_velocity")
 
     print(SEPARATOR)
     print("Verify set_velocity()")
@@ -377,18 +450,34 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
     print(f"Legacy IDs     : {args.allow_legacy_feedback_ids}")
     if args.feedback_can_id is not None:
         print(f"Feedback CAN ID: 0x{args.feedback_can_id:08X}")
-    print(f"Velocity test  : ±{velocity_mag} ERPM")
+    print(f"Velocity start : {velocity_cmd:+d} ERPM")
+    print(f"Velocity range : [{VERIFY_VELOCITY_MIN_ERPM}, {VERIFY_VELOCITY_MAX_ERPM}] ERPM")
     print(f"Velocity KD    : {args.velocity_kd:.3f}")
     print(f"Forward only   : {args.forward_only}")
     print(f"Sequence       : {sequence}")
     print(f"Preflight mode : {args.preflight_mode}")
+    print(f"CSV log        : {csv_path}")
     print(SEPARATOR)
 
     ensure_can_ready(args.interface, bitrate=args.bitrate, mode=args.preflight_mode)
 
     motor: CubeMarsAK606v3CAN | None = None
+    csv_file = None
+    csv_writer: csv.DictWriter | None = None
+    run_start = 0.0
     results: list[PhaseResult] = []
     try:
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        csv_file = csv_path.open("w", newline="", encoding="utf-8")
+        csv_writer = csv.DictWriter(csv_file, fieldnames=CSV_FIELDNAMES)
+        csv_writer.writeheader()
+
+        def write_sample_row(row: dict[str, str | int]) -> None:
+            if csv_writer is None or csv_file is None:
+                return
+            csv_writer.writerow(row)
+            csv_file.flush()
+
         motor = CubeMarsAK606v3CAN(
             motor_can_id=args.motor_id,
             interface=args.interface,
@@ -408,11 +497,13 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
 
         print("PASS: communication check")
         print("\nRunning verification phases...")
+        run_start = time.monotonic()
 
-        for command_erpm, duration_s in sequence:
+        for phase_index, (command_erpm, duration_s) in enumerate(sequence, start=1):
             print(f"\nPhase: cmd={command_erpm:+d} ERPM for {duration_s:.2f} s")
             result = run_phase(
                 motor,
+                phase_index=phase_index,
                 command_erpm=command_erpm,
                 duration_s=duration_s,
                 sample_hz=args.sample_hz,
@@ -420,6 +511,8 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
                 min_sign_match_ratio=args.min_sign_match_ratio,
                 min_informative_samples=args.min_informative_samples,
                 max_missed_feedback=args.max_missed_feedback,
+                run_start=run_start,
+                sample_logger=write_sample_row,
             )
             results.append(result)
             print_phase_result(result)
@@ -431,10 +524,12 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
             for result in failed:
                 print_phase_result(result)
             print(SEPARATOR)
+            print(f"CSV saved to: {csv_path}")
             return 1
 
         print("PASS: set_velocity verification passed")
         print(SEPARATOR)
+        print(f"CSV saved to: {csv_path}")
         return 0
     except KeyboardInterrupt:
         print("\nInterrupted by user")
@@ -443,6 +538,11 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
         print(f"\nFAIL: {exc}")
         return 1
     finally:
+        if csv_file is not None:
+            try:
+                csv_file.close()
+            except Exception as exc:  # pragma: no cover - cleanup path
+                print(f"WARN: CSV close failed during cleanup: {exc}")
         if motor is not None:
             try:
                 motor.close()

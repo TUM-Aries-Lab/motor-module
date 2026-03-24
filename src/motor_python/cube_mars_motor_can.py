@@ -329,12 +329,20 @@ class CubeMarsAK606v3CAN(BaseMotor):
             return tx_err >= 96 or rx_err >= 96
         return status != "ERROR-ACTIVE" or tx_err >= 96 or rx_err >= 96
 
+    @staticmethod
+    def _can_tx_viable_in_degraded_state(state: dict[str, int | str]) -> bool:
+        """Return True when transmit can proceed despite degraded CAN state."""
+        status = str(state.get("state", "UNKNOWN"))
+        tx_err = int(state.get("tx_err", 0))
+        return status != "BUS-OFF" and tx_err < 128
+
     def _recover_bus_if_needed(self, reason: str) -> bool:
         """Recover CAN transport when controller state is unhealthy.
 
-        Runtime behavior is intentionally conservative:
-        - Never keep transmitting on an unhealthy CAN controller state.
-        - Attempt reconnect/reset and proceed only after ERROR-ACTIVE recovery.
+        Runtime behavior balances safety and continuity:
+        - BUS-OFF or high transmit-error states are treated as hard faults.
+        - WARNING/PASSIVE states with low tx_err may continue transmitting while
+          recovery is attempted opportunistically.
         """
         can_state = self._read_can_state()
         if not self._is_unhealthy_bus_state(can_state):
@@ -352,9 +360,11 @@ class CubeMarsAK606v3CAN(BaseMotor):
         if not self._auto_recover_bus:
             return False
 
-        # In passive/warning states, additional transmit/reconnect churn can worsen
-        # the condition. Fail fast and let caller stop commanding motion.
+        # In passive/warning states, reconnect churn can worsen short-lived
+        # disturbances. If TX is still viable, keep commands flowing.
         if status in {"ERROR-PASSIVE", "ERROR-WARNING"}:
+            if self._can_tx_viable_in_degraded_state(can_state):
+                return True
             return False
 
         if status == "BUS-OFF":
@@ -367,7 +377,9 @@ class CubeMarsAK606v3CAN(BaseMotor):
                 f"CAN transport reconnected: state={recovered['state']} "
                 f"tx_err={recovered['tx_err']} rx_err={recovered['rx_err']}"
             )
-            return not self._is_unhealthy_bus_state(recovered)
+            return not self._is_unhealthy_bus_state(
+                recovered
+            ) or self._can_tx_viable_in_degraded_state(recovered)
 
         if self._aggressive_bus_reset and status == "BUS-OFF":
             logger.warning("Attempting aggressive kernel-level CAN reset")
@@ -380,7 +392,9 @@ class CubeMarsAK606v3CAN(BaseMotor):
                     f"CAN recovered after aggressive reset: state={recovered['state']} "
                     f"tx_err={recovered['tx_err']} rx_err={recovered['rx_err']}"
                 )
-                return not self._is_unhealthy_bus_state(recovered)
+                return not self._is_unhealthy_bus_state(
+                    recovered
+                ) or self._can_tx_viable_in_degraded_state(recovered)
             logger.error("Aggressive CAN reset failed")
             return False
 
@@ -476,7 +490,9 @@ class CubeMarsAK606v3CAN(BaseMotor):
                         logger.warning(
                             "SocketCAN transport recovery failed; continuing retries"
                         )
-                        if self._is_unhealthy_bus_state(can_state):
+                        if self._is_unhealthy_bus_state(
+                            can_state
+                        ) and not self._can_tx_viable_in_degraded_state(can_state):
                             break
 
                 if attempt < CAN_DEFAULTS.max_retries:
@@ -501,7 +517,9 @@ class CubeMarsAK606v3CAN(BaseMotor):
                         logger.info(
                             "SocketCAN transport recovered after unexpected exception; retrying transmit"
                         )
-                    elif self._is_unhealthy_bus_state(can_state):
+                    elif self._is_unhealthy_bus_state(
+                        can_state
+                    ) and not self._can_tx_viable_in_degraded_state(can_state):
                         break
                 if attempt < CAN_DEFAULTS.max_retries:
                     time.sleep(self._send_retry_backoff * attempt)
