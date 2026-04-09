@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import importlib.util
 import sys
 from pathlib import Path
@@ -22,19 +23,113 @@ def _load_script_module():
     return module
 
 
-def test_resolve_position_pairs_maps_90_to_position90_new() -> None:
+def _write_csv(path: Path, header: list[str], rows: list[list[object]]) -> None:
+    """Write a small CSV fixture file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(header)
+        writer.writerows(rows)
+
+
+def _write_position_motor_csv(path: Path) -> None:
+    """Create a minimal MIT position-step motor CSV."""
+    _write_csv(
+        path,
+        [
+            "elapsed_s",
+            "tick_index",
+            "direction",
+            "command_position_deg",
+            "segment_target_deg",
+            "feedback_received",
+            "feedback_position_deg",
+            "feedback_speed_erpm",
+        ],
+        [
+            [0.0, 0, 1, 22.0, 30.0, 1, 22.0, 120.0],
+            [0.5, 1, 1, 28.0, 30.0, 1, 27.5, 130.0],
+            [1.0, 2, 1, 34.0, 30.0, 1, 33.0, 140.0],
+        ],
+    )
+
+
+def _write_velocity_motor_csv(path: Path) -> None:
+    """Create a minimal MIT velocity-validation motor CSV."""
+    _write_csv(
+        path,
+        [
+            "elapsed_s",
+            "phase_index",
+            "phase_command_erpm",
+            "command_erpm",
+            "feedback_position_deg",
+            "feedback_speed_erpm",
+        ],
+        [
+            [0.0, 0, 1000, 1000, 10.0, 1000.0],
+            [0.5, 0, 1000, 1000, 20.0, 1270.0],
+            [1.0, 0, 1000, 1000, 30.0, 1400.0],
+        ],
+    )
+
+
+def _write_mocap_csv(path: Path) -> None:
+    """Create a minimal Vicon-style raw mocap CSV with a small preamble."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        handle.write("Trajectory export\n")
+        handle.write("Frame,Sub Frame,RX,RY,RZ,TX,TY,TZ\n")
+        handle.write("units,,deg,deg,deg,mm,mm,mm\n")
+        writer = csv.writer(handle)
+        writer.writerow([1, 0, 0.0, 0.0, 90.0071, 1.0, 2.0, 3.0])
+        writer.writerow([2, 0, 0.2, 0.1, 90.2071, 1.5, 2.5, 3.5])
+        writer.writerow([3, 0, 0.4, 0.1, 90.4071, 2.0, 3.0, 4.0])
+
+
+def _make_curated_data_root(tmp_path: Path) -> Path:
+    """Create a tiny curated data root used by resolve_* tests."""
+    data_root = tmp_path / "CSV"
+    motion_root = data_root / "motion-capture-data"
+    for name in (
+        "mit_position_steps_30.csv",
+        "mit_position_steps_50.csv",
+        "mit_position_steps_90.csv",
+    ):
+        _write_position_motor_csv(data_root / name)
+    for name in (
+        "verify_set_velocity_1000.csv",
+        "verify_set_velocity_3000.csv",
+        "verify_set_velocity_5000.csv",
+    ):
+        _write_velocity_motor_csv(data_root / name)
+    for name in (
+        "position30.csv",
+        "position50.csv",
+        "position90_new.csv",
+        "velo1000.csv",
+        "velo3000.csv",
+        "velo5000.csv",
+    ):
+        _write_mocap_csv(motion_root / name)
+    return data_root
+
+
+def test_resolve_position_pairs_maps_90_to_position90_new(tmp_path: Path) -> None:
     """The strict curated mapping should use the *_new file for 90 degrees."""
     module = _load_script_module()
-    pairs = module.resolve_position_pairs(Path("CSV"), targets=[90])
+    data_root = _make_curated_data_root(tmp_path)
+    pairs = module.resolve_position_pairs(data_root, targets=[90])
     assert len(pairs) == 1
     assert pairs[0].motor_csv.name == "mit_position_steps_90.csv"
     assert pairs[0].mocap_csv.name == "position90_new.csv"
 
 
-def test_resolve_velocity_pairs_maps_known_speed_files() -> None:
+def test_resolve_velocity_pairs_maps_known_speed_files(tmp_path: Path) -> None:
     """Velocity pairing should use the curated verify/velo filenames."""
     module = _load_script_module()
-    pairs = module.resolve_velocity_pairs(Path("CSV"), speeds=[1000, 5000])
+    data_root = _make_curated_data_root(tmp_path)
+    pairs = module.resolve_velocity_pairs(data_root, speeds=[1000, 5000])
     assert [pair.motor_csv.name for pair in pairs] == [
         "verify_set_velocity_1000.csv",
         "verify_set_velocity_5000.csv",
@@ -45,41 +140,67 @@ def test_resolve_velocity_pairs_maps_known_speed_files() -> None:
     ]
 
 
-def test_load_motor_position_csv_reads_expected_columns() -> None:
+def test_load_motor_position_csv_reads_expected_columns(tmp_path: Path) -> None:
     """Motor position CSV parsing should expose the MIT position columns."""
     module = _load_script_module()
-    data = module.load_motor_position_csv(Path("CSV/mit_position_steps_30.csv"))
-    assert len(data.elapsed_s) > 100
+    csv_path = tmp_path / "mit_position_steps_30.csv"
+    _write_position_motor_csv(csv_path)
+    data = module.load_motor_position_csv(csv_path)
+    assert len(data.elapsed_s) == 3
     assert data.feedback_received.dtype == np.int64
     assert data.elapsed_s[0] == 0.0
     assert data.command_position_deg[0] == 22.0
     assert data.feedback_position_deg[0] == 22.0
 
 
-def test_load_motor_velocity_csv_computes_mechanical_speed() -> None:
+def test_load_motor_velocity_csv_computes_mechanical_speed(tmp_path: Path) -> None:
     """Motor velocity parsing should convert ERPM to mechanical deg/s."""
     module = _load_script_module()
-    data = module.load_motor_velocity_csv(Path("CSV/verify_set_velocity_1000.csv"))
-    assert len(data.elapsed_s) > 100
-    assert data.feedback_speed_erpm[6] == 1270.0
-    expected = data.feedback_speed_erpm[6] * module.MECH_DEG_PER_SEC_PER_ERPM
-    assert np.isclose(data.motor_mech_deg_s[6], expected)
+    csv_path = tmp_path / "verify_set_velocity_1000.csv"
+    _write_velocity_motor_csv(csv_path)
+    data = module.load_motor_velocity_csv(csv_path)
+    assert len(data.elapsed_s) == 3
+    assert data.feedback_speed_erpm[1] == 1270.0
+    expected = data.feedback_speed_erpm[1] * module.MECH_DEG_PER_SEC_PER_ERPM
+    assert np.isclose(data.motor_mech_deg_s[1], expected)
 
 
-def test_load_raw_mocap_csv_skips_preamble_and_units_rows() -> None:
+def test_load_raw_mocap_csv_skips_preamble_and_units_rows(tmp_path: Path) -> None:
     """Raw Vicon parsing should start at the first numeric frame row."""
     module = _load_script_module()
-    mocap = module.load_raw_mocap_csv(Path("CSV/motion-capture-data/position30.csv"))
-    assert len(mocap.frame) > 1000
+    mocap_path = tmp_path / "motion-capture-data" / "position30.csv"
+    _write_mocap_csv(mocap_path)
+    mocap = module.load_raw_mocap_csv(mocap_path)
+    assert len(mocap.frame) == 3
     assert mocap.frame[0] == 1.0
     assert mocap.sub_frame[0] == 0.0
     assert np.isclose(mocap.rz_deg[0], 90.0071)
 
 
-def test_find_position_segments_keeps_one_direction_windows() -> None:
+def test_find_position_segments_keeps_one_direction_windows(tmp_path: Path) -> None:
     """Retained segments should be trimmed one-direction windows with span."""
     module = _load_script_module()
-    motor = module.load_motor_position_csv(Path("CSV/mit_position_steps_30.csv"))
+    csv_path = tmp_path / "mit_position_steps_segments.csv"
+    rows = []
+    for index in range(9):
+        rows.append(
+            [index * 0.25, index, 1, float(index), 10.0, 1, float(index), 100.0]
+        )
+    _write_csv(
+        csv_path,
+        [
+            "elapsed_s",
+            "tick_index",
+            "direction",
+            "command_position_deg",
+            "segment_target_deg",
+            "feedback_received",
+            "feedback_position_deg",
+            "feedback_speed_erpm",
+        ],
+        rows,
+    )
+    motor = module.load_motor_position_csv(csv_path)
     segments = module.find_position_segments(
         motor,
         boundary_trim_s=0.25,
