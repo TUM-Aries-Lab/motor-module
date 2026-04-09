@@ -2,113 +2,200 @@
 [![Coverage Status](https://coveralls.io/repos/github/TUM-Aries-Lab/motor-module/badge.svg?branch=main)](https://coveralls.io/github/TUM-Aries-Lab/motor-module?branch=main)
 ![Docker Image CI](https://github.com/TUM-Aries-Lab/motor-module/actions/workflows/ci.yml/badge.svg)
 
-Velocity and position motor control for exosuit tendon systems (CubeMars AK60-6).
+Motor control for the CubeMars AK60-6 actuator module used in Aries soft-exosuit development.
 
-Current and duty cycle modes are removed -- they cause oscillations when combined
-with the firmware's high acceleration trap parameters.
+## Current Status
 
-## Install
+- Primary interface: CAN on Jetson Orin Nano via Linux SocketCAN
+- Current maintained CAN path: MIT-only control
+- Supported high-level helpers: `set_position()`, `set_velocity()`, `set_current()`, `stop()`
+- UART support remains available for compatibility and earlier bring-up workflows
+
+This repository is the motor-module codebase, not a full exosuit application. Its current focus is a modular actuator-control layer plus the bench-side scripts used to validate it.
+
+## Key Features
+
+- Transport-independent motor abstraction through `BaseMotor`
+- Maintained SocketCAN backend for the CubeMars AK60-6
+- MIT-only CAN control path with one consistent command model
+- Background command refresh, feedback decoding, cached state handling, and staged recovery
+- Bench-validation scripts for MIT mode, position stepping, velocity verification, and plotting
+
+## Installation
+
+For normal development, testing, and analysis:
 
 ```bash
-uv install motor_python
+uv sync --all-groups
+source .venv/bin/activate
 ```
 
-## Quick Start
+If you only want to install the package itself:
+
+```bash
+uv pip install -e .
+```
+
+## CAN Setup on Jetson Orin Nano
+
+### Recommended: systemd startup
+
+Install the tracked `can0.service` once so `can0` comes up automatically on boot:
+
+```bash
+sudo cp can0.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable can0.service
+sudo systemctl start can0.service
+```
+
+This brings `can0` up at 1 Mbps with bus-off auto-recovery.
+
+Useful checks:
+
+```bash
+systemctl status can0.service
+sudo systemctl restart can0.service
+ip -details link show can0
+```
+
+### Manual setup
+
+If you do not want to use the service, configure the interface manually:
+
+```bash
+sudo ./setup_can.sh
+```
+
+## Important Hardware Note
+
+If the R-Link / UART cable is connected to the motor, CAN commands may be silently ignored even though feedback frames are still visible on the bus. For CAN operation, disconnect the UART cable and then reset the CAN interface.
+
+## Recommended Workflow
+
+### 1. Confirm MIT/CAN communication
+
+```bash
+sudo ./setup_can.sh
+.venv/bin/python scripts/mit_mode_test.py --motor-id 0x03
+```
+
+### 2. Validate sustained velocity behavior
+
+```bash
+.venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03 --velocity-erpm 3000
+```
+
+### 3. Run repeated MIT position stepping
+
+```bash
+.venv/bin/python scripts/mit_position_steps.py --motor-id 0x03 --duration 180 --angle-deg 50 --velocity-deg-s 100
+```
+
+### 4. Generate comparison plots from recorded CSV files
+
+```bash
+.venv/bin/python scripts/plot_graph.py velocity --data-root CSV --out-dir CSV/plots
+.venv/bin/python scripts/plot_graph.py position --data-root CSV --out-dir CSV/plots
+```
+
+## Python API
+
+The default convenience alias is the CAN motor class:
 
 ```python
+from motor_python import Motor
+
+with Motor(motor_can_id=0x03) as motor:
+    motor.enable_mit_mode()
+    motor.set_velocity(3000)
+    motor.set_position(90.0)
+    motor.stop()
+```
+
+For direct access to the specific implementations:
+
+```python
+from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
 from motor_python.cube_mars_motor import CubeMarsAK606v3
-
-motor = CubeMarsAK606v3()
-
-# Velocity control
-motor.set_velocity(velocity_erpm=10000)   # Pull tendon
-motor.set_velocity(velocity_erpm=-8000)   # Release tendon
-motor.stop()                              # Stop (releases windings)
-
-# Position control (hip controller calculates target from IMU angle)
-motor.set_position(position_degrees=90.0)   # Go to 90 degrees
-motor.set_position(position_degrees=0.0)    # Return to home
-motor.get_position()                        # Read current position
-
-# Combined: move to position at a given speed
-motor.move_to_position_with_speed(target_degrees=180.0, motor_speed_erpm=6000)
-
-# Tendon helper
-motor.control_exosuit_tendon(action="pull", velocity_erpm=10000)
-motor.control_exosuit_tendon(action="release", velocity_erpm=8000)
-motor.control_exosuit_tendon(action="stop")
 ```
 
-## Publishing
+### Main CAN lifecycle methods
 
-It's super easy to publish your own packages on PyPi. To build and publish this package run:
-1. Update the version number in pyproject.toml and motor_python/__init__.py
-2. Commit your changes and add a git tag "<new.version.number>"
-3. Push the tag `git push --tag`
+| Method | Purpose |
+| --- | --- |
+| `enable_mit_mode()` | Enter MIT mode |
+| `disable_mit_mode()` | Exit MIT mode |
+| `check_communication()` | Verify that the motor responds on the bus |
+| `get_status()` | Return the latest cached `MotorState` |
+| `close()` | Stop and close transport resources |
 
-## API
+### Main CAN control methods
 
-| Method | Description |
-|--------|-------------|
-| `set_velocity(velocity_erpm, allow_low_speed=False)` | Set speed in ERPM |
-| `set_position(position_degrees)` | Set target position in degrees (unlimited for spool cable system) |
-| `get_position()` | Read current position from motor |
-| `move_to_position_with_speed(target_degrees, motor_speed_erpm)` | Move to position via velocity then hold |
-| `control_exosuit_tendon(action, velocity_erpm)` | Helper for pull / release / stop |
-| `stop()` | Stop the motor (current = 0, releases windings) |
-| `get_status()` | Query all motor parameters |
-| `check_communication()` | Verify motor is responding |
+| Method | Purpose |
+| --- | --- |
+| `set_position(position_degrees)` | MIT-backed position command |
+| `set_velocity(velocity_erpm, allow_low_speed=False)` | MIT-backed velocity command |
+| `set_current(current_amps)` | Interpreted as MIT torque feedforward |
+| `set_mit_mode(pos_rad, vel_rad_s, kp, kd, torque_ff_nm)` | Direct MIT command |
+| `stop()` | Neutral MIT command and disable |
 
-## Velocity Safety
+## Useful Bench Scripts
 
-**Minimum safe velocity: 5000 ERPM** (enforced by default).
+These are the maintained scripts that matter most for the current implementation:
 
-Below 5000 ERPM the firmware acceleration settings cause current oscillations,
-audible noise, and motor instability.
+| Script | Purpose |
+| --- | --- |
+| `scripts/mit_mode_test.py` | Focused MIT/CAN protocol validation |
+| `scripts/verify_set_velocity.py` | Bench verification of `set_velocity()` |
+| `scripts/mit_position_steps.py` | Long-run MIT position stepping for bench tests |
+| `scripts/plot_graph.py` | Chapter-4-style overlay and summary plots from recorded CSV files |
+| `scripts/diagnose_can.py` | CAN bus diagnostics and recovery support |
+| `scripts/scan_ids.py` | CAN ID discovery |
+| `scripts/reset_degree.py` | Practical MIT recentering helper |
 
-```python
-motor.set_velocity(velocity_erpm=10000)              # OK
-motor.set_velocity(velocity_erpm=100)                 # Raises ValueError
-motor.set_velocity(velocity_erpm=100, allow_low_speed=True)  # Bypass
-motor.set_velocity(velocity_erpm=0)                   # Stop always allowed
-```
-
-## Position Control
-
-**Range: Unlimited** - Motor can rotate continuously for spool-based cable systems.
-
-No artificial position limits. Suitable for applications requiring multiple rotations to wind cable.
-
-## Run
-
-```bash
-uv run python -m motor_python
-```
+Additional exploratory and legacy scripts remain under `scripts/`, but they are not the primary maintained validation path.
 
 ## Testing
 
+Run unit tests:
+
 ```bash
-make test            # Unit tests only (no hardware, uses mocks)
-make test-hardware   # All tests (unit + hardware, requires motor connected)
+make test
 ```
 
-Hardware tests are skipped automatically if the motor is not available.
+Run CAN hardware tests:
+
+```bash
+make test-hardware-can
+```
+
+Run all hardware tests:
+
+```bash
+make test-hardware-all
+```
 
 ## Project Structure
 
+```text
+can0.service                    systemd unit for automatic can0 startup
+setup_can.sh                    manual CAN setup and reset helper
+src/motor_python/               package source
+scripts/                        bench and validation scripts
+tests/                          unit and hardware-oriented tests
+data/csv_logs/.gitkeep          placeholder for locally generated CSV logs
+Test Rig CAD files/             CAD assets for the bench rig
 ```
-src/motor_python/
-    __init__.py
-    __main__.py           # Entry point (make app)
-    cube_mars_motor.py    # Motor controller class
-    definitions.py        # Constants and limits
-    examples.py           # Demo functions
-    motor_status_parser.py
-    utils.py
-tests/
-    conftest.py
-    cube_mars_motor_test.py   # Unit tests (mocked serial)
-    hardware_test.py          # Integration tests (real motor)
-    motor_status_parser_test.py
-    utils_test.py
+
+## Notes on Scope
+
+- The current CAN implementation is MIT-only.
+- Legacy servo transport modes are intentionally not part of the maintained CAN path.
+- The repository includes bench-validation tooling, but not thesis-only notes, temporary files, or local analysis artifacts.
+
+## Run the Package Entry Point
+
+```bash
+uv run python -m motor_python
 ```

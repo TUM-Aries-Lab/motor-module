@@ -170,3 +170,20 @@ cython_debug/
 *.egg-info
 
 /logs/log_*
+
+# Motion capture logs and plots
+data/logs/
+
+# Local thesis / working documents that should not go to main
+docs/*.md
+docs/**/*.md
+docs/*.tex
+docs/**/*.tex
+tmp/
+
+# Local analysis/workspace artifacts
+.codex
+CSV/
+data/csv_logs/*.csv
+!data/csv_logs/.gitkeep
+repo_tree.py
