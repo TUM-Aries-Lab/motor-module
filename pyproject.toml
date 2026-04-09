@@ -6,11 +6,13 @@ readme = "README.md"
 authors = [{ name = "Tsmorz", email = "tony.smoragiewicz@tum.de"},{ name = "Hannes Nguyen", email = "hannes.nguyen@tum.de" }]
 requires-python = ">=3.11,<3.14"
 
-# --- Core dependencies: NO hardware here ---
+# --- Core dependencies ---
+# The maintained path is the CAN backend, and tests import it in CI.
 dependencies = [
     "numpy>=2.2.3",
     "loguru>=0.7.3",
     "pyserial>=3.5",
+    "python-can>=4.4.0",
 ]
 
 [dependency-groups]
@@ -25,7 +27,6 @@ dev = [
   "pyright>=1.1.407",
 ]
 hw = [
-  "python-can>=4.4.0",
 ]
 analysis = [
   "matplotlib>=3.9",

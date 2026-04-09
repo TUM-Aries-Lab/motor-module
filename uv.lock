@@ -507,6 +507,7 @@ dependencies = [
     { name = "loguru" },
     { name = "numpy" },
     { name = "pyserial" },
+    { name = "python-can" },
 ]
 
 [package.dev-dependencies]
@@ -524,15 +525,13 @@ dev = [
     { name = "pytest-rerunfailures" },
     { name = "ruff" },
 ]
-hw = [
-    { name = "python-can" },
-]
 
 [package.metadata]
 requires-dist = [
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "numpy", specifier = ">=2.2.3" },
     { name = "pyserial", specifier = ">=3.5" },
+    { name = "python-can", specifier = ">=4.4.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -550,7 +549,7 @@ dev = [
     { name = "pytest-rerunfailures", specifier = ">=15.0" },
     { name = "ruff", specifier = ">=0.6.9" },
 ]
-hw = [{ name = "python-can", specifier = ">=4.4.0" }]
+hw = []
 no-hw = []
 
 [[package]]
