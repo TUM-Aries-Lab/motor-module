@@ -1,12 +1,14 @@
-"""Test script for CAN motor communication."""
+"""Manual CAN communication checks that require a live motor on ``can0``."""
 
 import time
 
+import pytest
 from loguru import logger
 
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
 
 MOTOR_CAN_ID = 0x03
+pytestmark = pytest.mark.hardware
 
 
 def test_can_interface():
