@@ -1007,7 +1007,8 @@ def create_logged_sample(
         motor_position_deg=status.position_degrees if status else None,
         motor_speed_erpm=status.speed_erpm if status else None,
         motor_mech_deg_s=(
-            (status.speed_erpm / CAN_DEFAULTS.motor_pole_pairs) * 6.0
+            (status.speed_erpm * 6.0)
+            / (CAN_DEFAULTS.motor_pole_pairs * CAN_DEFAULTS.motor_gear_ratio)
             if status is not None
             else None
         ),

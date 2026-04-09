@@ -234,7 +234,11 @@ class TestMITCommandPath:
 
         mit.assert_called_once()
         kwargs = mit.call_args.kwargs
-        expected_vel = 6000 * (2 * np.pi) / (60 * CAN_DEFAULTS.motor_pole_pairs)
+        expected_vel = (
+            6000
+            * (2 * np.pi)
+            / (60 * CAN_DEFAULTS.motor_pole_pairs * CAN_DEFAULTS.motor_gear_ratio)
+        )
         assert kwargs["pos_rad"] == 0.0
         assert kwargs["vel_rad_s"] == pytest.approx(expected_vel)
         assert kwargs["kp"] == 0.0

@@ -3,7 +3,7 @@ name = "motor_python"
 version = "0.0.7"
 description = "CubeMars motor module for Aries exosuits."
 readme = "README.md"
-authors = [{ name = "Tsmorz", email = "tony.smoragiewicz@tum.de"},{ name = "Hannes", email = "hannes.nguyen@tum.de" }]
+authors = [{ name = "Tsmorz", email = "tony.smoragiewicz@tum.de"},{ name = "Hannes Nguyen", email = "hannes.nguyen@tum.de" }]
 requires-python = ">=3.11,<3.14"
 
 # --- Core dependencies: NO hardware here ---
@@ -26,6 +26,10 @@ dev = [
 ]
 hw = [
   "python-can>=4.4.0",
+]
+analysis = [
+  "matplotlib>=3.9",
+  "scipy>=1.14",
 ]
 no_hw = [
 ]
@@ -64,6 +68,7 @@ lint.ignore = [
 "tests/*" = ["PLR0913", "D103", "PLC0415"]
 "tests/manual_our_implementation_test.py" = ["T201"]
 "tests/manual_servo_mode_test.py" = ["T201"]
+"scripts/plot_graph.py" = ["PLR0913", "PLR0915"]
 
 
 [tool.ruff.lint.isort]

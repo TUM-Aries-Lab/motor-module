@@ -6,21 +6,29 @@ init:  # ENV SETUP
 	@echo "Environment initialized with uv."
 
 test:
+	rm -f .coverage coverage.xml
+	find . -name ".coverage*" -delete
 	uv run pytest -m "not hardware and not hardware_uart" --cov=src --cov-report=term-missing --no-cov-on-fail --cov-report=xml --cov-fail-under=70
 	rm -f .coverage
 
 test-hardware: test-hardware-can  ## Alias for test-hardware-can (CAN is the active setup)
 
 test-hardware-can:  ## Run only CAN hardware tests (requires motor on can0, NO UART cable)
+	rm -f .coverage coverage.xml
+	find . -name ".coverage*" -delete
 	sudo bash setup_can.sh
 	uv run pytest tests/hardware_can_test.py -v --cov=src --cov-report=term-missing --no-cov-on-fail
 	rm -f .coverage
 
 test-hardware-uart:  ## Run only UART hardware tests (requires R-Link cable; UART blocks CAN — never run alongside CAN)
+	rm -f .coverage coverage.xml
+	find . -name ".coverage*" -delete
 	uv run pytest -m hardware_uart -v --cov=src --cov-report=term-missing --no-cov-on-fail
 	rm -f .coverage
 
 test-hardware-all:  ## Run ALL hardware tests (requires both CAN motor and UART serial connected)
+	rm -f .coverage coverage.xml
+	find . -name ".coverage*" -delete
 	uv run pytest tests/hardware_can_test.py tests/hardware_test.py -v --cov=src --cov-report=term-missing --no-cov-on-fail
 	rm -f .coverage
 
@@ -69,9 +77,6 @@ docker:
 
 app:
 	uv run python -m motor_python
-
-tree:
-	uv run python repo_tree.py --update-readme
 
 build:
 	uv build

@@ -13,15 +13,16 @@ from typing import Any
 
 import numpy as np
 
-# Allow running as plain `python scripts/plot_ch4_validation.py` from repo root.
+# Allow running as plain `python scripts/plot_graph.py` from repo root.
 if __package__ in {None, ""}:
     repo_src = Path(__file__).resolve().parents[1] / "src"
     if str(repo_src) not in sys.path:
         sys.path.insert(0, str(repo_src))
 
 FRAME_RATE_HZ = 200.0
-AK60_6_MOTOR_POLE_PAIRS = 21
-MECH_DEG_PER_SEC_PER_ERPM = 6.0 / AK60_6_MOTOR_POLE_PAIRS
+AK60_6_MOTOR_POLE_PAIRS = 14
+AK60_6_GEAR_RATIO = 6
+MECH_DEG_PER_SEC_PER_ERPM = 6.0 / (AK60_6_MOTOR_POLE_PAIRS * AK60_6_GEAR_RATIO)
 POSITION_TARGETS = (30, 50, 90)
 VELOCITY_SPEEDS = (1000, 3000, 5000)
 POSITION_MOCAP_FILES = {
@@ -1842,6 +1843,69 @@ def build_velocity_command_response(
     plt.close(fig)
 
 
+def build_velocity_agreement_summary(
+    rows: Sequence[dict[str, Any]],
+    *,
+    output_dir: Path,
+) -> None:
+    """Create a compact run-level agreement plot for velocity validation."""
+    _, plt = _require_analysis_runtime()
+    summary_rows = summarize_velocity_response_rows(rows)
+    if not summary_rows:
+        return
+
+    command_erpm = np.asarray(
+        [int(row["command_erpm"]) for row in summary_rows], dtype=float
+    )
+    speed_ratio = np.asarray(
+        [float(row["motor_to_mocap_speed_ratio"]) for row in summary_rows], dtype=float
+    )
+    signed_percent_deviation = (speed_ratio - 1.0) * 100.0
+
+    fig, axes = plt.subplots(
+        2,
+        1,
+        sharex=True,
+        figsize=(8.0, 6.0),
+        constrained_layout=True,
+    )
+    ax_ratio, ax_dev = axes
+
+    ax_ratio.plot(
+        command_erpm,
+        speed_ratio,
+        marker="o",
+        color=COLOR_COMMAND,
+        linewidth=1.6,
+    )
+    ax_ratio.axhline(1.0, color="black", linestyle="--", linewidth=1.0, alpha=0.7)
+    ax_ratio.set_title("Velocity run-level agreement between motor and motion capture")
+    ax_ratio.set_ylabel("Mean-speed ratio [-]")
+    ax_ratio.grid(alpha=0.3)
+
+    bar_colors = [COLOR_MOCAP if value >= 0.0 else COLOR_ERROR for value in signed_percent_deviation]
+    ax_dev.bar(command_erpm, signed_percent_deviation, width=500.0, color=bar_colors)
+    ax_dev.axhline(0.0, color="black", linewidth=0.8, alpha=0.6)
+    ax_dev.set_ylabel("Deviation from ratio 1 [%]")
+    ax_dev.set_xlabel("Commanded speed [ERPM]")
+    ax_dev.grid(alpha=0.3)
+
+    for x_value, y_value in zip(command_erpm, signed_percent_deviation, strict=True):
+        label_y = y_value + (0.2 if y_value >= 0.0 else -0.2)
+        va = "bottom" if y_value >= 0.0 else "top"
+        ax_dev.text(
+            x_value,
+            label_y,
+            f"{abs(y_value):.2f}%",
+            ha="center",
+            va=va,
+            fontsize=8,
+        )
+
+    _save_figure(fig, output_dir / "velocity_agreement_summary")
+    plt.close(fig)
+
+
 def run_position_mode(args: argparse.Namespace) -> list[dict[str, Any]]:
     """Process all requested position pairs."""
     output_dir = args.out_dir / "position"
@@ -1907,6 +1971,7 @@ def run_velocity_mode(args: argparse.Namespace) -> list[dict[str, Any]]:
     _write_summary_csv(output_dir / "velocity_summary.csv", all_rows)
     build_velocity_scatter(scatter_points, output_dir=output_dir)
     build_velocity_command_response(all_rows, output_dir=output_dir)
+    build_velocity_agreement_summary(all_rows, output_dir=output_dir)
     return all_rows
 
 

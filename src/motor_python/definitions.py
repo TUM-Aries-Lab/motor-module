@@ -90,7 +90,12 @@ class CANDefaults:
     max_retries: int = 3  # Max transmission retries on error
     feedback_rate_hz: int = 50  # Motor periodic feedback rate (from motor config)
     refresh_capture_window_s: float = 0.025  # Per-iteration receive window in the refresh loop (s); covers one keepalive + command round-trip (~20 ms) within the 100 ms watchdog budget
-    motor_pole_pairs: int = 21  # AK60-6 pole-pair count for ERPM↔rad/s conversions
+    motor_pole_pairs: int = (
+        14  # AK60-6 pole-pair count for ERPM↔mechanical-speed conversions
+    )
+    motor_gear_ratio: int = (
+        6  # AK60-6 output reduction ratio (motor rotor : output shaft)
+    )
     mit_position_kp: float = 20.0  # Default stiffness for set_position() in MIT mode
     mit_position_kd: float = 1.0  # Default damping for set_position() in MIT mode
     mit_velocity_kd: float = 0.2  # Conservative default damping for MIT velocity mode to reduce start-up torque spikes

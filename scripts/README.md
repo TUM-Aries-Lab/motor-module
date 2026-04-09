@@ -251,4 +251,5 @@ make test-hardware-can   # includes TestCANDualMotor — skips if only one motor
 | Duty/current/velocity/position servo frames | legacy | historical experiments only |
 
 > Root cause of Speed=0 feedback: PSU must be **24 V**. At 18.5 V the H-bridge quietly
-> locks out (error_code remains 0). See `docs/CAN_TROUBLESHOOTING.md` Problem 5.
+> locks out (error_code remains 0). Treat undervoltage and power integrity as first-line
+> diagnostics when CAN feedback is present but commanded motion does not occur.

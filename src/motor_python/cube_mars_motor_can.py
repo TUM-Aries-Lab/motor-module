@@ -804,9 +804,15 @@ class CubeMarsAK606v3CAN(BaseMotor):
         _ = direction
 
     def _erpm_to_rad_s(self, erpm: int) -> float:
-        """Convert electrical RPM to mechanical rad/s for AK60-6."""
+        """Convert electrical RPM to output-shaft mechanical rad/s for AK60-6."""
         return (
-            float(erpm) * (2.0 * np.pi) / (60.0 * float(CAN_DEFAULTS.motor_pole_pairs))
+            float(erpm)
+            * (2.0 * np.pi)
+            / (
+                60.0
+                * float(CAN_DEFAULTS.motor_pole_pairs)
+                * float(CAN_DEFAULTS.motor_gear_ratio)
+            )
         )
 
     def _get_current_position_for_estimate(self) -> float:
