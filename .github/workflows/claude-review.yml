@@ -1,0 +1,55 @@
+name: Claude Code Review
+
+on:
+  # Trigger on PR comments containing @claude-review
+  pull_request_review_comment:
+    types: [created]
+  issue_comment:
+    types: [created]
+
+jobs:
+  claude-review:
+    # Only run when:
+    # 1. The comment contains @claude-review
+    # 2. The comment is on a pull request (not a plain issue)
+    # 3. The commenter is not a bot
+    if: |
+      github.actor == 'NGierden' &&
+      (
+        (github.event_name == 'issue_comment' &&
+         github.event.issue.pull_request &&
+         contains(github.event.comment.body, '@claude-review')) ||
+        (github.event_name == 'pull_request_review_comment' &&
+         contains(github.event.comment.body, '@claude-review'))
+      )
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install linting tools
+        run: pip install ruff
+
+      - name: Run Claude Code Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --max-turns 10
+            --allowedTools "Bash(git diff *),Bash(git log *),Bash(ruff check *),Bash(ruff rule *),Read"
