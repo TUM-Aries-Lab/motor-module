@@ -149,7 +149,7 @@ These are the maintained scripts that matter most for the current implementation
 | `scripts/mit_mode_test.py` | Focused MIT/CAN protocol validation |
 | `scripts/verify_set_velocity.py` | Bench verification of `set_velocity()` |
 | `scripts/mit_position_steps.py` | Long-run MIT position stepping for bench tests |
-| `scripts/plot_graph.py` | Chapter-4-style overlay and summary plots from recorded CSV files |
+| `scripts/plot_graph.py` | Overlay and summary plots from recorded CSV files |
 | `scripts/diagnose_can.py` | CAN bus diagnostics and recovery support |
 | `scripts/scan_ids.py` | CAN ID discovery |
 | `scripts/reset_degree.py` | Practical MIT recentering helper |
