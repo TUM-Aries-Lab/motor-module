@@ -5,7 +5,7 @@ Legacy UART interface: CubeMarsAK606v3.
 Base class: BaseMotor (for shared interface & safety logic).
 """
 
-__version__ = "0.0.8"
+__version__ = "0.0.7"
 
 from motor_python.base_motor import BaseMotor
 from motor_python.cube_mars_motor import CubeMarsAK606v3
