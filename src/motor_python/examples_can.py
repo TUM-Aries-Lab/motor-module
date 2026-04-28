@@ -5,7 +5,11 @@ import time
 from loguru import logger
 
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
-from motor_python.definitions import MOTOR_LIMITS, TendonAction
+from motor_python.definitions import (
+    CAN_DEFAULTS,
+    MOTOR_LIMITS,
+    TendonAction,
+)
 
 # ---------------------------------------------------------------------------
 # Composable helpers (accept a motor instance)
@@ -24,12 +28,12 @@ def run_velocity_control_can(
     """
     logger.info(f"Forward velocity ({velocity_erpm} ERPM)...")
     motor.set_velocity(velocity_erpm=velocity_erpm)
-    time.sleep(0.5)
+    time.sleep(CAN_DEFAULTS.can_reset_pause * 5)  # 0.5 seconds
     motor.get_status()
 
     logger.info(f"Reverse velocity (-{velocity_erpm} ERPM)...")
     motor.set_velocity(velocity_erpm=-velocity_erpm)
-    time.sleep(0.5)
+    time.sleep(CAN_DEFAULTS.can_reset_pause * 5)  # 0.5 seconds
     motor.get_status()
 
     logger.info("Stop...")

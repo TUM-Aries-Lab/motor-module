@@ -364,3 +364,92 @@ class BaseMotor(abc.ABC):
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Context manager exit."""
         self.close()
+
+    def get_timing_stats(self) -> dict:
+        """Return Refresh Loop Statistics.
+
+        Reports:
+        - Loop timing statistics (mean dt, std dt, min dt, max dt, and the effective Hz (1/mean_dt))
+        - Jitter count (Counts how many intervals exceed 2x the expected period)
+        - Cumulative send failures and missed feedback frames (never resets)
+        - CAN error counter deltas (current tx_err/rx_err vs values at start)
+        - TX pacing metrics (if available)
+
+        :return: Dictionary with timing statistics, or minimal dict if unavailable.
+        """
+        stats = {
+            "method": "get_timing_stats",
+            "available": False,
+        }
+
+        # Trying to get loop timing from refresh timestamps
+        refresh_timestamps = getattr(self, "_refresh_timestamps", None)
+        if refresh_timestamps is not None:
+            timestamps = np.array(refresh_timestamps)
+            if len(timestamps) > 1:
+                expected_period = (
+                    1.0 / getattr(self, "_refresh_interval", 0.01)
+                    if hasattr(self, "_refresh_interval")
+                    else 0.01
+                )
+                dts = np.diff(timestamps)
+                threshold = 2.0 * expected_period
+                jitter_count = np.sum(
+                    dts > threshold
+                )  # Counting intervals that exceed the expected threshold
+
+                stats.update(
+                    {
+                        "available": True,
+                        "loop_period_expected_s": expected_period,
+                        "loop_period_mean_s": float(np.mean(dts)),
+                        "loop_period_std_s": float(np.std(dts)),
+                        "loop_period_min_s": float(np.min(dts)),
+                        "loop_period_max_s": float(np.max(dts)),
+                        "loop_effective_hz": 1.0 / float(np.mean(dts)),
+                        "loop_intervals_total": len(dts),
+                        "loop_jitter_count": int(jitter_count),
+                        "loop_jitter_ratio": float(
+                            jitter_count / len(dts)
+                        )  # delete if unnecessary
+                        if len(dts) > 0
+                        else 0.0,
+                    }
+                )
+
+        # Cumulative send failures
+        cumulative_send_failures = getattr(
+            self, "_cumulative_refresh_send_failures", None
+        )
+        if cumulative_send_failures is not None:
+            stats["cumulative_send_failures"] = cumulative_send_failures
+
+        # Cumulative missed feedback
+        cumulative_no_feedback = getattr(self, "_cumulative_refresh_no_feedback", None)
+        if cumulative_no_feedback is not None:
+            stats["cumulative_missed_feedback"] = cumulative_no_feedback
+
+        # CAN error counter deltas
+        initial_can_state = getattr(self, "_initial_can_state", None)
+        last_can_state_cache = getattr(self, "_last_can_state_cache", None)
+        if initial_can_state is not None and last_can_state_cache is not None:
+            stats["can_tx_err_initial"] = initial_can_state.get("tx_err", 0)
+            stats["can_tx_err_final"] = last_can_state_cache.get("tx_err", 0)
+            stats["can_tx_err_delta"] = last_can_state_cache.get(
+                "tx_err", 0
+            ) - initial_can_state.get("tx_err", 0)
+            stats["can_rx_err_initial"] = initial_can_state.get("rx_err", 0)
+            stats["can_rx_err_final"] = last_can_state_cache.get("rx_err", 0)
+            stats["can_rx_err_delta"] = last_can_state_cache.get(
+                "rx_err", 0
+            ) - initial_can_state.get("rx_err", 0)
+
+        # TX pacing metrics tells how often pacing delays were needed and how much time was spent sleeping to pace transmissions.
+        tx_pace_sleep_count = getattr(self, "_tx_pace_sleep_count", None)
+        if tx_pace_sleep_count is not None:
+            stats["tx_pace_sleep_count"] = tx_pace_sleep_count
+        tx_pace_sleep_time_s = getattr(self, "_tx_pace_sleep_time_s", None)
+        if tx_pace_sleep_time_s is not None:
+            stats["tx_pace_sleep_time_s"] = tx_pace_sleep_time_s
+
+        return stats

@@ -110,20 +110,31 @@ class CubeMarsAK606v3CAN(BaseMotor):
         self._refresh_payload: bytes | None = None
         self._refresh_stop = threading.Event()
         self._refresh_thread: threading.Thread | None = None
-        self._refresh_interval = 1.0 / CAN_DEFAULTS.feedback_rate_hz
+        self._refresh_interval = 1.0 / CAN_DEFAULTS.motor_control_rate_hz
         self._refresh_send_failures = 0
         self._refresh_no_feedback = 0
+        self._cumulative_refresh_send_failures = 0  # Cumulative counter (never resets)
+        self._cumulative_refresh_no_feedback = 0  # Cumulative counter (never resets)
+        self._refresh_timestamps: list[float] = []  # Timestamps for jitter analysis
 
         # Transport health / pacing
         self._send_lock = threading.Lock()
         self._recv_lock = threading.Lock()
         self._last_tx_monotonic = 0.0
         self._tx_min_interval = max(0.0, self._refresh_interval / 2.0)  # <=100 Hz
-        self._send_retry_backoff = 0.01
+        self._tx_pace_sleep_count = 0
+        self._tx_pace_sleep_time_s = 0.0
+        self._tx_calls = 0
+        self._send_retry_backoff = CAN_DEFAULTS.retry_backoff
         self._transport_fault: str | None = None
         self._last_unhealthy_log_monotonic = 0.0
         self._last_can_state_cache_monotonic = 0.0
         self._last_can_state_cache: dict[str, int | str] = {
+            "state": "UNKNOWN",
+            "tx_err": 0,
+            "rx_err": 0,
+        }
+        self._initial_can_state: dict[str, int | str] = {
             "state": "UNKNOWN",
             "tx_err": 0,
             "rx_err": 0,
@@ -154,6 +165,12 @@ class CubeMarsAK606v3CAN(BaseMotor):
         try:
             bus_state = get_can_state(self.interface)
             self._last_can_state_cache = {
+                "state": str(bus_state.get("state", "UNKNOWN")),
+                "tx_err": int(bus_state.get("tx_err", 0)),
+                "rx_err": int(bus_state.get("rx_err", 0)),
+            }
+            # Capture initial state for delta calculation in get_timing_stats()
+            self._initial_can_state = {
                 "state": str(bus_state.get("state", "UNKNOWN")),
                 "tx_err": int(bus_state.get("tx_err", 0)),
                 "rx_err": int(bus_state.get("rx_err", 0)),
@@ -229,7 +246,10 @@ class CubeMarsAK606v3CAN(BaseMotor):
         now = time.monotonic()
         elapsed = now - self._last_tx_monotonic
         if elapsed < self._tx_min_interval:
-            time.sleep(self._tx_min_interval - elapsed)
+            sleep_time = self._tx_min_interval - elapsed
+            self._tx_pace_sleep_count += 1
+            self._tx_pace_sleep_time_s += sleep_time
+            time.sleep(sleep_time)
         self._last_tx_monotonic = time.monotonic()
 
     def _drain_rx_queue(self, max_frames: int = 256) -> int:
@@ -289,7 +309,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
                 logger.debug(f"Ignoring error during bus shutdown: {exc}")
 
         # Small pause so kernel/socket state settles before re-opening.
-        time.sleep(0.05)
+        time.sleep(CAN_DEFAULTS.can_reset_pause / 2)  # 0.05 seconds
         self._connect()
         return self.connected and self.bus is not None
 
@@ -365,11 +385,19 @@ class CubeMarsAK606v3CAN(BaseMotor):
         if status in {"ERROR-PASSIVE", "ERROR-WARNING"}:
             if self._can_tx_viable_in_degraded_state(can_state):
                 return True
+            # TX error count is critical (>= 128); trigger reset chain
+            if int(can_state.get("tx_err", 0)) >= 128:
+                logger.warning(
+                    f"TX errors critical ({can_state['tx_err']}), attempting recovery"
+                )
+                time.sleep(CAN_DEFAULTS.can_reset_pause / 2)  # approx 0.05 seconds
+                if self._reconnect_transport() and self._read_can_state():
+                    return True
             return False
 
         if status == "BUS-OFF":
             # With restart-ms configured, controller can recover automatically.
-            time.sleep(0.12)
+            time.sleep(CAN_DEFAULTS.can_reset_pause / 0.8)  # approx 0.12 seconds
 
         if self._reconnect_transport():
             recovered = self._read_can_state(force=True)
@@ -690,8 +718,19 @@ class CubeMarsAK606v3CAN(BaseMotor):
     # ------------------------------------------------------------------
 
     def _refresh_loop(self) -> None:
-        """Re-send active MIT command at fixed rate while enabled."""
+        """Re-send active MIT command at fixed rate(motor_control_rate_hz) while enabled.
+
+        Loop timing:
+        - Period = 1.0 / motor_control_rate_hz
+        - Capture timeout = 60% of period (allows TX + RX in 60% of time)
+        - Sleep = remaining time to complete period
+        """
         while not self._refresh_stop.is_set():
+            loop_start = time.monotonic()
+            self._refresh_timestamps.append(
+                loop_start
+            )  # Record timestamp for jitter analysis in get_timing_stats()
+
             payload = self._refresh_payload
             if payload is not None and self.connected and self.bus is not None:
                 if not self._mit_enabled:
@@ -700,36 +739,54 @@ class CubeMarsAK606v3CAN(BaseMotor):
                     except Exception as exc:
                         self._record_transport_fault(f"Refresh enable failed: {exc}")
                         self._refresh_stop.set()
+                        # Sleep for remaining loop period before continuing
+                        elapsed = time.monotonic() - loop_start
+                        remaining = max(0.0, self._refresh_interval - elapsed)
+                        self._refresh_stop.wait(remaining)
                         continue
 
                 sent = self._send_mit_payload(payload, capture_response=False)
                 if not sent:
                     self._refresh_send_failures += 1
+                    self._cumulative_refresh_send_failures += (
+                        1  # Cumulative counter (never resets)
+                    )
                     if self._refresh_send_failures >= CAN_DEFAULTS.max_retries:
                         self._record_transport_fault(
                             "Refresh loop stopped after repeated CAN transmit failures"
                         )
                         self._refresh_stop.set()
-                    self._refresh_stop.wait(self._refresh_interval)
+                    # Sleep for remaining loop period
+                    elapsed = time.monotonic() - loop_start
+                    remaining = max(0.0, self._refresh_interval - elapsed)
+                    self._refresh_stop.wait(remaining)
                     continue
 
                 self._refresh_send_failures = 0
+                # Capture timeout is 60% of loop period (TX + RX in 60%, 40% safety margin)
+                capture_timeout = self._refresh_interval * 0.6
                 feedback = self._capture_response(
-                    timeout=CAN_DEFAULTS.refresh_capture_window_s,
+                    timeout=capture_timeout,
                     store_for_refresh=True,
                 )
                 if feedback is None:
                     self._refresh_no_feedback += 1
+                    self._cumulative_refresh_no_feedback += (
+                        1  # Cumulative counter (never resets)
+                    )
                     if self._refresh_no_feedback >= max(12, self._max_no_response * 4):
                         self._record_transport_fault(
                             "No motor feedback during MIT refresh loop; stopping keepalive "
                             "to avoid flooding an unhealthy CAN bus"
                         )
                         self._refresh_stop.set()
-                        continue
                 else:
                     self._refresh_no_feedback = 0
-            self._refresh_stop.wait(self._refresh_interval)
+
+            # Sleep only the remaining time to complete the loop period
+            elapsed = time.monotonic() - loop_start
+            remaining = max(0.0, self._refresh_interval - elapsed)
+            self._refresh_stop.wait(remaining)
 
     def _start_refresh(self, payload: bytes) -> None:
         """Store active MIT payload and ensure refresh thread is running."""
@@ -961,6 +1018,18 @@ class CubeMarsAK606v3CAN(BaseMotor):
             if not self._reconnect_transport():
                 raise RuntimeError(f"CAN transport fault: {self._transport_fault}")
             self.clear_transport_fault()
+
+        # Check for critical TX errors and attempt recovery before proceeding
+        can_state = self._read_can_state()
+        if int(can_state.get("tx_err", 0)) >= 128:
+            logger.warning(
+                f"Critical TX errors ({can_state['tx_err']}) detected before enable_mit_mode; "
+                f"attempting aggressive recovery..."
+            )
+            time.sleep(CAN_DEFAULTS.can_reset_pause)  # 0.1 seconds
+            self._reconnect_transport()
+            time.sleep(CAN_DEFAULTS.can_reset_pause / 2)  # 0.05 seconds
+
         if not self._recover_bus_if_needed(reason="enable_mit_mode"):
             raise RuntimeError(
                 "Failed to recover CAN interface before enabling MIT mode"
@@ -1021,7 +1090,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
         # Send a short neutral burst before disable helper to quench motion quickly.
         for _ in range(3):
             _ = self._send_mit_payload(neutral, capture_response=False)
-            time.sleep(0.01)
+            time.sleep(CAN_DEFAULTS.can_reset_pause / 10)  # 0.01 seconds
 
         sent = True
         if self._helper_policy in {"fcfd", "legacy"}:
@@ -1117,10 +1186,10 @@ class CubeMarsAK606v3CAN(BaseMotor):
         for _ in range(4):
             sent = self._send_mit_payload(neutral, capture_response=False)
             sent_any = sent_any or sent
-            time.sleep(0.01)
+            time.sleep(CAN_DEFAULTS.can_reset_pause / 10)  # 0.01 seconds
         if not sent_any:
             logger.warning("Failed to send neutral MIT stop payload")
-        time.sleep(0.02)
+        time.sleep(CAN_DEFAULTS.can_reset_pause / 5)  # 0.02 seconds
 
         disable_error: Exception | None = None
         for _ in range(2):
@@ -1130,7 +1199,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
                 break
             except Exception as exc:
                 disable_error = exc
-                time.sleep(0.02)
+                time.sleep(CAN_DEFAULTS.can_reset_pause / 5)  # 0.02 seconds
         if disable_error is not None:
             logger.warning(f"disable_mit_mode() failed during stop: {disable_error}")
 

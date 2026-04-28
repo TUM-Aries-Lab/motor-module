@@ -145,8 +145,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sample-hz",
         type=float,
-        default=50.0,
-        help="Feedback sampling rate in Hz (default: 50)",
+        default=CAN_DEFAULTS.motor_control_rate_hz,  # 100.0 Hz
+        help=(
+            f"Feedback sampling rate in Hz "
+            f"(default: {CAN_DEFAULTS.motor_control_rate_hz / 2.0:.1f} Hz, "
+            f"i.e. half of motor_control_rate_hz={CAN_DEFAULTS.motor_control_rate_hz} Hz)"
+        ),
     )
     parser.add_argument(
         "--min-informative-erpm",
@@ -538,6 +542,28 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
         print(f"\nFAIL: {exc}")
         return 1
     finally:
+        if motor is not None:
+            # Capture timing statistics before closing
+            timing_stats = motor.get_timing_stats()
+            if timing_stats.get("available", False):
+                print(f"\n{SEPARATOR}")
+                print("Timing & Health Diagnostics")
+                print(SEPARATOR)
+                print(f"Loop effective Hz      : {timing_stats.get('loop_effective_hz', 0):.1f}")
+                print(f"Loop period (expected) : {timing_stats.get('loop_period_expected_s', 0):.6f} s")
+                print(f"Loop period (mean)     : {timing_stats.get('loop_period_mean_s', 0):.6f} s")
+                print(f"Loop period (std)      : {timing_stats.get('loop_period_std_s', 0):.6f} s")
+                print(f"Loop period (min/max)  : {timing_stats.get('loop_period_min_s', 0):.6f} / {timing_stats.get('loop_period_max_s', 0):.6f} s")
+                print(f"Jitter (>2x period)    : {timing_stats.get('loop_jitter_count', 0)} / {timing_stats.get('loop_intervals_total', 0)} ({100.0 * timing_stats.get('loop_jitter_ratio', 0):.1f}%)")
+                print(f"TX pace sleeps         : {timing_stats.get('tx_pace_sleep_count', 0)} times, {timing_stats.get('tx_pace_sleep_time_s', 0):.3f} s total")
+                print(f"Send failures (cumul.) : {timing_stats.get('cumulative_send_failures', 0)}")
+                print(f"Missed feedback (cumul): {timing_stats.get('cumulative_missed_feedback', 0)}"
+                      )
+                can_tx_delta = timing_stats.get("can_tx_err_delta", 0)
+                can_rx_delta = timing_stats.get("can_rx_err_delta", 0)
+                print(f"CAN errors             : tx_err {timing_stats.get('can_tx_err_initial', 0)}→{timing_stats.get('can_tx_err_final', 0)} (Δ{can_tx_delta:+d}), rx_err {timing_stats.get('can_rx_err_initial', 0)}→{timing_stats.get('can_rx_err_final', 0)} (Δ{can_rx_delta:+d})")
+                print(SEPARATOR)
+
         if csv_file is not None:
             try:
                 csv_file.close()

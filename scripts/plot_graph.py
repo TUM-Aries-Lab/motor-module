@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from motor_python.utils import _write_summary_csv
 
 import numpy as np
 
@@ -884,19 +885,6 @@ def find_position_segments(
 
     close_candidate(start, len(time_s) - 1)
     return segments
-
-
-def _write_summary_csv(path: Path, rows: Sequence[dict[str, Any]]) -> None:
-    """Write summary rows to CSV."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not rows:
-        path.write_text("", encoding="utf-8")
-        return
-    fieldnames = list(rows[0].keys())
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
 
 
 def _save_figure(fig: Any, path_without_suffix: Path) -> None:

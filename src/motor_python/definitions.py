@@ -88,7 +88,7 @@ class CANDefaults:
     receive_timeout: float = 0.5  # Timeout for receiving CAN messages (seconds)
     connection_stabilization_delay: float = 0.05  # Delay after CAN bus init
     max_retries: int = 3  # Max transmission retries on error
-    feedback_rate_hz: int = 50  # Motor periodic feedback rate (from motor config)
+    motor_control_rate_hz: int = 100  # Motor periodic feedback rate (from motor config)
     refresh_capture_window_s: float = 0.025  # Per-iteration receive window in the refresh loop (s); covers one keepalive + command round-trip (~20 ms) within the 100 ms watchdog budget
     motor_pole_pairs: int = (
         14  # AK60-6 pole-pair count for ERPM↔mechanical-speed conversions
@@ -99,6 +99,8 @@ class CANDefaults:
     mit_position_kp: float = 20.0  # Default stiffness for set_position() in MIT mode
     mit_position_kd: float = 1.0  # Default damping for set_position() in MIT mode
     mit_velocity_kd: float = 0.2  # Conservative default damping for MIT velocity mode to reduce start-up torque spikes
+    retry_backoff: float = 0.01  # Base backoff time for retries (seconds)
+    can_reset_pause: float = 0.1  # Small Pause after CAN bus reset (seconds)
 
 
 @dataclass(frozen=True)

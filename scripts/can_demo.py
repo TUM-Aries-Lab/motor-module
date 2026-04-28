@@ -15,7 +15,8 @@ produces real movement.  Those sections are marked [ACK-ONLY].
 
 import time
 
-from motor_python.cube_mars_motor_can import CAN_ERROR_CODES, CubeMarsAK606v3CAN
+from motor_python.cube_mars_motor_can import  CubeMarsAK606v3CAN
+from motor_python.base_motor import CAN_ERROR_CODES
 from motor_python.definitions import TendonAction
 
 MOTOR_ID  = 0x03

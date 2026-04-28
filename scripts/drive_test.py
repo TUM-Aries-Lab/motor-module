@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Comprehensive motor drive test - try various duty formats, levels, and modes."""
+"""Comprehensive motor drive test - try various duty formats, levels, and modes.
+
+Run
+---
+    sudo ./setup_can.sh
+    python scripts/drive_test.py
+"""
 import struct
 import sys
 import time
