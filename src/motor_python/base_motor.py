@@ -388,7 +388,7 @@ class BaseMotor(abc.ABC):
             timestamps = np.array(refresh_timestamps)
             if len(timestamps) > 1:
                 expected_period = (
-                    1.0 / getattr(self, "_refresh_interval", 0.01)
+                    getattr(self, "_refresh_interval", 0.01)
                     if hasattr(self, "_refresh_interval")
                     else 0.01
                 )

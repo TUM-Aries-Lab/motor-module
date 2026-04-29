@@ -497,6 +497,10 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
 
         if not motor.check_communication():
             print("FAIL: communication check failed (no feedback)")
+            try:
+                motor.disable_mit_mode()
+            except Exception:
+                pass  # Ignore cleanup failures
             return 1
 
         print("PASS: communication check")
@@ -570,6 +574,10 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
             except Exception as exc:  # pragma: no cover - cleanup path
                 print(f"WARN: CSV close failed during cleanup: {exc}")
         if motor is not None:
+            try:
+                motor.stop()
+            except Exception as exc:  # pragma: no cover - cleanup path
+                print(f"WARN: stop() failed during cleanup: {exc}")
             try:
                 motor.close()
             except Exception as exc:  # pragma: no cover - cleanup path

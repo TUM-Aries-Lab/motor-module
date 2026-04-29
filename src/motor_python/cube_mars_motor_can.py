@@ -962,25 +962,33 @@ class CubeMarsAK606v3CAN(BaseMotor):
     def check_communication(self) -> bool:
         """Verify communication by enabling MIT mode and sending neutral command."""
         if not self.connected:
+            logger.debug("check_communication failed: CAN bus not connected")
             return False
 
         neutral = self._mit_neutral_payload()
-
         max_attempts = max(MOTOR_DEFAULTS.max_communication_attempts, 3)
+        last_failure: str | None = None
 
         for attempt in range(1, max_attempts + 1):
             logger.debug(f"check_communication attempt {attempt}/{max_attempts}")
             self._pending_feedback = None
             feedback_before = self._last_feedback_monotonic
+
             try:
                 self.enable_mit_mode()
             except Exception as exc:
-                logger.debug(f"enable_mit_mode failed during comm check: {exc}")
+                last_failure = f"enable_mit_mode failed: {exc}"
+                logger.debug(last_failure)
                 time.sleep(MOTOR_DEFAULTS.communication_retry_delay)
                 continue
 
             sent = self._send_mit_payload(neutral, capture_response=True)
             if not sent:
+                last_failure = (
+                    "CAN transmit failed while sending neutral MIT payload; "
+                    "transport fault may be present"
+                )
+                logger.debug(last_failure)
                 time.sleep(MOTOR_DEFAULTS.communication_retry_delay)
                 continue
 
@@ -989,14 +997,24 @@ class CubeMarsAK606v3CAN(BaseMotor):
                 self.communicating = True
                 self._consecutive_no_response = 0
                 return True
+
+            last_failure = (
+                "MIT payload sent but no fresh feedback was received "
+                f"(last known feedback ts={feedback_before:.6f})"
+            )
+            logger.debug(last_failure)
             time.sleep(MOTOR_DEFAULTS.communication_retry_delay)
 
         self.communicating = False
         can_state = self._read_can_state(force=True)
+        transport_fault = getattr(self, "_transport_fault", None)
+        error_reason = last_failure or "unknown"
         logger.error(
-            "No motor feedback during check_communication. "
-            f"state={can_state['state']} tx_err={can_state['tx_err']} rx_err={can_state['rx_err']}. "
-            "Likely causes: UART cable connected, CAN feedback mode not periodic/query-reply, "
+            "check_communication failed: "
+            f"state={can_state['state']} tx_err={can_state['tx_err']} rx_err={can_state['rx_err']} "
+            f"transport_fault={transport_fault!r} "
+            f"reason={error_reason}. "
+            "Likely causes: CAN interface unhealthy, motor not replying in MIT/feedback mode, "
             "or firmware uses a different feedback ID mapping."
         )
         return False
