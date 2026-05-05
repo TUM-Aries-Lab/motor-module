@@ -833,6 +833,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
     def _send_velocity_command(self, velocity_erpm: int) -> None:
         """Velocity loop in MIT mode (``kp=0``, ``kd>0``)."""
         vel_rad_s = self._erpm_to_rad_s(velocity_erpm)
+        logger.info(f"Setting velocity: {velocity_erpm} ERPM -> {vel_rad_s:.2f} rad/s")
         self.set_mit_mode(
             pos_rad=0.0,
             vel_rad_s=vel_rad_s,

@@ -121,7 +121,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--velocity-erpm",
         type=int,
-        default=1000,
+        default=3000,
         help="Test start velocity in ERPM (range: -5000..5000, default: 1000)",
     )
     parser.add_argument(
