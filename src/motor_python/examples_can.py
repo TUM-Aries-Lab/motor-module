@@ -255,7 +255,9 @@ def multi_motor_can_example(
 
     try:
         motor_left.enable_motor()
+        logger.debug(f"Left motor (ID 0x{left_can_id:02X}) enabled")
         motor_right.enable_motor()
+        logger.debug(f"Right motor (ID 0x{right_can_id:02X}) enabled")
 
         left_ok = motor_left.check_communication()
         right_ok = motor_right.check_communication()
@@ -278,6 +280,7 @@ def multi_motor_can_example(
         logger.success("Dual-motor example completed!")
 
     finally:
+        logger.debug("Closing CAN motor connections")
         motor_left.close()
         motor_right.close()
 

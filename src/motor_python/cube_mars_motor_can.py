@@ -1069,6 +1069,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
             helper_frames.append(("FF..FF", self._CAN_HELPER_ENABLE_LEGACY))
 
         for label, frame in helper_frames:
+            logger.debug(f"Attempting MIT handshake with helper frame {label}")
             helper_sent = self._send_raw(
                 arbitration_id=self.motor_can_id,
                 data=frame,

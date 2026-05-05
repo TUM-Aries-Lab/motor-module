@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# This is a can bus monitoring script that logs the state of the CAN interface and dumps CAN messages to a log file.
+# Run this on one terminal: ./scripts/can_bus_monitor.sh
+
+#Run the motor script on second terminal: uv run python -m motor_python --log-level DEBUG
+
 set -euo pipefail
 
 LOGDIR=~/can_debug_$(date +%Y%m%d_%H%M%S)
@@ -36,7 +41,7 @@ echo "CAN dump file  : $LOGDIR/candump.log"
 cleanup() {
     echo ""
     echo "Stopping CAN logging..."
-    echo "=== AFTER FAILURE ===" >> "$STATEFILE"
+    echo "=== AFTER FAILURE ===" >> "$STATEFILE"   # If it fails, immediately snapshot the bus state in Terminal 1
     ip -details -statistics link show can0 >> "$STATEFILE" 2>&1
     kill "$STATE_PID" "$DUMP_PID" 2>/dev/null || true
     wait "$STATE_PID" 2>/dev/null || true

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Hard reset the CAN interface by unloading and reloading the mttcan driver, then bringing the interface back up.
+# Run this on one terminal: ./scripts/can_hard_reset.sh
+
 set -euo pipefail
 
 INTERFACE="can0"
