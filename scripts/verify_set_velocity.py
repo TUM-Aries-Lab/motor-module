@@ -470,6 +470,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
     csv_writer: csv.DictWriter | None = None
     run_start = 0.0
     results: list[PhaseResult] = []
+    total_feedback_samples = 0
     try:
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         csv_file = csv_path.open("w", newline="", encoding="utf-8")
@@ -477,6 +478,8 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
         csv_writer.writeheader()
 
         def write_sample_row(row: dict[str, str | int]) -> None:
+            nonlocal total_feedback_samples
+            total_feedback_samples += 1
             if csv_writer is None or csv_file is None:
                 return
             csv_writer.writerow(row)
@@ -561,8 +564,13 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
                 print(f"Jitter (>2x period)    : {timing_stats.get('loop_jitter_count', 0)} / {timing_stats.get('loop_intervals_total', 0)} ({100.0 * timing_stats.get('loop_jitter_ratio', 0):.1f}%)")
                 print(f"TX pace sleeps         : {timing_stats.get('tx_pace_sleep_count', 0)} times, {timing_stats.get('tx_pace_sleep_time_s', 0):.3f} s total")
                 print(f"Send failures (cumul.) : {timing_stats.get('cumulative_send_failures', 0)}")
-                print(f"Missed feedback (cumul): {timing_stats.get('cumulative_missed_feedback', 0)}"
-                      )
+                missed_feedback = timing_stats.get('cumulative_missed_feedback', 0)
+                if total_feedback_samples > 0:
+                    missed_percentage = (missed_feedback / total_feedback_samples) * 100.0
+                    print(f"Missed feedback (cumul) : {missed_feedback}/{total_feedback_samples} ({missed_percentage:.1f}%)")
+                else:
+                    print(f"Feedback samples (total): {total_feedback_samples}")
+                    print(f"Missed feedback (cumul) : {missed_feedback}")
                 can_tx_delta = timing_stats.get("can_tx_err_delta", 0)
                 can_rx_delta = timing_stats.get("can_rx_err_delta", 0)
                 print(f"CAN errors             : tx_err {timing_stats.get('can_tx_err_initial', 0)}→{timing_stats.get('can_tx_err_final', 0)} (Δ{can_tx_delta:+d}), rx_err {timing_stats.get('can_rx_err_initial', 0)}→{timing_stats.get('can_rx_err_final', 0)} (Δ{can_rx_delta:+d})")

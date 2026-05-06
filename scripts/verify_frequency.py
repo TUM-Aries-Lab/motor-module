@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Sweep motor refresh frequency and measure the actual achieved rate.
-
+"""
 This script is intended to test how the CAN refresh/keepalive loop behaves
 when the target refresh frequency is changed from a low value up to a high
 value. It writes a CSV recording the commanded vs actual frequency and
@@ -89,13 +88,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--motor-id",
         type=lambda value: int(value, 0),
-        default=0x03,
+        default=CAN_DEFAULTS.motor_can_id,
         help="Motor CAN ID in decimal or hex (default: 0x03)",
     )
     parser.add_argument(
         "--bitrate",
         type=int,
-        default=1_000_000,
+        default=CAN_DEFAULTS.bitrate,
         help="CAN bitrate (default: 1000000)",
     )
     parser.add_argument(
@@ -122,8 +121,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--step-hz",
         type=float,
-        default=20.0,
-        help="Step size between frequency points in Hz (default: 20)",
+        default=10.0,
+        help="Step size between frequency points in Hz (default: 10)",
     )
     parser.add_argument(
         "--phase-seconds",
@@ -144,10 +143,10 @@ def parse_args() -> argparse.Namespace:
         help="Command velocity used during frequency testing in ERPM (default: 3000)",
     )
     parser.add_argument(
-    "--tolerance-hz",
-    type=float,
-    default=5.0,
-    help="Allowed absolute difference between target and actual frequency (default: 10 Hz)",
+        "--tolerance-hz",
+        type=float,
+        default=5.0,
+        help="Allowed absolute difference between target and actual frequency (default: 10 Hz)",
     )
     parser.add_argument(
         "--plot-path",
@@ -462,4 +461,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

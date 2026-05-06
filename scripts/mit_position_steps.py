@@ -225,13 +225,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--motor-id",
         type=lambda value: int(value, 0),
-        default=0x03,
+        default=CAN_DEFAULTS.motor_can_id,
         help="Motor CAN ID in decimal or hex (default: 0x03)",
     )
     parser.add_argument(
         "--bitrate",
         type=int,
-        default=1_000_000,
+        default=CAN_DEFAULTS.bitrate,
         help="CAN bitrate (default: 1000000)",
     )
     parser.add_argument(
@@ -442,6 +442,7 @@ def main() -> int:
         tick_index = 0
         turnarounds = 0
         last_status = status0
+        total_feedback_samples = 0
 
         def log_sample(
             elapsed_s: float,
@@ -451,6 +452,8 @@ def main() -> int:
             segment_target_deg: float,
             status: MotorState | None,
         ) -> None:
+            nonlocal total_feedback_samples
+            total_feedback_samples += 1
             if csv_writer is None or csv_file is None:
                 return
             now_epoch = time.time()
@@ -587,7 +590,12 @@ def main() -> int:
                 print(f"Jitter (>2x period)    : {timing_stats.get('loop_jitter_count', 0)} / {timing_stats.get('loop_intervals_total', 0)} ({100.0 * timing_stats.get('loop_jitter_ratio', 0):.1f}%)")
                 print(f"TX pace sleeps         : {timing_stats.get('tx_pace_sleep_count', 0)} times, {timing_stats.get('tx_pace_sleep_time_s', 0):.3f} s total")
                 print(f"Send failures (cumul.) : {timing_stats.get('cumulative_send_failures', 0)}")
-                print(f"Missed feedback (cumul): {timing_stats.get('cumulative_missed_feedback', 0)}")
+                missed_feedback = timing_stats.get('cumulative_missed_feedback', 0)
+                if total_feedback_samples > 0:
+                    missed_percentage = (missed_feedback / total_feedback_samples) * 100.0
+                    print(f"Missed feedback (cumul) : {missed_feedback}/{total_feedback_samples} ({missed_percentage:.1f}%)")
+                else:
+                    print(f"Missed feedback (cumul) : {missed_feedback}")
 
                 can_tx_delta = timing_stats.get("can_tx_err_delta", 0)
                 can_rx_delta = timing_stats.get("can_rx_err_delta", 0)
