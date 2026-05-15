@@ -5,7 +5,11 @@ import time
 from loguru import logger
 
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
-from motor_python.definitions import MOTOR_LIMITS, TendonAction
+from motor_python.definitions import (
+    CAN_DEFAULTS,
+    MOTOR_LIMITS,
+    TendonAction,
+)
 
 # ---------------------------------------------------------------------------
 # Composable helpers (accept a motor instance)
@@ -24,12 +28,12 @@ def run_velocity_control_can(
     """
     logger.info(f"Forward velocity ({velocity_erpm} ERPM)...")
     motor.set_velocity(velocity_erpm=velocity_erpm)
-    time.sleep(0.5)
+    time.sleep(CAN_DEFAULTS.can_reset_pause * 5)  # 0.5 seconds
     motor.get_status()
 
     logger.info(f"Reverse velocity (-{velocity_erpm} ERPM)...")
     motor.set_velocity(velocity_erpm=-velocity_erpm)
-    time.sleep(0.5)
+    time.sleep(CAN_DEFAULTS.can_reset_pause * 5)  # 0.5 seconds
     motor.get_status()
 
     logger.info("Stop...")
@@ -251,7 +255,9 @@ def multi_motor_can_example(
 
     try:
         motor_left.enable_motor()
+        logger.debug(f"Left motor (ID 0x{left_can_id:02X}) enabled")
         motor_right.enable_motor()
+        logger.debug(f"Right motor (ID 0x{right_can_id:02X}) enabled")
 
         left_ok = motor_left.check_communication()
         right_ok = motor_right.check_communication()
@@ -274,6 +280,7 @@ def multi_motor_can_example(
         logger.success("Dual-motor example completed!")
 
     finally:
+        logger.debug("Closing CAN motor connections")
         motor_left.close()
         motor_right.close()
 

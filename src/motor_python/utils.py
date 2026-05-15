@@ -1,8 +1,11 @@
 """Configure the logger."""
 
+import csv
 import sys
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
@@ -72,3 +75,16 @@ def erpm_to_degrees_per_second(erpm: int | float) -> float:
         * 6.0
         / (float(CAN_DEFAULTS.motor_pole_pairs) * float(CAN_DEFAULTS.motor_gear_ratio))
     )
+
+
+def _write_summary_csv(path: Path, rows: Sequence[dict[str, Any]]) -> None:
+    """Write summary rows to CSV."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not rows:
+        path.write_text("", encoding="utf-8")
+        return
+    fieldnames = list(rows[0].keys())
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
