@@ -35,8 +35,6 @@ CSV_FIELDNAMES = [
     "loop_intervals_total",
     "loop_jitter_count",
     "loop_jitter_ratio",
-    "refresh_send_failures",
-    "refresh_no_feedback",
     "cumulative_send_failures",
     "cumulative_missed_feedback",
     "command_erpm",
@@ -58,8 +56,6 @@ class FrequencyResult:
     loop_intervals_total: int
     loop_jitter_count: int
     loop_jitter_ratio: float | None
-    refresh_send_failures: int
-    refresh_no_feedback: int
     cumulative_send_failures: int
     cumulative_missed_feedback: int
     command_erpm: int
@@ -109,14 +105,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--start-hz",
         type=float,
-        default=10.0,
-        help="Starting target refresh frequency in Hz (default: 10)",
+        default=20.0,
+        help="Starting target refresh frequency in Hz (default: 20)",
     )
     parser.add_argument(
         "--end-hz",
         type=float,
-        default=200.0,
-        help="Ending target refresh frequency in Hz (default: 200)",
+        default=500.0,
+        help="Ending target refresh frequency in Hz (default: 500)",
     )
     parser.add_argument(
         "--step-hz",
@@ -246,8 +242,6 @@ def measure_frequency(
 
     if hasattr(motor, "_refresh_timestamps"):
         motor._refresh_timestamps.clear()
-    send_failures_before = getattr(motor, "_cumulative_refresh_send_failures", 0)
-    no_feedback_before = getattr(motor, "_cumulative_refresh_no_feedback", 0)
 
     start = time.monotonic()
     time.sleep(phase_seconds)
@@ -255,8 +249,6 @@ def measure_frequency(
 
     stats = motor.get_timing_stats()
     effective_hz = float(stats.get("loop_effective_hz", 0.0))
-    refresh_send_failures = getattr(motor, "_cumulative_refresh_send_failures", 0) - send_failures_before
-    refresh_no_feedback = getattr(motor, "_cumulative_refresh_no_feedback", 0) - no_feedback_before
 
     return FrequencyResult(
         target_hz=target_hz,
@@ -269,8 +261,6 @@ def measure_frequency(
         loop_intervals_total=int(stats.get("loop_intervals_total", 0)),
         loop_jitter_count=int(stats.get("loop_jitter_count", 0)),
         loop_jitter_ratio=float(stats.get("loop_jitter_ratio", 0.0)) if stats.get("available", False) else None,
-        refresh_send_failures=refresh_send_failures,
-        refresh_no_feedback=refresh_no_feedback,
         cumulative_send_failures=int(getattr(motor, "_cumulative_refresh_send_failures", 0)),
         cumulative_missed_feedback=int(getattr(motor, "_cumulative_refresh_no_feedback", 0)),
         command_erpm=command_erpm,
@@ -295,8 +285,6 @@ def write_csv(path: Path, results: list[FrequencyResult]) -> None:
                 "loop_intervals_total": result.loop_intervals_total,
                 "loop_jitter_count": result.loop_jitter_count,
                 "loop_jitter_ratio": f"{result.loop_jitter_ratio:.3f}" if result.loop_jitter_ratio is not None else "",
-                "refresh_send_failures": result.refresh_send_failures,
-                "refresh_no_feedback": result.refresh_no_feedback,
                 "cumulative_send_failures": result.cumulative_send_failures,
                 "cumulative_missed_feedback": result.cumulative_missed_feedback,
                 "command_erpm": result.command_erpm,
