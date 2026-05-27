@@ -60,6 +60,7 @@ from typing import Any
 from motor_python.base_motor import MotorState
 from motor_python.can_utils import get_can_state, reset_can_interface
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+from motor_python import definitions
 from motor_python.definitions import CAN_DEFAULTS
 
 SEPARATOR = "=" * 84
@@ -1008,7 +1009,7 @@ def create_logged_sample(
         motor_speed_erpm=status.speed_erpm if status else None,
         motor_mech_deg_s=(
             (status.speed_erpm * 6.0)
-            / (CAN_DEFAULTS.motor_pole_pairs * CAN_DEFAULTS.motor_gear_ratio)
+            / (definitions.CURRENT_MOTOR_SPEC.pole_pairs * definitions.CURRENT_MOTOR_SPEC.gear_ratio)
             if status is not None
             else None
         ),

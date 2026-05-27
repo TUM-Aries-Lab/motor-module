@@ -5,17 +5,26 @@ import argparse
 from loguru import logger
 
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
-from motor_python.definitions import CAN_DEFAULTS, DEFAULT_LOG_LEVEL, LogLevel
+from motor_python.definitions import (
+    CAN_DEFAULTS,
+    DEFAULT_LOG_LEVEL,
+    DEFAULT_MOTOR_SPEC,
+    LogLevel,
+    MotorModel,
+    set_current_motor_model_by_name,
+)
 from motor_python.examples_can import multi_motor_can_example, run_motor_demo_can
 from motor_python.utils import setup_logger
 
 
+# ruff: noqa: PLR0913
 def main(
     log_level: str = DEFAULT_LOG_LEVEL,
     stderr_level: str = DEFAULT_LOG_LEVEL,
     dual: bool = False,
     motor_id_left: int = CAN_DEFAULTS.motor_can_id,
     motor_id_right: int = CAN_DEFAULTS.motor_can_id_2,
+    motor_model: str = DEFAULT_MOTOR_SPEC.model_name,
 ) -> None:
     """Run the main CAN motor control loop.
 
@@ -30,6 +39,9 @@ def main(
     :return: None
     """
     setup_logger(log_level=log_level, stderr_level=stderr_level)
+
+    set_current_motor_model_by_name(motor_model)
+    logger.info(f"Selected motor model: {motor_model}")
 
     # --- Two-motor mode ---
     if dual:
@@ -117,6 +129,13 @@ if __name__ == "__main__":  # pragma: no cover
         type=lambda x: int(x, 0),
         help="CAN ID of the right / secondary motor (default: 0x04).",
     )
+    parser.add_argument(
+        "--motor-model",
+        type=str,
+        choices=list(MotorModel),
+        default=DEFAULT_MOTOR_SPEC.model_name,
+        help="Select motor type (AK60-6 or AK80-6).",
+    )
     args = parser.parse_args()
 
     main(
@@ -125,4 +144,5 @@ if __name__ == "__main__":  # pragma: no cover
         dual=args.dual,
         motor_id_left=args.motor_id_left,
         motor_id_right=args.motor_id_right,
+        motor_model=args.motor_model,
     )

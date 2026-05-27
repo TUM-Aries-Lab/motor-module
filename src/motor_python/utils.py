@@ -6,13 +6,14 @@ from pathlib import Path
 
 from loguru import logger
 
+from motor_python import definitions
 from motor_python.definitions import (
-    CAN_DEFAULTS,
     DATE_FORMAT,
     DEFAULT_LOG_FILENAME,
     DEFAULT_LOG_LEVEL,
     ENCODING,
     LOG_DIR,
+    MotorSpec,
 )
 
 
@@ -60,15 +61,20 @@ def setup_logger(
     return filepath_with_time
 
 
-def erpm_to_degrees_per_second(erpm: int | float) -> float:
+def erpm_to_degrees_per_second(
+    erpm: int | float,
+    motor_spec: MotorSpec | None = None,
+) -> float:
     """Convert Electrical RPM (ERPM) to output-shaft degrees per second.
 
     Formula: ERPM * 360 / (60 * pole_pairs * gear_ratio)
     :param erpm: Electrical RPM
+    :param motor_spec: Optional motor hardware profile for modularity
     :return: Output-shaft degrees per second
     """
+    motor_spec = definitions.CURRENT_MOTOR_SPEC if motor_spec is None else motor_spec
     return (
         abs(float(erpm))
         * 6.0
-        / (float(CAN_DEFAULTS.motor_pole_pairs) * float(CAN_DEFAULTS.motor_gear_ratio))
+        / (float(motor_spec.pole_pairs) * float(motor_spec.gear_ratio))
     )

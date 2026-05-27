@@ -1,10 +1,16 @@
 """Common definitions for this module."""
 
 from dataclasses import asdict, dataclass
-from enum import IntEnum
+from enum import IntEnum, StrEnum
 from pathlib import Path
 
 import numpy as np
+
+from motor_python.mit_mode_packer import (
+    AK60_6_MIT_LIMITS,
+    AK80_6_MIT_LIMITS,
+    MITModeLimits,
+)
 
 np.set_printoptions(precision=3, floatmode="fixed", suppress=True)
 
@@ -76,6 +82,9 @@ class CANDefaults:
     - CAN Bitrate: 1 Mbps
     - CAN ID: 3 (default, configurable per motor)
     - Periodic Feedback: 50Hz
+
+    Motor hardware and control tuning constants are not hard-coded here;
+    use the `MotorSpec` profiles for AK60-6 / AK80-6 model-specific values.
     """
 
     interface: str = "can0"  # SocketCAN interface name (can0 or can1 on Jetson)
@@ -90,15 +99,37 @@ class CANDefaults:
     max_retries: int = 3  # Max transmission retries on error
     feedback_rate_hz: int = 50  # Motor periodic feedback rate (from motor config)
     refresh_capture_window_s: float = 0.025  # Per-iteration receive window in the refresh loop (s); covers one keepalive + command round-trip (~20 ms) within the 100 ms watchdog budget
-    motor_pole_pairs: int = (
-        14  # AK60-6 pole-pair count for ERPM↔mechanical-speed conversions
-    )
-    motor_gear_ratio: int = (
-        6  # AK60-6 output reduction ratio (motor rotor : output shaft)
-    )
     mit_position_kp: float = 20.0  # Default stiffness for set_position() in MIT mode
     mit_position_kd: float = 1.0  # Default damping for set_position() in MIT mode
     mit_velocity_kd: float = 0.2  # Conservative default damping for MIT velocity mode to reduce start-up torque spikes
+
+
+@dataclass(frozen=True)
+class MotorSpec:
+    """Hardware and control parameters for a CubeMars motor variant."""
+
+    model_name: str
+    rated_voltage: str
+    pole_pairs: int
+    gear_ratio: int
+    rated_torque_nm: float
+    peak_torque_nm: float
+    rated_current_amps: float
+    peak_current_amps: float
+    max_output_speed_rpm: int
+    max_velocity_electrical_rpm: int
+    min_velocity_electrical_rpm: int
+    mit_position_kp: float = 20.0
+    mit_position_kd: float = 1.0
+    mit_velocity_kd: float = 0.2
+    mit_mode_limits: MITModeLimits = AK60_6_MIT_LIMITS
+
+
+class MotorModel(StrEnum):
+    """Canonical motor models supported by this package."""
+
+    AK60_6 = "AK60-6"
+    AK80_6 = "AK80-6"
 
 
 @dataclass(frozen=True)
@@ -240,6 +271,76 @@ CONVERSION_FACTORS = ConversionFactors()
 HARDWARE_TEST_DEFAULTS = HardwareTestDefaults()
 
 
+# Motor-specifications - from CubeMars site specifications
+AK60_6_MOTOR_SPEC = MotorSpec(
+    model_name="AK60-6",
+    rated_voltage="24/48V",
+    pole_pairs=14,
+    gear_ratio=6,
+    rated_torque_nm=3.0,
+    peak_torque_nm=9.0,
+    rated_current_amps=3.8,
+    peak_current_amps=11.2,
+    max_output_speed_rpm=640,
+    max_velocity_electrical_rpm=7840,  # 560 RPM * 14 pole pairs
+    min_velocity_electrical_rpm=-7840,  # -560 RPM * 14 pole pairs
+    mit_position_kp=20.0,
+    mit_position_kd=1.0,
+    mit_velocity_kd=0.2,
+    mit_mode_limits=AK60_6_MIT_LIMITS,
+)
+
+# Motor-specifications - from CubeMars site specifications
+AK80_6_MOTOR_SPEC = MotorSpec(
+    model_name="AK80-6",
+    rated_voltage="48V",
+    pole_pairs=21,
+    gear_ratio=6,
+    rated_torque_nm=6.0,
+    peak_torque_nm=12.0,
+    rated_current_amps=9.7,
+    peak_current_amps=20.0,
+    max_output_speed_rpm=800,
+    max_velocity_electrical_rpm=16800,  # 800 RPM * 21 pole pairs
+    min_velocity_electrical_rpm=-16800,  # -800 RPM * 21 pole pairs
+    mit_position_kp=20.0,
+    mit_position_kd=1.0,
+    mit_velocity_kd=0.2,
+    mit_mode_limits=AK80_6_MIT_LIMITS,
+)
+
+# Dictionary mapping motor model names to their specifications for easy lookup
+MOTOR_SPECS: dict[str, MotorSpec] = {
+    AK60_6_MOTOR_SPEC.model_name: AK60_6_MOTOR_SPEC,
+    AK80_6_MOTOR_SPEC.model_name: AK80_6_MOTOR_SPEC,
+}
+
+# Setting default motor model and spec to AK60-6
+DEFAULT_MOTOR_SPEC = AK60_6_MOTOR_SPEC
+CURRENT_MOTOR_MODEL: MotorModel = MotorModel.AK60_6
+CURRENT_MOTOR_SPEC: MotorSpec = MOTOR_SPECS[CURRENT_MOTOR_MODEL.value]
+
+
+# ruff: noqa: PLW0603
+def set_current_motor_model(model: MotorModel) -> None:
+    """Select the current motor model for the running application."""
+    global CURRENT_MOTOR_MODEL, CURRENT_MOTOR_SPEC
+    CURRENT_MOTOR_MODEL = model
+    CURRENT_MOTOR_SPEC = MOTOR_SPECS[model.value]
+
+
+def set_current_motor_model_by_name(model_name: str) -> None:
+    """Select the current motor model by name string."""
+    try:
+        model = MotorModel(model_name)
+    except ValueError as exc:
+        valid = ", ".join(MOTOR_SPECS)
+        raise ValueError(
+            f"Unknown motor model '{model_name}'. Valid models: {valid}"
+        ) from exc
+    set_current_motor_model(model)
+
+
 # Tendon action control
 class TendonAction(IntEnum):
     """Exosuit tendon control actions."""
@@ -300,6 +401,53 @@ class FaultCode(IntEnum):
             FaultCode.UNBALANCED_CURRENTS: "UNBALANCED_CURRENTS",
         }
         return descriptions.get(self, self.name)
+
+
+class SolverType(StrEnum):
+    """Selects the numerical integration strategy for the second-order low-pass filter.
+
+    FORWARD_EULER   -- Discrete, output = current state before update.
+    BACKWARD_EULER  -- Discrete, output = state + dt*u (input feedthrough).
+    TRAPEZOIDAL     -- Discrete, output = state + dt/2*u (average of current/next).
+    RUNGE_KUTTA     -- Continuous, four-stage Runge-Kutta (RK4).
+    """
+
+    FORWARD_EULER = "forward_euler"
+    BACKWARD_EULER = "backward_euler"
+    TRAPEZOIDAL = "trapezoidal"
+    RUNGE_KUTTA = "rk4"
+
+
+@dataclass
+class LowPassFilterConfig:
+    """Settings for the second-order low-pass filter.
+
+    :param float cut_off_frequency_rad_per_sec: Natural frequency (rad/s).
+    :param float damping_ratio: Damping ratio. 1.0 = critically damped.
+    :param float initial_condition: Initial value for both internal integrator states.
+    :param SolverType solver_type: Numerical integration strategy.
+    """
+
+    cut_off_frequency_rad_per_sec: float = 20.0
+    damping_ratio: float = 1.0
+    initial_condition: float = 0.0
+    solver_type: SolverType = SolverType.RUNGE_KUTTA
+
+
+@dataclass(frozen=True)
+class PIDConfig:
+    """Configuration for the PID controller.
+
+    :param float proportional_gain: P gain (kp).
+    :param float integral_gain: I gain (ki).
+    :param float derivative_gain: D gain (kd), applied to LPF-smoothed previous output (velocity feedback damping).
+    :param tuple[float, float] | None output_limits: (low, high) clamp on integral term and final output. None = no clamp.
+    """
+
+    proportional_gain: float = 14.0
+    integral_gain: float = 0.0
+    derivative_gain: float = 0.02
+    output_limits: "tuple[float, float] | None" = -20, 20
 
 
 # CRC16 Lookup Table from CubeMars Manual

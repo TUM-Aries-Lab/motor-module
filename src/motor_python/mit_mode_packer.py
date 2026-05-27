@@ -21,12 +21,26 @@ class MITModeLimits:
     kd_max: float
 
 
-# AK60-6 limits from CubeMars manual force-control parameter table.
+# AK60-6 limits from CubeMars manual force-control parameter table. (Page 39)
 AK60_6_MIT_LIMITS = MITModeLimits(
     p_min=-12.56,
     p_max=12.56,
     v_min=-60.0,
     v_max=60.0,
+    t_min=-12.0,
+    t_max=12.0,
+    kp_min=0.0,
+    kp_max=500.0,
+    kd_min=0.0,
+    kd_max=5.0,
+)
+
+# AK80-6 limits from CubeMars manual parameter table. (Page 42)
+AK80_6_MIT_LIMITS = MITModeLimits(
+    p_min=-12.56,
+    p_max=12.56,
+    v_min=-76.0,
+    v_max=76.0,
     t_min=-12.0,
     t_max=12.0,
     kp_min=0.0,

@@ -1,4 +1,4 @@
-"""AK60-6 CAN controller using CubeMars Force Control Mode (MIT) only."""
+"""AK60-6 / AK80-6 CAN controller using CubeMars Force Control Mode (MIT) only."""
 
 from __future__ import annotations
 
@@ -14,8 +14,16 @@ from loguru import logger
 from motor_python.base_motor import BaseMotor, MotorState
 from motor_python.can_protocol import CANControlMode
 from motor_python.can_utils import get_can_state, reset_can_interface
-from motor_python.definitions import CAN_DEFAULTS, MOTOR_DEFAULTS
-from motor_python.mit_mode_packer import AK60_6_MIT_LIMITS, pack_mit_frame
+from motor_python.definitions import (
+    CAN_DEFAULTS,
+    CURRENT_MOTOR_SPEC,
+    MOTOR_DEFAULTS,
+    LowPassFilterConfig,
+    MotorSpec,
+    PIDConfig,
+)
+from motor_python.mit_mode_packer import pack_mit_frame
+from motor_python.pid_controller import PIDController
 
 
 class CubeMarsAK606v3CAN(BaseMotor):
@@ -48,6 +56,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
         bitrate: int = CAN_DEFAULTS.bitrate,
         feedback_can_id: int | None = None,
         mit_velocity_kd: float | None = None,
+        motor_spec: MotorSpec | None = None,
         helper_policy: Literal["strict", "fcfd", "legacy"] = "fcfd",
         auto_recover_bus: bool = True,
         allow_legacy_feedback_ids: bool = False,
@@ -60,7 +69,9 @@ class CubeMarsAK606v3CAN(BaseMotor):
         :param bitrate: CAN bitrate in bits/sec.
         :param feedback_can_id: Optional explicit status frame ID.
         :param mit_velocity_kd: Optional default KD used by ``set_velocity()``.
-            If omitted, ``CAN_DEFAULTS.mit_velocity_kd`` is used.
+            If omitted, the current motor profile's default KD is used.
+        :param motor_spec: Optional hardware profile for the target motor.
+            If omitted, the currently selected motor profile is used.
         :param helper_policy: MIT helper-frame policy:
             ``strict`` = no helper frames,
             ``fcfd`` = use FF..FC / FF..FD compatibility frames,
@@ -85,14 +96,19 @@ class CubeMarsAK606v3CAN(BaseMotor):
         self._helper_policy = policy
         self._auto_recover_bus = auto_recover_bus
         self._aggressive_bus_reset = aggressive_bus_reset
+        self._motor_spec = CURRENT_MOTOR_SPEC if motor_spec is None else motor_spec
         velocity_kd = (
-            CAN_DEFAULTS.mit_velocity_kd
+            self._motor_spec.mit_velocity_kd
             if mit_velocity_kd is None
             else float(mit_velocity_kd)
         )
-        if not (AK60_6_MIT_LIMITS.kd_min <= velocity_kd <= AK60_6_MIT_LIMITS.kd_max):
+        if not (
+            self._motor_spec.mit_mode_limits.kd_min
+            <= velocity_kd
+            <= self._motor_spec.mit_mode_limits.kd_max
+        ):
             raise ValueError(
-                f"mit_velocity_kd must be in [{AK60_6_MIT_LIMITS.kd_min}, {AK60_6_MIT_LIMITS.kd_max}]"
+                f"mit_velocity_kd must be in [{self._motor_spec.mit_mode_limits.kd_min}, {self._motor_spec.mit_mode_limits.kd_max}]"
             )
         self._mit_velocity_kd = velocity_kd
 
@@ -142,6 +158,18 @@ class CubeMarsAK606v3CAN(BaseMotor):
             self._feedback_ids_ext.update(legacy_ids)
             self._feedback_ids_std.update(legacy_ids)
         self._feedback_ids: set[int] = self._feedback_ids_ext | self._feedback_ids_std
+
+        self.pid = PIDController(
+            pid_config=PIDConfig(
+                proportional_gain=1.0,
+                integral_gain=0.0,
+                derivative_gain=0.1,
+                output_limits=(-5000, 5000),  # ERPM limits
+            ),
+            filter_config=LowPassFilterConfig(),
+        )
+
+        self._pid_target_deg: float | None = None
 
         self._connect()
 
@@ -400,10 +428,38 @@ class CubeMarsAK606v3CAN(BaseMotor):
 
         return False
 
-    @staticmethod
-    def _mit_neutral_payload() -> bytes:
+    def set_velocity(self, velocity_erpm: int) -> None:
+        """Override velocity clamping to use the current motor profile limits."""
+        velocity_erpm_int = int(velocity_erpm)
+
+        if velocity_erpm_int == 0:
+            self.stop()
+            return
+
+        velocity_erpm_clamped = int(
+            np.clip(
+                velocity_erpm_int,
+                self._motor_spec.min_velocity_electrical_rpm,
+                self._motor_spec.max_velocity_electrical_rpm,
+            )
+        )
+        if velocity_erpm_clamped != velocity_erpm_int:
+            logger.warning(
+                f"Velocity {velocity_erpm_int} ERPM clamped to {velocity_erpm_clamped} ERPM"
+            )
+
+        super().set_velocity(velocity_erpm_clamped)
+
+    def _mit_neutral_payload(self) -> bytes:
         """Return a neutral MIT payload (no position/speed/torque command)."""
-        return pack_mit_frame(0.0, 0.0, 0.0, 0.0, 0.0, limits=AK60_6_MIT_LIMITS)
+        return pack_mit_frame(
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            limits=self._motor_spec.mit_mode_limits,
+        )
 
     def _send_raw(  # noqa: PLR0912, PLR0915
         self,
@@ -810,9 +866,21 @@ class CubeMarsAK606v3CAN(BaseMotor):
             * (2.0 * np.pi)
             / (
                 60.0
-                * float(CAN_DEFAULTS.motor_pole_pairs)
-                * float(CAN_DEFAULTS.motor_gear_ratio)
+                * float(self._motor_spec.pole_pairs)
+                * float(self._motor_spec.gear_ratio)
             )
+        )
+
+    def _rad_s_to_erpm(self, rad_s: float) -> int:
+        """Convert output-shaft mechanical rad/s to electrical RPM for AK60-6."""
+        return round(
+            rad_s
+            * (
+                60.0
+                * float(self._motor_spec.pole_pairs)
+                * float(self._motor_spec.gear_ratio)
+            )
+            / (2.0 * np.pi)
         )
 
     def _get_current_position_for_estimate(self) -> float:
@@ -825,8 +893,8 @@ class CubeMarsAK606v3CAN(BaseMotor):
         self.set_mit_mode(
             pos_rad=pos_rad,
             vel_rad_s=0.0,
-            kp=CAN_DEFAULTS.mit_position_kp,
-            kd=CAN_DEFAULTS.mit_position_kd,
+            kp=self._motor_spec.mit_position_kp,
+            kd=self._motor_spec.mit_position_kd,
             torque_ff_nm=0.0,
         )
 
@@ -1057,8 +1125,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
         Frame details implemented here follow the CubeMars manual:
         - Extended ID: ``(0x08 << 8) | motor_id``
         - Payload order: ``KP, KD, Position, Speed, Torque`` bit-packed in 8 bytes.
-        - AK60-6 limits:
-          ``pos ±12.56 rad, vel ±60 rad/s, torque ±12 Nm, kp 0..500, kd 0..5``.
+        - Limits are taken from the currently selected motor profile.
         """
         if not self.connected:
             logger.warning("Cannot send MIT command - CAN bus not connected")
@@ -1081,7 +1148,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
             kp=kp,
             kd=kd,
             t_ff=torque_ff_nm,
-            limits=AK60_6_MIT_LIMITS,
+            limits=self._motor_spec.mit_mode_limits,
         )
 
         # Send once immediately, then keep alive in the background.
