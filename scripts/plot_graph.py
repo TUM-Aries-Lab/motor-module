@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from motor_python.definitions import CURRENT_MOTOR_SPEC
 
 import numpy as np
 
@@ -20,9 +21,9 @@ if __package__ in {None, ""}:
         sys.path.insert(0, str(repo_src))
 
 FRAME_RATE_HZ = 200.0
-AK60_6_MOTOR_POLE_PAIRS = 14
-AK60_6_GEAR_RATIO = 6
-MECH_DEG_PER_SEC_PER_ERPM = 6.0 / (AK60_6_MOTOR_POLE_PAIRS * AK60_6_GEAR_RATIO)
+MOTOR_POLE_PAIRS = CURRENT_MOTOR_SPEC.pole_pairs
+GEAR_RATIO = CURRENT_MOTOR_SPEC.gear_ratio
+MECH_DEG_PER_SEC_PER_ERPM = 6.0 / (MOTOR_POLE_PAIRS * GEAR_RATIO)
 POSITION_TARGETS = (30, 50, 90)
 VELOCITY_SPEEDS = (1000, 3000, 5000)
 POSITION_MOCAP_FILES = {

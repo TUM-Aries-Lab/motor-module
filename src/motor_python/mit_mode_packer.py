@@ -35,7 +35,7 @@ AK60_6_MIT_LIMITS = MITModeLimits(
     kd_max=5.0,
 )
 
-# AK80-6 limits from CubeMars manual parameter table. (Page 42)
+# AK80-6 KV100 V2.0 limits (from CubeMars manual parameter table. (Page 42))
 AK80_6_MIT_LIMITS = MITModeLimits(
     p_min=-12.56,
     p_max=12.56,

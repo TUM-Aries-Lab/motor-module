@@ -11,6 +11,9 @@ This script is intentionally simple and strict:
 Run:
     sudo ./setup_can.sh
     .venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03
+
+    sudo ./setup_can.sh
+    .venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03 --velocity-rad 10 --motor-model AK80-6
 """
 # ruff: noqa: T201
 
@@ -26,7 +29,7 @@ from typing import Callable
 
 from motor_python.base_motor import MotorState
 from motor_python.can_utils import get_can_state, reset_can_interface
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN
 from motor_python.definitions import CAN_DEFAULTS
 
 SEPARATOR = "=" * 78
@@ -123,6 +126,18 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1000,
         help="Test start velocity in ERPM (range: -5000..5000, default: 1000)",
+    )
+    parser.add_argument(
+        "--velocity-rad",
+        type=float,
+        default=None,
+        help="Test start velocity in rad/s (commands MIT vel_rad_s directly). Overrides --velocity-erpm if set.",
+    )
+    parser.add_argument(
+        "--motor-model",
+        choices=("AK60-6", "AK80-6"),
+        default="AK60-6",
+        help="Motor model to instantiate (default: AK60-6)",
     )
     parser.add_argument(
         "--velocity-kd",
@@ -261,7 +276,7 @@ def ensure_can_ready(interface: str, bitrate: int, *, mode: str) -> None:
         )
 
 
-def read_status(motor: CubeMarsAK606v3CAN, timeout: float) -> MotorState | None:
+def read_status(motor, timeout: float) -> MotorState | None:
     """Read freshest available feedback without long blocking."""
     status = motor._receive_feedback(timeout=timeout)
     if status is not None:
@@ -269,8 +284,18 @@ def read_status(motor: CubeMarsAK606v3CAN, timeout: float) -> MotorState | None:
     return motor._last_feedback
 
 
-def _command_phase(motor: CubeMarsAK606v3CAN, command_erpm: int) -> None:
+def _command_phase(motor, command_erpm: int, command_rad_s: float | None = None, kd: float = 0.0) -> None:
     """Send one phase command."""
+    # if not motor.isinstance((CubeMarsAK606v3CAN, CubeMarsAK806v2CAN)):
+    #     raise TypeError("Expected CubeMarsAK606v3CAN or CubeMarsAK806v2CAN motor instance")
+    if command_rad_s is not None:
+        # Command MIT mode directly in rad/s precision
+        if abs(command_rad_s) < 1e-12:
+            motor.set_mit_mode(pos_rad=0.0, vel_rad_s=0.0, kp=0.0, kd=kd, torque_ff_nm=0.0)
+        else:
+            motor.set_mit_mode(pos_rad=0.0, vel_rad_s=command_rad_s, kp=0.0, kd=kd, torque_ff_nm=0.0)
+        return
+
     if command_erpm == 0:
         motor.set_mit_mode(
             pos_rad=0.0,
@@ -280,6 +305,7 @@ def _command_phase(motor: CubeMarsAK606v3CAN, command_erpm: int) -> None:
             torque_ff_nm=0.0,
         )
         return
+
     motor.set_velocity(command_erpm)
 
 
@@ -300,21 +326,23 @@ def _sign(value: float) -> int:
 
 
 def run_phase(  # noqa: PLR0913
-    motor: CubeMarsAK606v3CAN,
+    motor,
     *,
     phase_index: int,
     command_erpm: int,
+    command_rad_s: float | None,
     duration_s: float,
     sample_hz: float,
     min_informative_erpm: int,
     min_sign_match_ratio: float,
     min_informative_samples: int,
     max_missed_feedback: int,
+    kd: float,
     run_start: float,
     sample_logger: Callable[[dict[str, str | int]], None] | None = None,
 ) -> PhaseResult:
     """Execute a velocity phase and evaluate speed feedback quality."""
-    _command_phase(motor, command_erpm)
+    _command_phase(motor, command_erpm, command_rad_s=command_rad_s, kd=kd)
 
     period_s = 1.0 / sample_hz
     t_end = time.monotonic() + duration_s
@@ -429,14 +457,9 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
     args = parse_args()
     validate_args(args)
 
+    # Defer building the command sequence until after motor instantiation
+    # because rad/s <-> ERPM conversion requires motor-specific params.
     velocity_cmd = int(args.velocity_erpm)
-    sequence: list[tuple[int, float]] = [(velocity_cmd, args.phase_seconds)]
-    if args.neutral_seconds > 0:
-        sequence.append((0, args.neutral_seconds))
-    if not args.forward_only:
-        sequence.append((-velocity_cmd, args.phase_seconds))
-        if args.neutral_seconds > 0:
-            sequence.append((0, args.neutral_seconds))
 
     csv_path = _resolve_csv_path(args.csv_path, prefix="verify_set_velocity")
 
@@ -450,11 +473,18 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
     print(f"Legacy IDs     : {args.allow_legacy_feedback_ids}")
     if args.feedback_can_id is not None:
         print(f"Feedback CAN ID: 0x{args.feedback_can_id:08X}")
-    print(f"Velocity start : {velocity_cmd:+d} ERPM")
-    print(f"Velocity range : [{VERIFY_VELOCITY_MIN_ERPM}, {VERIFY_VELOCITY_MAX_ERPM}] ERPM")
+    if args.velocity_rad is not None:
+        print(f"Velocity start : {args.velocity_rad:.3f} rad/s")
+    else:
+        print(f"Velocity start : {int(args.velocity_erpm):+d} ERPM")
+        print(f"Velocity range : [{VERIFY_VELOCITY_MIN_ERPM}, {VERIFY_VELOCITY_MAX_ERPM}] ERPM")
     print(f"Velocity KD    : {args.velocity_kd:.3f}")
     print(f"Forward only   : {args.forward_only}")
-    print(f"Sequence       : {sequence}")
+    if args.velocity_rad is not None:
+        seq_desc = "[+rad, neutral, -rad, neutral]" if not args.forward_only else "[+rad, neutral]"
+    else:
+        seq_desc = "[+ERPM, neutral, -ERPM, neutral]" if not args.forward_only else "[+ERPM, neutral]"
+    print(f"Sequence       : {seq_desc}")
     print(f"Preflight mode : {args.preflight_mode}")
     print(f"CSV log        : {csv_path}")
     print(SEPARATOR)
@@ -478,15 +508,27 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
             csv_writer.writerow(row)
             csv_file.flush()
 
-        motor = CubeMarsAK606v3CAN(
-            motor_can_id=args.motor_id,
-            interface=args.interface,
-            bitrate=args.bitrate,
-            mit_velocity_kd=args.velocity_kd,
-            helper_policy=args.helper_policy,
-            allow_legacy_feedback_ids=args.allow_legacy_feedback_ids,
-            feedback_can_id=args.feedback_can_id,
-        )
+        # Instantiate the requested motor model
+        if args.motor_model == "AK80-6":
+            motor = CubeMarsAK806v2CAN(
+                motor_can_id=args.motor_id,
+                interface=args.interface,
+                bitrate=args.bitrate,
+                mit_velocity_kd=args.velocity_kd,
+                helper_policy=args.helper_policy,
+                allow_legacy_feedback_ids=args.allow_legacy_feedback_ids,
+                feedback_can_id=args.feedback_can_id,
+            )
+        else:
+            motor = CubeMarsAK606v3CAN(
+                motor_can_id=args.motor_id,
+                interface=args.interface,
+                bitrate=args.bitrate,
+                mit_velocity_kd=args.velocity_kd,
+                helper_policy=args.helper_policy,
+                allow_legacy_feedback_ids=args.allow_legacy_feedback_ids,
+                feedback_can_id=args.feedback_can_id,
+            )
         if not motor.connected:
             print("FAIL: could not connect to CAN motor interface")
             return 1
@@ -498,26 +540,56 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
         print("PASS: communication check")
         print("\nRunning verification phases...")
         run_start = time.monotonic()
+        # Build the phase sequence now that we have a motor instance
+        sequence_phases: list[tuple[int, float, float | None]] = []
+        if args.velocity_rad is not None:
+            base_rad = float(args.velocity_rad)
+            base_erpm = motor._rad_s_to_erpm(base_rad)
+            sequence_phases.append((base_erpm, base_rad, args.phase_seconds))
+            if args.neutral_seconds > 0:
+                sequence_phases.append((0, 0.0, args.neutral_seconds))
+            if not args.forward_only:
+                sequence_phases.append((-base_erpm, -base_rad, args.phase_seconds))
+                if args.neutral_seconds > 0:
+                    sequence_phases.append((0, 0.0, args.neutral_seconds))
+        else:
+            base_erpm = int(args.velocity_erpm)
+            sequence_phases.append((base_erpm, None, args.phase_seconds))
+            if args.neutral_seconds > 0:
+                sequence_phases.append((0, None, args.neutral_seconds))
+            if not args.forward_only:
+                sequence_phases.append((-base_erpm, None, args.phase_seconds))
+                if args.neutral_seconds > 0:
+                    sequence_phases.append((0, None, args.neutral_seconds))
 
-        for phase_index, (command_erpm, duration_s) in enumerate(sequence, start=1):
-            print(f"\nPhase: cmd={command_erpm:+d} ERPM for {duration_s:.2f} s")
+        for phase_index, (command_erpm, command_rad_s, duration_s) in enumerate(sequence_phases, start=1):
+            cmd_desc = f"{command_rad_s:.3f} rad/s" if command_rad_s is not None else f"{command_erpm:+d} ERPM"
+            print(f"\nPhase: cmd={cmd_desc} for {duration_s:.2f} s")
             result = run_phase(
                 motor,
                 phase_index=phase_index,
                 command_erpm=command_erpm,
+                command_rad_s=(command_rad_s if command_rad_s is not None else None),
                 duration_s=duration_s,
                 sample_hz=args.sample_hz,
                 min_informative_erpm=args.min_informative_erpm,
                 min_sign_match_ratio=args.min_sign_match_ratio,
                 min_informative_samples=args.min_informative_samples,
                 max_missed_feedback=args.max_missed_feedback,
+                kd=args.velocity_kd,
                 run_start=run_start,
                 sample_logger=write_sample_row,
             )
-            results.append(result)
+            results.append((result, command_rad_s))
             print_phase_result(result)
+            # If commanded in rad/s, print measured rad/s
+            if command_rad_s is not None and result.mean_speed_erpm is not None:
+                measured_rad_s = motor._erpm_to_rad_s(int(round(result.mean_speed_erpm)))
+                print(
+                    f"Measured mean: {measured_rad_s:.4f} rad/s vs commanded {command_rad_s:.4f} rad/s"
+                )
 
-        failed = [result for result in results if not result.pass_phase]
+        failed = [result for (result, _) in results if not result.pass_phase]
         print(f"\n{SEPARATOR}")
         if failed:
             print("FAIL: set_velocity verification failed")

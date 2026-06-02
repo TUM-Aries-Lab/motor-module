@@ -15,6 +15,7 @@ from motor_python.base_motor import BaseMotor, MotorState
 from motor_python.can_protocol import CANControlMode
 from motor_python.can_utils import get_can_state, reset_can_interface
 from motor_python.definitions import (
+    AK80_6_MOTOR_SPEC,
     CAN_DEFAULTS,
     CURRENT_MOTOR_SPEC,
     MOTOR_DEFAULTS,
@@ -97,18 +98,15 @@ class CubeMarsAK606v3CAN(BaseMotor):
         self._auto_recover_bus = auto_recover_bus
         self._aggressive_bus_reset = aggressive_bus_reset
         self._motor_spec = CURRENT_MOTOR_SPEC if motor_spec is None else motor_spec
+        self._mit_limits = self._motor_spec.mit_mode_limits
         velocity_kd = (
             self._motor_spec.mit_velocity_kd
             if mit_velocity_kd is None
             else float(mit_velocity_kd)
         )
-        if not (
-            self._motor_spec.mit_mode_limits.kd_min
-            <= velocity_kd
-            <= self._motor_spec.mit_mode_limits.kd_max
-        ):
+        if not (self._mit_limits.kd_min <= velocity_kd <= self._mit_limits.kd_max):
             raise ValueError(
-                f"mit_velocity_kd must be in [{self._motor_spec.mit_mode_limits.kd_min}, {self._motor_spec.mit_mode_limits.kd_max}]"
+                f"mit_velocity_kd must be in [{self._mit_limits.kd_min}, {self._mit_limits.kd_max}]"
             )
         self._mit_velocity_kd = velocity_kd
 
@@ -458,7 +456,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
             0.0,
             0.0,
             0.0,
-            limits=self._motor_spec.mit_mode_limits,
+            limits=self._mit_limits,
         )
 
     def _send_raw(  # noqa: PLR0912, PLR0915
@@ -1148,7 +1146,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
             kp=kp,
             kd=kd,
             t_ff=torque_ff_nm,
-            limits=self._motor_spec.mit_mode_limits,
+            limits=self._mit_limits,
         )
 
         # Send once immediately, then keep alive in the background.
@@ -1213,3 +1211,40 @@ class CubeMarsAK606v3CAN(BaseMotor):
             self.bus = None
 
         self.connected = False
+
+
+# A subclass for the AK80-6 V2, which has the same CAN protocol but different motor specs.
+class CubeMarsAK806v2CAN(CubeMarsAK606v3CAN):
+    """AK80-6 V2 Motor Controller over CAN with MIT force-control protocol."""
+
+    def __init__(  # noqa: PLR0913
+        self,
+        motor_can_id: int = CAN_DEFAULTS.motor_can_id,
+        interface: str = CAN_DEFAULTS.interface,
+        bitrate: int = CAN_DEFAULTS.bitrate,
+        feedback_can_id: int | None = None,
+        mit_velocity_kd: float | None = None,
+        motor_spec: MotorSpec | None = None,
+        helper_policy: Literal["strict", "fcfd", "legacy"] = "fcfd",
+        auto_recover_bus: bool = True,
+        allow_legacy_feedback_ids: bool = False,
+        aggressive_bus_reset: bool = False,
+    ) -> None:
+        """Initialize CAN motor connection for the AK80-6 V2.
+
+        :param motor_spec: If not provided, defaults to AK80_6_MOTOR_SPEC
+        """
+        if motor_spec is None:
+            motor_spec = AK80_6_MOTOR_SPEC
+        super().__init__(
+            motor_can_id=motor_can_id,
+            interface=interface,
+            bitrate=bitrate,
+            feedback_can_id=feedback_can_id,
+            mit_velocity_kd=mit_velocity_kd,
+            motor_spec=motor_spec,
+            helper_policy=helper_policy,
+            auto_recover_bus=auto_recover_bus,
+            allow_legacy_feedback_ids=allow_legacy_feedback_ids,
+            aggressive_bus_reset=aggressive_bus_reset,
+        )

@@ -11,6 +11,7 @@ from loguru import logger
 
 from motor_python.base_motor import BaseMotor, MotorState
 from motor_python.definitions import (
+    AK80_6_MOTOR_SPEC,
     CRC16_TAB,
     CRC_CONSTANTS,
     FRAME_BYTES,
@@ -429,3 +430,20 @@ class CubeMarsAK606v3(BaseMotor):
             self.stop()
             self.serial.close()
             logger.info("Motor connection closed")
+
+
+class CubeMarsAK806v2(CubeMarsAK606v3):
+    """AK80-6 Motor Controller for CubeMars V3 UART Protocol."""
+
+    def __init__(
+        self,
+        port: Path | str = MOTOR_DEFAULTS.port,
+        baudrate: int = MOTOR_DEFAULTS.baudrate,
+    ) -> None:
+        """Initialize AK80-6 UART motor connection.
+
+        :param port: Serial port path (default: MOTOR_DEFAULTS.port).
+        :param baudrate: Communication baudrate (default: MOTOR_DEFAULTS.baudrate).
+        """
+        self._motor_spec = AK80_6_MOTOR_SPEC
+        super().__init__(port=port, baudrate=baudrate)
