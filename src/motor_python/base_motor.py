@@ -451,3 +451,108 @@ class BaseMotor(abc.ABC):
             stats["tx_pace_sleep_time_s"] = tx_pace_sleep_time_s
 
         return stats
+
+    def reset_timing_stats(self) -> None:
+        """Reset timing-related diagnostic state used by get_timing_stats().
+
+        This clears any transport-specific timestamp buffers and zeroes
+        counters that are safe to reset for a fresh measurement run.
+        """
+        # Clear refresh timestamps used for jitter analysis (CAN transport)
+        if hasattr(self, "_refresh_timestamps"):
+            try:
+                self._refresh_timestamps.clear()
+            except Exception:
+                try:
+                    self._refresh_timestamps = type(self._refresh_timestamps)()
+                except Exception:
+                    logger.warning("Failed to reset _refresh_timestamps")
+
+        if hasattr(self, "_refresh_send_failures"):
+            try:
+                self._refresh_send_failures = 0
+            except Exception:
+                logger.warning("Failed to reset _refresh_send_failures")
+        if hasattr(self, "_refresh_no_feedback"):
+            try:
+                self._refresh_no_feedback = 0
+            except Exception:
+                logger.warning("Failed to reset _refresh_no_feedback")
+
+
+def print_timing_stats(
+    timing_stats: dict[str, float | int | bool],
+    total_feedback_samples: int,
+    separator: str,
+) -> None:
+    """Print timing and CAN health diagnostics."""
+    if not timing_stats.get("available", False):
+        return
+
+    logger.info(f"\n{separator}")
+    logger.info("Timing & Health Diagnostics")
+    logger.info(separator)
+
+    logger.info(
+        f"Loop effective Hz      : {timing_stats.get('loop_effective_hz', 0):.1f}"
+    )
+    logger.info(
+        f"Loop period (expected) : "
+        f"{timing_stats.get('loop_period_expected_s', 0):.6f} s"
+    )
+    logger.info(
+        f"Loop period (mean)     : {timing_stats.get('loop_period_mean_s', 0):.6f} s"
+    )
+    logger.info(
+        f"Loop period (std)      : {timing_stats.get('loop_period_std_s', 0):.6f} s"
+    )
+    logger.info(
+        f"Loop period (min/max)  : "
+        f"{timing_stats.get('loop_period_min_s', 0):.6f} / "
+        f"{timing_stats.get('loop_period_max_s', 0):.6f} s"
+    )
+
+    logger.info(
+        f"Jitter (>2x period)    : "
+        f"{timing_stats.get('loop_jitter_count', 0)} / "
+        f"{timing_stats.get('loop_intervals_total', 0)} "
+        f"({100.0 * timing_stats.get('loop_jitter_ratio', 0):.1f}%)"
+    )
+
+    logger.info(
+        f"TX pace sleeps         : "
+        f"{timing_stats.get('tx_pace_sleep_count', 0)} times, "
+        f"{timing_stats.get('tx_pace_sleep_time_s', 0):.3f} s total"
+    )
+
+    logger.info(
+        f"Send failures (cumul.) : {timing_stats.get('cumulative_send_failures', 0)}"
+    )
+
+    missed_feedback = timing_stats.get("cumulative_missed_feedback", 0)
+
+    if total_feedback_samples > 0:
+        missed_percentage = (missed_feedback / total_feedback_samples) * 100.0
+        logger.info(
+            f"Missed feedback (cumul) : "
+            f"{missed_feedback}/{total_feedback_samples} "
+            f"({missed_percentage:.1f}%)"
+        )
+    else:
+        logger.info(f"Feedback samples (total): {total_feedback_samples}")
+        logger.info(f"Missed feedback (cumul) : {missed_feedback}")
+
+    can_tx_delta = timing_stats.get("can_tx_err_delta", 0)
+    can_rx_delta = timing_stats.get("can_rx_err_delta", 0)
+
+    logger.info(
+        f"CAN errors             : "
+        f"tx_err {timing_stats.get('can_tx_err_initial', 0)}"
+        f"→{timing_stats.get('can_tx_err_final', 0)} "
+        f"(Δ{can_tx_delta:+d}), "
+        f"rx_err {timing_stats.get('can_rx_err_initial', 0)}"
+        f"→{timing_stats.get('can_rx_err_final', 0)} "
+        f"(Δ{can_rx_delta:+d})"
+    )
+
+    logger.info(separator)

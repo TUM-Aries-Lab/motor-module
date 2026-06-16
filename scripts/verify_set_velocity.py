@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from motor_python.base_motor import MotorState
+from motor_python.base_motor import MotorState, print_timing_stats
 from motor_python.can_utils import get_can_state, reset_can_interface
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
 from motor_python.definitions import CAN_DEFAULTS
@@ -121,7 +121,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--velocity-erpm",
         type=int,
-        default=1000,
+        default=3000,
         help="Test start velocity in ERPM (range: -5000..5000, default: 1000)",
     )
     parser.add_argument(
@@ -470,6 +470,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
     csv_writer: csv.DictWriter | None = None
     run_start = 0.0
     results: list[PhaseResult] = []
+    total_feedback_samples = 0
     try:
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         csv_file = csv_path.open("w", newline="", encoding="utf-8")
@@ -477,6 +478,8 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
         csv_writer.writeheader()
 
         def write_sample_row(row: dict[str, str | int]) -> None:
+            nonlocal total_feedback_samples
+            total_feedback_samples += 1
             if csv_writer is None or csv_file is None:
                 return
             csv_writer.writerow(row)
@@ -547,26 +550,38 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
         return 1
     finally:
         if motor is not None:
-            # Capture timing statistics before closing
             timing_stats = motor.get_timing_stats()
-            if timing_stats.get("available", False):
-                print(f"\n{SEPARATOR}")
-                print("Timing & Health Diagnostics")
-                print(SEPARATOR)
-                print(f"Loop effective Hz      : {timing_stats.get('loop_effective_hz', 0):.1f}")
-                print(f"Loop period (expected) : {timing_stats.get('loop_period_expected_s', 0):.6f} s")
-                print(f"Loop period (mean)     : {timing_stats.get('loop_period_mean_s', 0):.6f} s")
-                print(f"Loop period (std)      : {timing_stats.get('loop_period_std_s', 0):.6f} s")
-                print(f"Loop period (min/max)  : {timing_stats.get('loop_period_min_s', 0):.6f} / {timing_stats.get('loop_period_max_s', 0):.6f} s")
-                print(f"Jitter (>2x period)    : {timing_stats.get('loop_jitter_count', 0)} / {timing_stats.get('loop_intervals_total', 0)} ({100.0 * timing_stats.get('loop_jitter_ratio', 0):.1f}%)")
-                print(f"TX pace sleeps         : {timing_stats.get('tx_pace_sleep_count', 0)} times, {timing_stats.get('tx_pace_sleep_time_s', 0):.3f} s total")
-                print(f"Send failures (cumul.) : {timing_stats.get('cumulative_send_failures', 0)}")
-                print(f"Missed feedback (cumul): {timing_stats.get('cumulative_missed_feedback', 0)}"
-                      )
-                can_tx_delta = timing_stats.get("can_tx_err_delta", 0)
-                can_rx_delta = timing_stats.get("can_rx_err_delta", 0)
-                print(f"CAN errors             : tx_err {timing_stats.get('can_tx_err_initial', 0)}→{timing_stats.get('can_tx_err_final', 0)} (Δ{can_tx_delta:+d}), rx_err {timing_stats.get('can_rx_err_initial', 0)}→{timing_stats.get('can_rx_err_final', 0)} (Δ{can_rx_delta:+d})")
-                print(SEPARATOR)
+
+            # Print timing stats summary in terminal
+            print_timing_stats(
+                    timing_stats,
+                    total_feedback_samples,
+                    SEPARATOR
+                    )
+
+            # Write timing stats summary to CSV
+            try:
+                if timing_stats.get("available", False):
+                    # Write timing stats to CSV
+                    timing_csv_path = csv_path.with_suffix(".timing_stats.csv")
+
+                    file_exists = timing_csv_path.exists()
+
+                    with timing_csv_path.open("a", newline="", encoding="utf-8") as timing_csv_file:
+                        writer = csv.writer(timing_csv_file)
+
+                        if not file_exists:
+                            writer.writerow(["metric", "value"])
+
+                        for key in sorted(timing_stats.keys()):
+                            writer.writerow([key, timing_stats.get(key)])
+
+                    print(f"Timing stats saved to: {timing_csv_path}")
+                else:
+                    print("Timing stats not available from motor.")
+
+            except Exception as exc:
+                print(f"WARN: Failed to write the timing stats to CSV: {exc}")
 
         if csv_file is not None:
             try:

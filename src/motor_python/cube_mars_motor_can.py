@@ -834,6 +834,21 @@ class CubeMarsAK606v3CAN(BaseMotor):
             self._refresh_thread = None
         self._refresh_stop.clear()
 
+    def set_refresh_rate_hz(self, refresh_rate_hz: float) -> None:
+        """Set the MIT refresh loop rate used for active command keepalive.
+
+        This is primarily a test helper for measuring how the CAN refresh
+        loop behaves at different rates.
+        """
+        if refresh_rate_hz <= 0.0:
+            raise ValueError("refresh_rate_hz must be > 0")
+        self._refresh_interval = 1.0 / float(refresh_rate_hz)
+        self._tx_min_interval = max(0.0, self._refresh_interval / 2.0)
+        try:
+            self.reset_timing_stats()
+        except Exception:
+            logger.debug("Failed to reset timing stats after refresh rate change")
+
     # ------------------------------------------------------------------
     # BaseMotor-required API
     # ------------------------------------------------------------------
@@ -893,6 +908,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
     def _send_velocity_command(self, velocity_erpm: int) -> None:
         """Velocity loop in MIT mode (``kp=0``, ``kd>0``)."""
         vel_rad_s = self._erpm_to_rad_s(velocity_erpm)
+        logger.info(f"Setting velocity: {velocity_erpm} ERPM -> {vel_rad_s:.2f} rad/s")
         self.set_mit_mode(
             pos_rad=0.0,
             vel_rad_s=vel_rad_s,
