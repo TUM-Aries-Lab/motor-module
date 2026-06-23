@@ -281,6 +281,10 @@ def run_multi_motor_demo(manager: MotorManager) -> None:
             motor.stop()
 
 
+# TODO:
+# This standalone function manually manages two motors with a bare try/finally.
+# Now that MotorManager exists, this is the obvious candidate for refactoring (or at least using with statements per motor).
+# As a standalone example it still works, but it's inconsistent with the module's new idioms.
 def multi_motor_can_example(
     left_can_id: int = 0x03,
     right_can_id: int = 0x04,

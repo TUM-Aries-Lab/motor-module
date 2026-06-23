@@ -2,6 +2,7 @@
 
 The manager creates one `CubeMarsAK606v3CAN` instance per motor ID and
 provides label-based access, lifecycle helpers, and context-manager cleanup.
+_closed and _motors are accessed without locks, so this class is not thread-safe. Use a lock later if you need to access it from multiple threads.
 """
 
 from __future__ import annotations
@@ -150,7 +151,7 @@ class MotorManager:
                     logger.exception("Motor failed to close")
                 errors.append(exc)
 
-        self._closed = True
+        self._closed = True  # Mark as closed to prevent future operations
         if errors:
             raise ExceptionGroup("MotorManager.close failed", errors)
 
@@ -165,4 +166,5 @@ class MotorManager:
         traceback: object | None,
     ) -> None:
         """Context manager exit - ensures all motors are closed."""
+        self.stop_all()  # Attempt to stop all motors first
         self.close()
