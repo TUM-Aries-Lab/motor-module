@@ -217,6 +217,10 @@ def main() -> int:  # noqa: C901, PLR0912
         section("1) check_communication()")
         if not motor.check_communication():
             print("FAIL: motor did not respond")
+            try:
+                motor.disable_mit_mode()
+            except Exception:
+                pass
             return 1
         print("PASS: motor communication verified")
 

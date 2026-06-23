@@ -30,6 +30,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from motor_python.definitions import CAN_DEFAULTS
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
 
 # Suppress INFO/DEBUG logs from the motor class so terminal output stays clean.
@@ -49,7 +50,7 @@ SETTLE_ERPM  = 200       # ERPM    — arm considered stopped
 SETTLE_TIME  = 0.5       # seconds — must hold settled for this long
 MOVE_TIMEOUT = 25.0      # seconds — abort step if no settle by then
 HOLD_TIME    = 2.0       # seconds — actively hold at target (PD loop on)
-LOOP_HZ      = 10        # control loop rate (Hz)
+LOOP_HZ      = CAN_DEFAULTS.motor_control_rate_hz        # control loop rate (Hz)
 LOG_DIR      = Path(__file__).parent.parent / "data" / "logs"
 # ──────────────────────────────────────────────────────────────────────────────
 

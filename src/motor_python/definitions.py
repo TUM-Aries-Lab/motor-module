@@ -85,23 +85,24 @@ class CANDefaults:
 
     Motor hardware and control tuning constants are not hard-coded here;
     use the `MotorSpec` profiles for AK60-6 / AK80-6 model-specific values.
+    - Periodic Feedback: 100Hz
     """
 
     interface: str = "can0"  # SocketCAN interface name (can0 or can1 on Jetson)
     bitrate: int = 1000000  # CAN bus bitrate in bits/sec (1 Mbps per motor config)
     motor_can_id: int = 0x03  # Default motor CAN ID — primary / left motor (ID: 3)
-    motor_can_id_2: int = (
-        0x04  # Secondary motor CAN ID — right motor (ID: 4, arrives Wednesday)
-    )
+    motor_can_id_2: int = 0x04  # Secondary motor CAN ID — right motor (ID: 4)
     controller_can_id: int = 0x00  # Controller/master CAN ID
     receive_timeout: float = 0.5  # Timeout for receiving CAN messages (seconds)
     connection_stabilization_delay: float = 0.05  # Delay after CAN bus init
     max_retries: int = 3  # Max transmission retries on error
-    feedback_rate_hz: int = 50  # Motor periodic feedback rate (from motor config)
+    motor_control_rate_hz: int = 100  # Motor periodic feedback rate (from motor config)
     refresh_capture_window_s: float = 0.025  # Per-iteration receive window in the refresh loop (s); covers one keepalive + command round-trip (~20 ms) within the 100 ms watchdog budget
     mit_position_kp: float = 20.0  # Default stiffness for set_position() in MIT mode
     mit_position_kd: float = 1.0  # Default damping for set_position() in MIT mode
     mit_velocity_kd: float = 0.2  # Conservative default damping for MIT velocity mode to reduce start-up torque spikes
+    retry_backoff: float = 0.01  # Base backoff time for retries (seconds)
+    can_reset_pause: float = 0.1  # Small Pause after CAN bus reset (seconds)
 
 
 @dataclass(frozen=True)

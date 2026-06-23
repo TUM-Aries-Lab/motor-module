@@ -68,6 +68,7 @@ import struct
 import sys
 import time
 from typing import NamedTuple
+from motor_python.definitions import CAN_DEFAULTS
 
 import can
 
@@ -89,7 +90,7 @@ DISABLE_PAYLOAD = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD])
 # Test parameters
 DEFAULT_ERPM  = 5000          # library blocks < 5000 ERPM (firmware low-speed PID issue)
 PHASE_SECS    = 5.0           # seconds per direction
-LOOP_HZ       = 50            # command rate
+LOOP_HZ       = CAN_DEFAULTS.motor_control_rate_hz           # command rate
 RECV_TIMEOUT  = 0.025         # 25 ms recv window — keepalive ACK + velocity reply
 
 # Safety: never exceed this |ERPM| regardless of argument

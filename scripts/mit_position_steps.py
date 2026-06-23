@@ -31,9 +31,10 @@ if __package__ in {None, ""}:
     if str(repo_src) not in sys.path:
         sys.path.insert(0, str(repo_src))
 
-from motor_python.base_motor import MotorState
+from motor_python.base_motor import MotorState, print_timing_stats
 from motor_python.can_utils import get_can_state, reset_can_interface
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+from motor_python.definitions import CAN_DEFAULTS
 
 SEPARATOR = "=" * 72
 HEALTHY_TX_ERR_MAX = 96
@@ -48,7 +49,7 @@ DEFAULT_ANGLE_DEG = 50.0
 DEFAULT_DURATION_S = 180.0
 DEFAULT_VELOCITY_DEG_S = 100.0
 DEFAULT_TICK_PAUSE_S = 0.5
-DEFAULT_CONTROL_HZ = 20.0
+DEFAULT_CONTROL_HZ = CAN_DEFAULTS.motor_control_rate_hz  # 100.0 Hz
 DEFAULT_SWEEP_MIN_DEG = -650.0
 DEFAULT_SWEEP_MAX_DEG = 650.0
 
@@ -224,13 +225,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--motor-id",
         type=lambda value: int(value, 0),
-        default=0x03,
+        default=CAN_DEFAULTS.motor_can_id,
         help="Motor CAN ID in decimal or hex (default: 0x03)",
     )
     parser.add_argument(
         "--bitrate",
         type=int,
-        default=1_000_000,
+        default=CAN_DEFAULTS.bitrate,
         help="CAN bitrate (default: 1000000)",
     )
     parser.add_argument(
@@ -441,6 +442,7 @@ def main() -> int:
         tick_index = 0
         turnarounds = 0
         last_status = status0
+        total_feedback_samples = 0
 
         def log_sample(
             elapsed_s: float,
@@ -450,6 +452,8 @@ def main() -> int:
             segment_target_deg: float,
             status: MotorState | None,
         ) -> None:
+            nonlocal total_feedback_samples
+            total_feedback_samples += 1
             if csv_writer is None or csv_file is None:
                 return
             now_epoch = time.time()
@@ -571,6 +575,14 @@ def main() -> int:
         print(f"\nFAIL: {exc}")
         return 1
     finally:
+        if motor is not None:
+            # Capture timing statistics before closing
+            print_timing_stats(
+                    motor.get_timing_stats(),
+                    total_feedback_samples,
+                    SEPARATOR
+                    )
+
         if csv_file is not None:
             try:
                 csv_file.close()
