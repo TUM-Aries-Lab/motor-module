@@ -20,10 +20,16 @@ from motor_python.definitions import (
     CURRENT_MOTOR_SPEC,
     MOTOR_DEFAULTS,
     LowPassFilterConfig,
+    MITModeLimits,
     MotorSpec,
     PIDConfig,
 )
-from motor_python.mit_mode_packer import pack_mit_frame
+from motor_python.mit_mode_packer import (
+    AK60_6_MIT_LIMITS,
+    AK80_6_MIT_LIMITS,
+    float_to_uint,
+    uint_to_float,
+)
 from motor_python.pid_controller import PIDController
 
 
@@ -50,14 +56,14 @@ class CubeMarsAK606v3CAN(BaseMotor):
     )
     _HELPER_POLICIES: ClassVar[set[str]] = {"strict", "fcfd", "legacy"}
 
-    def __init__(  # noqa: PLR0913, PLR0915
+    def __init__(  # noqa: PLR0915
         self,
         motor_can_id: int = CAN_DEFAULTS.motor_can_id,
         interface: str = CAN_DEFAULTS.interface,
         bitrate: int = CAN_DEFAULTS.bitrate,
         feedback_can_id: int | None = None,
         mit_velocity_kd: float | None = None,
-        motor_spec: MotorSpec | None = None,
+        motor_spec: MotorSpec = CURRENT_MOTOR_SPEC,
         helper_policy: Literal["strict", "fcfd", "legacy"] = "fcfd",
         auto_recover_bus: bool = True,
         allow_legacy_feedback_ids: bool = False,
@@ -85,6 +91,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
         """
         super().__init__()
         self.motor_can_id = motor_can_id
+        self.motor_model = motor_spec.model_name
         self.interface = interface
         self.bitrate = bitrate
         self.bus: can.BusABC | None = None
@@ -247,7 +254,9 @@ class CubeMarsAK606v3CAN(BaseMotor):
             self.connected = False
 
     def _build_extended_id(self, mode: int) -> int:
-        """Build extended arbitration ID: ``(mode << 8) | motor_can_id``."""
+        """AK60-6 only."""
+        if self.motor_model == "AK80-6":
+            raise ValueError("AK80-6 does not use extended ID format")
         return (mode << 8) | self.motor_can_id
 
     def _pace_tx(self) -> None:
@@ -344,6 +353,48 @@ class CubeMarsAK606v3CAN(BaseMotor):
         }
         self._last_can_state_cache_monotonic = now
         return self._last_can_state_cache
+
+    def pack_mit_frame(
+        self,
+        p_des: float,
+        v_des: float,
+        kp: float,
+        kd: float,
+        t_ff: float,
+        limits: MITModeLimits = AK60_6_MIT_LIMITS,
+    ) -> bytes:
+        """Pack Force Control Mode payload according to CubeMars manual layout.
+
+        For AK60-6 only.
+
+        Byte layout (AK manual, mode ID = 8):
+        DATA[0] = KP high 8 bits
+        DATA[1] = KP low 4 bits | KD high 4 bits
+        DATA[2] = KD low 8 bits
+        DATA[3] = Position high 8 bits
+        DATA[4] = Position low 8 bits
+        DATA[5] = Speed high 8 bits
+        DATA[6] = Speed low 4 bits | Torque high 4 bits
+        DATA[7] = Torque low 8 bits
+        """
+        p_int = float_to_uint(p_des, limits.p_min, limits.p_max, 16)
+        v_int = float_to_uint(v_des, limits.v_min, limits.v_max, 12)
+        kp_int = float_to_uint(kp, limits.kp_min, limits.kp_max, 12)
+        kd_int = float_to_uint(kd, limits.kd_min, limits.kd_max, 12)
+        t_int = float_to_uint(t_ff, limits.t_min, limits.t_max, 12)
+
+        return bytes(
+            [
+                kp_int >> 4,
+                ((kp_int & 0xF) << 4) | (kd_int >> 8),
+                kd_int & 0xFF,
+                p_int >> 8,
+                p_int & 0xFF,
+                v_int >> 4,
+                ((v_int & 0xF) << 4) | (t_int >> 8),
+                t_int & 0xFF,
+            ]
+        )
 
     @staticmethod
     def _is_unhealthy_bus_state(state: dict[str, int | str]) -> bool:
@@ -450,7 +501,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
 
     def _mit_neutral_payload(self) -> bytes:
         """Return a neutral MIT payload (no position/speed/torque command)."""
-        return pack_mit_frame(
+        return self.pack_mit_frame(
             0.0,
             0.0,
             0.0,
@@ -466,6 +517,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
         *,
         capture_response: bool = True,
         timeout: float = 0.1,
+        force_extended: bool | None = None,
     ) -> bool:
         """Send one extended CAN frame and optionally capture immediate feedback."""
         if not self.connected or self.bus is None:
@@ -484,10 +536,15 @@ class CubeMarsAK606v3CAN(BaseMotor):
         else:
             payload = data
 
+        if force_extended is None:
+            is_extended = self.motor_model != "AK80-6"
+        else:
+            is_extended = force_extended
+
         msg = can.Message(
             arbitration_id=arbitration_id,
             data=payload,
-            is_extended_id=True,
+            is_extended_id=is_extended,
         )
 
         reconnected = False
@@ -597,11 +654,21 @@ class CubeMarsAK606v3CAN(BaseMotor):
     def _send_mit_payload(
         self, payload: bytes, *, capture_response: bool = True
     ) -> bool:
-        """Send one Force Control Mode (MIT) command frame."""
+        """Send MIT command frame for AK60-6 or AK80-6."""
+        if self.motor_model == "AK80-6":
+            # AK80-6 uses STANDARD FRAME
+            arbitration_id = self.motor_can_id
+            is_extended = False
+        else:
+            # AK60-6 uses EXTENDED FRAME
+            arbitration_id = self._build_extended_id(CANControlMode.MIT_MODE)
+            is_extended = True
+
         return self._send_raw(
-            self._build_extended_id(CANControlMode.MIT_MODE),
+            arbitration_id,
             payload,
             capture_response=capture_response,
+            force_extended=is_extended,
         )
 
     # ------------------------------------------------------------------
@@ -626,6 +693,8 @@ class CubeMarsAK606v3CAN(BaseMotor):
         if len(msg.data) < 8:
             logger.warning(f"Received short CAN message: {len(msg.data)} bytes")
             return None
+
+        logger.debug(f"RAW feedback bytes: {' '.join(f'{b:02X}' for b in msg.data)}")
 
         pos_int = struct.unpack(">h", msg.data[0:2])[0]
         speed_int = struct.unpack(">h", msg.data[2:4])[0]
@@ -962,7 +1031,19 @@ class CubeMarsAK606v3CAN(BaseMotor):
         return None
 
     def get_status(self) -> MotorState | None:
-        """Return latest parsed motor telemetry."""
+        """Return latest parsed motor telemetry.
+
+        Per CubeMars manual AK80-6 (Page 41): re-sending the enter MIT command
+        returns current state in a stateless manner.
+        """
+        if not self.connected:
+            return None
+        READ_STATE = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC])
+        self._send_raw(
+            arbitration_id=self.motor_can_id,
+            data=READ_STATE,
+            capture_response=True,
+        )
         feedback = self._receive_feedback(timeout=0.5)
         if feedback is None:
             feedback = self._last_feedback
@@ -1140,7 +1221,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
         if not self._mit_enabled:
             self.enable_mit_mode()
 
-        payload = pack_mit_frame(
+        payload = self.pack_mit_frame(
             p_des=pos_rad,
             v_des=vel_rad_s,
             kp=kp,
@@ -1213,18 +1294,18 @@ class CubeMarsAK606v3CAN(BaseMotor):
         self.connected = False
 
 
-# A subclass for the AK80-6 V2, which has the same CAN protocol but different motor specs.
+# A subclass for the AK80-6 V2, which has the same CAN protocol but different motor specs and some different methods.
 class CubeMarsAK806v2CAN(CubeMarsAK606v3CAN):
     """AK80-6 V2 Motor Controller over CAN with MIT force-control protocol."""
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         motor_can_id: int = CAN_DEFAULTS.motor_can_id,
         interface: str = CAN_DEFAULTS.interface,
         bitrate: int = CAN_DEFAULTS.bitrate,
         feedback_can_id: int | None = None,
         mit_velocity_kd: float | None = None,
-        motor_spec: MotorSpec | None = None,
+        motor_spec: MotorSpec = CURRENT_MOTOR_SPEC,
         helper_policy: Literal["strict", "fcfd", "legacy"] = "fcfd",
         auto_recover_bus: bool = True,
         allow_legacy_feedback_ids: bool = False,
@@ -1248,3 +1329,174 @@ class CubeMarsAK806v2CAN(CubeMarsAK606v3CAN):
             allow_legacy_feedback_ids=allow_legacy_feedback_ids,
             aggressive_bus_reset=aggressive_bus_reset,
         )
+
+    def _parse_feedback_msg(self, msg: can.Message) -> MotorState | None:
+        """Parse AK80-6 MIT feedback frame."""
+        if msg.is_error_frame:
+            return None
+        if getattr(msg, "is_remote_frame", False):
+            return None
+
+        is_rx = getattr(msg, "is_rx", None)
+        if is_rx is False:
+            return None
+
+        allowed_ids = (
+            self._feedback_ids_ext if msg.is_extended_id else self._feedback_ids_std
+        )
+
+        if msg.arbitration_id not in allowed_ids:
+            return None
+        if len(msg.data) < 7:
+            return None
+
+        d = msg.data
+
+        # AK80 MIT reply format from CubeMars manual
+        motor_id = d[0]
+        p_int = (d[1] << 8) | d[2]
+        v_int = (d[3] << 4) | (d[4] >> 4)
+        i_int = ((d[4] & 0x0F) << 8) | d[5]
+        temp_raw = d[6]
+        error_code = d[7] if len(d) > 7 else 0
+
+        # Manual uses I_MAX here, not torque limits.
+        self._mit_current_max = 12.0
+
+        # Convert back to physical units
+        position_rad = uint_to_float(
+            p_int,
+            self._mit_limits.p_min,
+            self._mit_limits.p_max,
+            16,
+        )
+        velocity_rad_s = uint_to_float(
+            v_int,
+            self._mit_limits.v_min,
+            self._mit_limits.v_max,
+            12,
+        )
+        current_amps = uint_to_float(
+            i_int,
+            -self._mit_current_max,
+            self._mit_current_max,
+            12,
+        )
+
+        temperature_celsius = temp_raw - 40
+
+        # Convert velocity to ERPM for compatibility with MotorState
+        speed_erpm = int(
+            velocity_rad_s * self._motor_spec.pole_pairs * 60.0 / (2.0 * np.pi)
+        )
+
+        logger.debug(
+            f"Parsed AK80 MIT feedback ints: motor_id={motor_id} p={position_rad} v={velocity_rad_s} i={current_amps} temp={temperature_celsius} error={error_code}"
+        )
+
+        feedback = MotorState(
+            position_degrees=np.degrees(position_rad),
+            speed_erpm=speed_erpm,
+            current_amps=current_amps,
+            temperature_celsius=temperature_celsius,
+            error_code=error_code,
+        )
+
+        if self._active_feedback_id != msg.arbitration_id:
+            self._active_feedback_id = msg.arbitration_id
+            logger.info(f"Active AK80 MIT feedback CAN ID: 0x{msg.arbitration_id:08X}")
+
+        return feedback
+
+    # ruff: noqa: PLR0913
+    def pack_mit_frame(
+        self,
+        p_des: float,
+        v_des: float,
+        kp: float,
+        kd: float,
+        t_ff: float,
+        limits: MITModeLimits = AK80_6_MIT_LIMITS,
+    ) -> bytes:
+        """Pack MIT command frame for AK80-6 V2."""
+        p_int = float_to_uint(
+            p_des,
+            limits.p_min,
+            limits.p_max,
+            16,
+        )
+        v_int = float_to_uint(
+            v_des,
+            limits.v_min,
+            limits.v_max,
+            12,
+        )
+        kp_int = float_to_uint(
+            kp,
+            limits.kp_min,
+            limits.kp_max,
+            12,
+        )
+        kd_int = float_to_uint(
+            kd,
+            limits.kd_min,
+            limits.kd_max,
+            12,
+        )
+        t_int = float_to_uint(
+            t_ff,
+            limits.t_min,
+            limits.t_max,
+            12,
+        )
+
+        logger.debug(
+            f"Packing AK80 MIT frame: p={p_des:.3f} rad (int {p_int}) "
+            f"v={v_des:.3f} rad/s (int {v_int}) kp={kp:.2f} (int {kp_int}) "
+            f"kd={kd:.2f} (int {kd_int}) t_ff={t_ff:.2f} Nm (int {t_int})"
+        )
+
+        return bytes(
+            [
+                (p_int >> 8) & 0xFF,
+                p_int & 0xFF,
+                (v_int >> 4) & 0xFF,
+                ((v_int & 0x0F) << 4) | ((kp_int >> 8) & 0x0F),
+                kp_int & 0xFF,
+                (kd_int >> 4) & 0xFF,
+                ((kd_int & 0x0F) << 4) | ((t_int >> 8) & 0x0F),
+                t_int & 0xFF,
+            ]
+        )
+
+    def _send_velocity_command(self, velocity_erpm: int) -> None:
+        """AK80-6 needs torque feedforward to overcome higher static friction."""
+        vel_rad_s = self._erpm_to_rad_s(velocity_erpm)
+        direction = 1.0 if vel_rad_s >= 0 else -1.0
+
+        tau_ff = float(np.clip(abs(vel_rad_s) * 0.5, 3.0, 8.0)) * direction
+
+        self.set_mit_mode(
+            pos_rad=0.0,
+            vel_rad_s=vel_rad_s,
+            kp=0.5,
+            kd=self._mit_velocity_kd,
+            torque_ff_nm=tau_ff,
+        )
+
+    def _connect(self) -> None:
+        """Connect and reset MIT state for clean startup."""
+        super()._connect()
+
+        if not self.connected:
+            return
+
+        # Force exit MIT mode first in case motor is still in it from previous session
+        self._send_raw(
+            arbitration_id=self.motor_can_id,
+            data=self._CAN_HELPER_DISABLE,  # 0xFD
+            capture_response=False,
+        )
+        time.sleep(0.15)  # motor needs ~100ms to fully exit MIT mode
+
+        logger.info("AK80-6 startup MIT reset complete")

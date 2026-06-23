@@ -13,7 +13,7 @@ Run:
     .venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03
 
     sudo ./setup_can.sh
-    .venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03 --velocity-rad 10 --motor-model AK80-6
+    .venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03 --velocity-rad 1 --motor-model AK80-6
 """
 # ruff: noqa: T201
 

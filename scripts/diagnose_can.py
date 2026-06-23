@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CAN reliability diagnostic for CubeMars AK60-6.
+"""CAN reliability diagnostic for CubeMars AK60-6/AK80-6.
 
 Tests each phase of the connection sequence independently:
   1. CAN bus state (ERROR-ACTIVE vs PASSIVE vs BUS-OFF)
@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import can
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from motor_python import create_can_motor
 
 ENABLE_FRAME = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC])
 IMU_FLOOD_STD_ID = 0x0088
@@ -41,6 +43,7 @@ class DiagnosticConfig:
     enable_attempts: int
     status_attempts: int
     skip_reset: bool
+    motor_model: str
 
 
 def parse_int(value: str) -> int:
@@ -67,6 +70,7 @@ def build_driver_filters(motor_id: int) -> list[dict[str, int | bool]]:
         {"can_id": motor_id + 1, "can_mask": CAN_MASK_EXTENDED, "extended": True},
         {"can_id": motor_id, "can_mask": CAN_MASK_EXTENDED, "extended": True},
         {"can_id": 0x0080 | motor_id, "can_mask": CAN_MASK_EXTENDED, "extended": True},
+        {"can_id": motor_id, "can_mask": CAN_MASK_STANDARD, "extended": False},
         {"can_id": motor_id + 1, "can_mask": CAN_MASK_STANDARD, "extended": False},
     ]
 
@@ -301,13 +305,13 @@ def test_get_status_loop(config: DiagnosticConfig) -> dict[str, float]:
     print(f"Test 4: Full driver enable + get_status ({config.status_attempts} attempts)")
     print(f"{'-' * 60}")
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-    from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
 
     results = []
     for i in range(config.status_attempts):
         motor = None
         try:
-            motor = CubeMarsAK606v3CAN(
+            motor = create_can_motor(
+                config.motor_model,
                 motor_can_id=config.motor_id,
                 interface=config.interface,
             )
@@ -383,6 +387,12 @@ def parse_args() -> DiagnosticConfig:
         action="store_true",
         help="Do not reset can0 when bus state is not ERROR-ACTIVE.",
     )
+    parser.add_argument(
+        "--motor-model",
+        choices=("AK60-6", "AK80-6"),
+        default="AK60-6",
+        help="Motor model to diagnose (default: AK60-6)",
+    )
     args = parser.parse_args()
     return DiagnosticConfig(
         motor_id=args.motor_id,
@@ -392,6 +402,7 @@ def parse_args() -> DiagnosticConfig:
         enable_attempts=args.enable_attempts,
         status_attempts=args.status_attempts,
         skip_reset=args.skip_reset,
+        motor_model=args.motor_model,
     )
 
 
@@ -401,6 +412,7 @@ def main(config: DiagnosticConfig) -> None:
     print("  CAN Reliability Diagnostic")
     print("=" * 60)
     print(f"  Interface : {config.interface}")
+    print(f"  Motor model: {config.motor_model}")
     print(f"  Motor ID  : 0x{config.motor_id:02X}")
     print(f"  IMU flood : 0x{IMU_FLOOD_STD_ID:03X} (standard ID)")
 

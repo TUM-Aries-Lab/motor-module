@@ -5,27 +5,57 @@ Run this after: sudo ./setup_can.sh && .venv/bin/python scripts/quick_test.py
 Make sure the UART cable is DISCONNECTED from the motor first.
 """
 
+import argparse
 import struct
 import time
 
 import can
 
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+from motor_python import create_can_motor
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Quick CAN feedback diagnostic")
+    parser.add_argument(
+        "--interface",
+        default="can0",
+        help="SocketCAN interface",
+    )
+    parser.add_argument(
+        "--motor-id",
+        type=lambda value: int(value, 0),
+        default=0x03,
+        help="Motor CAN ID in decimal or hex (default: 0x03)",
+    )
+    parser.add_argument(
+        "--motor-model",
+        choices=("AK60-6", "AK80-6"),
+        default="AK60-6",
+        help="Motor model to instantiate (default: AK60-6)",
+    )
+    return parser.parse_args()
+
+
+args = parse_args()
 
 print("=" * 60)
 print("CAN Motor Feedback Diagnostic")
-print("Motor CAN ID: 0x03  |  Interface: can0")
+print(f"Motor model: {args.motor_model}")
+print(f"Motor CAN ID: 0x{args.motor_id:02X}  |  Interface: {args.interface}")
 print("UART cable must be DISCONNECTED for CAN control")
 print("=" * 60)
 
 # ── Step 1: enable motor then sniff ALL 8-byte frames for 3 s ──
 print("\n[1] Sending enable command, then listening (3 s) for ALL 8-byte frames...")
-bus = can.interface.Bus(channel="can0", interface="socketcan")
+bus = can.interface.Bus(channel=args.interface, interface="socketcan")
+
+# AK80-6 uses standard 11-bit frames; AK60-6 uses extended 29-bit frames
+is_extended_id = True if args.motor_model != "AK80-6" else False
 
 enable_msg = can.Message(
     arbitration_id=0x03,
     data=bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC]),
-    is_extended_id=True,
+    is_extended_id=is_extended_id,
 )
 bus.send(enable_msg)
 print(f"  TX enable → 0x{enable_msg.arbitration_id:08X}  FF FF FF FF FF FF FF FC")
@@ -49,7 +79,7 @@ BACKGROUND_IDS = {
     0x0100: "heartbeat (not motor)",
 }
 # Confirmed motor feedback ID (Session 2 verified, EXT 29-bit frame)
-MOTOR_FEEDBACK_ID = 0x2903
+MOTOR_FEEDBACK_ID = 0x2900 | args.motor_id
 
 print()
 if seen:
@@ -83,9 +113,13 @@ else:
 bus.shutdown()
 
 # ── Step 2: try with our CAN class (send command, check cached response) ──
-print("\n[2] Testing with CubeMarsAK606v3CAN (ID=0x03)...")
+print(f"\n[2] Testing with {args.motor_model} class (ID=0x{args.motor_id:02X})...")
 print("    Motor is response-only: feedback comes as reply to each command.")
-motor = CubeMarsAK606v3CAN(motor_can_id=0x03)
+motor = create_can_motor(
+    args.motor_model,
+    motor_can_id=args.motor_id,
+    interface=args.interface,
+)
 motor.enable_motor()          # sends enable → auto-captures 0x2903 response
 
 got = 0

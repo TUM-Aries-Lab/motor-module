@@ -12,22 +12,54 @@ Run:
     .venv/bin/python scripts/stress_test_can.py
 """
 
+import argparse
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+from motor_python import create_can_motor
 
 MOTOR_ID = 0x03
+MOTOR_MODEL = "AK60-6"
 INTERFACE = "can0"
+BITRATE = 1_000_000
 ROUNDS = 30  # Total test iterations
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="CAN reliability stress test")
+    parser.add_argument("--interface", default="can0", help="SocketCAN interface")
+    parser.add_argument(
+        "--motor-id",
+        type=lambda value: int(value, 0),
+        default=0x03,
+        help="Motor CAN ID in decimal or hex (default: 0x03)",
+    )
+    parser.add_argument(
+        "--bitrate",
+        type=int,
+        default=1_000_000,
+        help="CAN bitrate (default: 1000000)",
+    )
+    parser.add_argument(
+        "--motor-model",
+        choices=("AK60-6", "AK80-6"),
+        default="AK60-6",
+        help="Motor model to instantiate (default: AK60-6)",
+    )
+    return parser.parse_args()
 
 
 def test_basic_cycle(round_num: int) -> bool:
     """Connect → enable → get_status → disable → close."""
     try:
-        motor = CubeMarsAK606v3CAN(motor_can_id=MOTOR_ID, interface=INTERFACE)
+        motor = create_can_motor(
+            MOTOR_MODEL,
+            motor_can_id=MOTOR_ID,
+            interface=INTERFACE,
+            bitrate=BITRATE,
+        )
         motor.enable_motor()
         fb = motor.get_status()
         motor.disable_motor()
@@ -46,7 +78,12 @@ def test_basic_cycle(round_num: int) -> bool:
 def test_check_communication(round_num: int) -> bool:
     """Use the historically unreliable check_communication() path."""
     try:
-        motor = CubeMarsAK606v3CAN(motor_can_id=MOTOR_ID, interface=INTERFACE)
+        motor = create_can_motor(
+            MOTOR_MODEL,
+            motor_can_id=MOTOR_ID,
+            interface=INTERFACE,
+            bitrate=BITRATE,
+        )
         ok = motor.check_communication()
         motor.disable_motor()
         motor.close()
@@ -64,7 +101,12 @@ def test_check_communication(round_num: int) -> bool:
 def test_rapid_commands(round_num: int) -> bool:
     """Send 20 rapid get_status calls to stress the feedback path."""
     try:
-        motor = CubeMarsAK606v3CAN(motor_can_id=MOTOR_ID, interface=INTERFACE)
+        motor = create_can_motor(
+            MOTOR_MODEL,
+            motor_can_id=MOTOR_ID,
+            interface=INTERFACE,
+            bitrate=BITRATE,
+        )
         motor.enable_motor()
         time.sleep(0.1)
 
@@ -91,12 +133,22 @@ def test_no_close_reconnect(round_num: int) -> bool:
     """Simulate crash: connect without closing previous connection."""
     try:
         # First connection — deliberately NOT closed
-        motor1 = CubeMarsAK606v3CAN(motor_can_id=MOTOR_ID, interface=INTERFACE)
+        motor1 = create_can_motor(
+            MOTOR_MODEL,
+            motor_can_id=MOTOR_ID,
+            interface=INTERFACE,
+            bitrate=BITRATE,
+        )
         motor1.enable_motor()
         # "crash" — lose reference without close()
 
         # Second connection — should recover
-        motor2 = CubeMarsAK606v3CAN(motor_can_id=MOTOR_ID, interface=INTERFACE)
+        motor2 = create_can_motor(
+            MOTOR_MODEL,
+            motor_can_id=MOTOR_ID,
+            interface=INTERFACE,
+            bitrate=BITRATE,
+        )
         motor2.enable_motor()
         fb = motor2.get_status()
         motor2.disable_motor()
@@ -120,8 +172,17 @@ def test_no_close_reconnect(round_num: int) -> bool:
 
 
 def main():
+    args = parse_args()
+    global MOTOR_ID, INTERFACE, BITRATE, MOTOR_MODEL
+    MOTOR_ID = args.motor_id
+    INTERFACE = args.interface
+    BITRATE = args.bitrate
+    MOTOR_MODEL = args.motor_model
+
     print("=" * 60)
     print("  CAN Reliability Stress Test")
+    print(f"  Motor model: {MOTOR_MODEL}")
+    print(f"  Motor ID: 0x{MOTOR_ID:02X}  |  Interface: {INTERFACE}  |  Bitrate: {BITRATE}")
     print(f"  {ROUNDS} rounds × 4 test types = {ROUNDS * 4} operations")
     print("=" * 60)
 

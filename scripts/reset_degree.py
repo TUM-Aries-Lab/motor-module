@@ -8,7 +8,8 @@ Important:
   known, centered command angle.
 
 Example:
-    .venv/bin/python scripts/reset_degree.py --motor-id 0x03 --target-deg 0
+    sudo ./setup_can.sh
+    .venv/bin/python scripts/reset_degree.py --motor-id 0x03 --target-deg 0 --motor-model AK80-6
 """
 # ruff: noqa: T201
 
@@ -25,9 +26,10 @@ if __package__ in {None, ""}:
     if str(repo_src) not in sys.path:
         sys.path.insert(0, str(repo_src))
 
+from motor_python import create_can_motor
 from motor_python.base_motor import MotorState
 from motor_python.can_utils import get_can_state, reset_can_interface
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN
 
 SEPARATOR = "=" * 72
 MIT_POSITION_LIMIT_DEG = math.degrees(12.56)
@@ -71,7 +73,7 @@ def _ensure_can_ready(interface: str, bitrate: int) -> None:
         raise RuntimeError("CAN bus still unhealthy after reset.")
 
 
-def _read_status(motor: CubeMarsAK606v3CAN, timeout: float = 0.10) -> MotorState | None:
+def _read_status(motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN, timeout: float = 0.10) -> MotorState | None:
     status = motor._receive_feedback(timeout=timeout)
     if status is None:
         status = motor.get_status()
@@ -79,7 +81,7 @@ def _read_status(motor: CubeMarsAK606v3CAN, timeout: float = 0.10) -> MotorState
 
 
 def _move_to_target(  # noqa: PLR0913
-    motor: CubeMarsAK606v3CAN,
+    motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN,
     *,
     start_deg: float,
     target_deg: float,
@@ -126,6 +128,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--interface", default="can0")
     parser.add_argument("--motor-id", type=lambda v: int(v, 0), default=0x03)
+    parser.add_argument("--motor-model",
+        choices=("AK60-6", "AK80-6"),
+        default="AK60-6",
+        help="Motor model to instantiate (default: AK60-6)",)
     parser.add_argument("--bitrate", type=int, default=1_000_000)
     parser.add_argument(
         "--target-deg",
@@ -170,9 +176,10 @@ def main() -> int:
         )
 
     print(SEPARATOR)
-    print("AK60-6 MIT Degree Reset Script")
+    print(f"{args.motor_model} MIT Degree Reset Script")
     print(SEPARATOR)
     print(f"Interface            : {args.interface}")
+    print(f"Motor model          : {args.motor_model}")
     print(f"Motor ID             : 0x{args.motor_id:02X}")
     print(f"Target degree        : {target_deg:.2f}")
     print(f"Velocity             : {args.velocity_deg_s:.2f} deg/s")
@@ -181,7 +188,7 @@ def main() -> int:
     print(f"Timeout              : {args.timeout:.1f} s")
     print(f"Preflight            : {'skip' if args.skip_preflight else 'auto-reset if needed'}")
 
-    motor: CubeMarsAK606v3CAN | None = None
+    motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN | None = None
     try:
         if args.skip_preflight:
             state = get_can_state(args.interface)
@@ -192,7 +199,8 @@ def main() -> int:
         else:
             _ensure_can_ready(args.interface, args.bitrate)
 
-        motor = CubeMarsAK606v3CAN(
+        motor = create_can_motor(
+            args.motor_model,
             motor_can_id=args.motor_id,
             interface=args.interface,
             bitrate=args.bitrate,

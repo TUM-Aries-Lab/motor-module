@@ -23,14 +23,14 @@ import time
 
 from loguru import logger
 
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+from motor_python import create_can_motor
 from motor_python.motor_control_using_pid import PIDMotorController
 
 
 def parse_args() -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(
-        description="PID position control test for CubeMars AK60-6 motor",
+        description="PID position control test for CubeMars AK60-6/AK80-6 motor",
     )
 
     parser.add_argument(
@@ -66,6 +66,12 @@ def parse_args() -> argparse.Namespace:
         default=1_000_000,
         help="CAN bitrate (default: 1000000)",
     )
+    parser.add_argument(
+        "--motor-model",
+        choices=("AK60-6", "AK80-6"),
+        default="AK60-6",
+        help="Motor model to instantiate (default: AK60-6)",
+    )
 
     parser.add_argument(
         "--rate-hz",
@@ -95,10 +101,11 @@ def main() -> int:
     print(f"Rate      : {args.rate_hz} Hz")
     print("Safety    : keep load clear")
 
-    motor: CubeMarsAK606v3CAN | None = None
+    motor = None
 
     try:
-        motor = CubeMarsAK606v3CAN(
+        motor = create_can_motor(
+            args.motor_model,
             motor_can_id=args.motor_id,
             interface=args.interface,
             bitrate=args.bitrate,

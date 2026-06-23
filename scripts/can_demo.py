@@ -1,8 +1,11 @@
-"""CAN class function demo — exercises every public method of CubeMarsAK606v3CAN.
+"""CAN class function demo — exercises every public method of the CAN motor driver.
 
 Run:
     sudo ./setup_can.sh
     .venv/bin/python scripts/can_demo.py
+
+    sudo ./setup_can.sh
+    .venv/bin/python scripts/can_demo.py --motor-model AK80-6
 
 Each section prints PASS / FAIL / SKIP so you can confirm which functions
 are working on the current firmware.
@@ -13,18 +16,39 @@ produce shaft rotation on this AK60-6 firmware build.  Only set_duty_cycle()
 produces real movement.  Those sections are marked [ACK-ONLY].
 """
 
+import argparse
 import time
 
-from motor_python.cube_mars_motor_can import CAN_ERROR_CODES, CubeMarsAK606v3CAN
+from motor_python import create_can_motor
+from motor_python.base_motor import CAN_ERROR_CODES
 from motor_python.definitions import TendonAction
 
 MOTOR_ID  = 0x03
+MOTOR_MODEL = "AK60-6"
 INTERFACE = "can0"
 SEPARATOR = "─" * 56
 
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="CAN function demo for CubeMars AK60-6/AK80-6")
+    parser.add_argument("--interface", default="can0", help="SocketCAN interface")
+    parser.add_argument(
+        "--motor-id",
+        type=lambda value: int(value, 0),
+        default=0x03,
+        help="Motor CAN ID in decimal or hex (default: 0x03)",
+    )
+    parser.add_argument(
+        "--motor-model",
+        choices=("AK60-6", "AK80-6"),
+        default="AK60-6",
+        help="Motor model to instantiate (default: AK60-6)",
+    )
+    return parser.parse_args()
+
 
 def section(title: str) -> None:
     print(f"\n{SEPARATOR}")
@@ -43,12 +67,18 @@ def result(label: str, value, *, passed: bool = True, note: str = "") -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    args = parse_args()
     print("=" * 56)
-    print("  CubeMarsAK606v3CAN — Function Demo")
-    print(f"  Motor ID: 0x{MOTOR_ID:02X}  |  Interface: {INTERFACE}")
+    print("  CAN Function Demo")
+    print(f"  Motor model: {args.motor_model}")
+    print(f"  Motor ID: 0x{args.motor_id:02X}  |  Interface: {args.interface}")
     print("=" * 56)
 
-    with CubeMarsAK606v3CAN(motor_can_id=MOTOR_ID, interface=INTERFACE) as motor:
+    with create_can_motor(
+        args.motor_model,
+        motor_can_id=args.motor_id,
+        interface=args.interface,
+    ) as motor:
 
         # ── 1. check_communication ─────────────────────────────────────────
         section("1. check_communication()")

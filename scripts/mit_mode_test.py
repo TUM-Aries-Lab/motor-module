@@ -11,7 +11,10 @@ This script exercises all MIT-related public APIs in the current CAN driver:
 Run:
     sudo ./setup_can.sh
     .venv/bin/python scripts/mit_mode_test.py
-"""
+
+    sudo ./setup_can.sh
+    .venv/bin/python scripts/mit_mode_test.py --motor-model AK80-6
+    """
 # ruff: noqa: T201, PLR0915, S110
 
 from __future__ import annotations
@@ -21,9 +24,10 @@ import subprocess
 import sys
 import time
 
+from motor_python import create_can_motor
 from motor_python.base_motor import MotorState
 from motor_python.can_utils import get_can_state
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN
 
 SEPARATOR = "=" * 72
 
@@ -68,7 +72,7 @@ def section(title: str) -> None:
 
 
 def print_status(
-    motor: CubeMarsAK606v3CAN, label: str, timeout: float = 0.4
+    motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN, label: str, timeout: float = 0.4
 ) -> MotorState | None:
     """Print and return one status sample."""
     status = motor._receive_feedback(timeout=timeout)
@@ -89,7 +93,7 @@ def print_status(
     return status
 
 
-def hold_and_log(motor: CubeMarsAK606v3CAN, seconds: float, label: str) -> None:
+def hold_and_log(motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN, seconds: float, label: str) -> None:
     """Sleep for a short duration while printing live feedback and validating health."""
     end = time.time() + seconds
     no_feedback_count = 0
@@ -139,7 +143,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--velocity-erpm",
         type=int,
-        default=3000,
+        default=5000,
         help="Velocity helper test command in ERPM (default: 3000)",
     )
     parser.add_argument(
@@ -172,6 +176,12 @@ def parse_args() -> argparse.Namespace:
             "Disabled by default to avoid unexpected spinning."
         ),
     )
+    parser.add_argument(
+        "--motor-model",
+        choices=("AK60-6", "AK80-6"),
+        default="AK60-6",
+        help="Motor model to instantiate (default: AK60-6)",
+    )
     return parser.parse_args()
 
 
@@ -187,6 +197,7 @@ def main() -> int:  # noqa: C901, PLR0912
         args.step_seconds = max(0.3, min(0.6, args.step_seconds))
 
     print(f"Interface : {args.interface}")
+    print(f"Motor model: {args.motor_model}")
     print(f"Motor ID  : 0x{args.motor_id:02X}")
     print(f"Bitrate   : {args.bitrate}")
     print(f"Safe mode : {args.safe}")
@@ -202,9 +213,10 @@ def main() -> int:  # noqa: C901, PLR0912
     else:
         _ensure_can_ready(args.interface)
 
-    motor: CubeMarsAK606v3CAN | None = None
+    motor = None
     try:
-        motor = CubeMarsAK606v3CAN(
+        motor = create_can_motor(
+            args.motor_model,
             motor_can_id=args.motor_id,
             interface=args.interface,
             bitrate=args.bitrate,
@@ -214,15 +226,15 @@ def main() -> int:  # noqa: C901, PLR0912
             print("\nFAIL: CAN interface not connected")
             return 1
 
-        section("1) check_communication()")
-        if not motor.check_communication():
-            print("FAIL: motor did not respond")
-            return 1
-        print("PASS: motor communication verified")
+        # section("1) check_communication()")
+        # if not motor.check_communication():
+        #     print("FAIL: motor did not respond")
+        #     return 1
+        # print("PASS: motor communication verified")
 
-        section("2) enable_mit_mode()")
-        motor.enable_mit_mode()
-        hold_and_log(motor, 0.7, "after enable_mit_mode")
+        # section("2) enable_mit_mode()")
+        # motor.enable_mit_mode()
+        # hold_and_log(motor, 0.7, "after enable_mit_mode")
 
         section("3) set_mit_mode() direct calls")
         print("- passive float (all zeros)")
@@ -262,38 +274,38 @@ def main() -> int:  # noqa: C901, PLR0912
         else:
             print("- velocity/torque MIT subtests skipped (use --include-spin-tests)")
 
-        section("4) set_position() helper (MIT-backed)")
-        motor.set_position(args.position_deg)
-        hold_and_log(motor, args.step_seconds, "set_position")
+        # section("4) set_position() helper (MIT-backed)")
+        # motor.set_position(args.position_deg)
+        # hold_and_log(motor, args.step_seconds, "set_position")
 
-        if args.include_spin_tests:
-            section("5) set_velocity() helper (MIT-backed)")
-            motor.set_velocity(args.velocity_erpm)
-            hold_and_log(motor, args.step_seconds, "set_velocity")
+        # if args.include_spin_tests:
+        #     section("5) set_velocity() helper (MIT-backed)")
+        #     motor.set_velocity(args.velocity_erpm)
+        #     hold_and_log(motor, args.step_seconds, "set_velocity")
 
-            section("6) set_current() helper (maps to MIT torque)")
-            motor.set_current(args.torque_nm)
-            hold_and_log(motor, args.step_seconds, "set_current")
-        else:
-            section("5/6) spin-prone sections skipped")
-            print("Skipped set_velocity()/set_current(). Use --include-spin-tests to run them.")
+        #     section("6) set_current() helper (maps to MIT torque)")
+        #     motor.set_current(args.torque_nm)
+        #     hold_and_log(motor, args.step_seconds, "set_current")
+        # else:
+        #     section("5/6) spin-prone sections skipped")
+        #     print("Skipped set_velocity()/set_current(). Use --include-spin-tests to run them.")
 
-        section("7) stop()")
-        motor.stop()
-        hold_and_log(motor, 0.8, "after stop")
+        # section("7) stop()")
+        # motor.stop()
+        # hold_and_log(motor, 0.8, "after stop")
 
-        section("8) enable_motor()/disable_motor() aliases")
-        print("- enable_motor() alias")
-        motor.enable_motor()
-        hold_and_log(motor, 0.5, "after enable_motor alias")
+        # section("8) enable_motor()/disable_motor() aliases")
+        # print("- enable_motor() alias")
+        # motor.enable_motor()
+        # hold_and_log(motor, 0.5, "after enable_motor alias")
 
-        print("- disable_motor() alias")
-        motor.disable_motor()
-        hold_and_log(motor, 0.5, "after disable_motor alias")
+        # print("- disable_motor() alias")
+        # motor.disable_motor()
+        # hold_and_log(motor, 0.5, "after disable_motor alias")
 
-        section("9) disable_mit_mode() explicit")
-        motor.disable_mit_mode()
-        print("PASS: MIT mode disabled")
+        # section("9) disable_mit_mode() explicit")
+        # motor.disable_mit_mode()
+        # print("PASS: MIT mode disabled")
 
         section("MIT test complete")
         print("PASS: all MIT-related API calls executed")

@@ -5,7 +5,7 @@ import pytest
 from motor_python.mit_mode_packer import (
     AK60_6_MIT_LIMITS,
     float_to_uint,
-    pack_mit_frame,
+    pack_mit_frame,  # this might need to be changed, because pack_mit_frame has been moved
     uint_to_float,
 )
 

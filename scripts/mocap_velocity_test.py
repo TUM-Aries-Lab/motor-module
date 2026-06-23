@@ -59,8 +59,7 @@ from typing import Any
 
 from motor_python.base_motor import MotorState
 from motor_python.can_utils import get_can_state, reset_can_interface
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
-from motor_python import definitions
+from motor_python import create_can_motor, definitions
 from motor_python.definitions import CAN_DEFAULTS
 
 SEPARATOR = "=" * 84
@@ -295,6 +294,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1_000_000,
         help="CAN bitrate (default: 1000000)",
+    )
+    parser.add_argument(
+        "--motor-model",
+        choices=("AK60-6", "AK80-6"),
+        default="AK60-6",
+        help="Motor model to instantiate (default: AK60-6)",
     )
     parser.add_argument(
         "--helper-policy",
@@ -1140,7 +1145,8 @@ def execute_run(
 
         mocap_adapter.start()
 
-        motor = CubeMarsAK606v3CAN(
+        motor = create_can_motor(
+            args.motor_model,
             motor_can_id=args.motor_id,
             interface=args.interface,
             bitrate=args.bitrate,

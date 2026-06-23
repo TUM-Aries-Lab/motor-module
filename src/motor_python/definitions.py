@@ -305,7 +305,7 @@ AK80_6_MOTOR_SPEC = MotorSpec(
     min_velocity_electrical_rpm=-16800,  # -800 RPM * 21 pole pairs
     mit_position_kp=20.0,
     mit_position_kd=1.0,
-    mit_velocity_kd=0.2,
+    mit_velocity_kd=0.5,
     mit_mode_limits=AK80_6_MIT_LIMITS,
 )
 

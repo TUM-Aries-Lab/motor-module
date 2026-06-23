@@ -11,6 +11,8 @@ Primary controls:
 
 Example:
     .venv/bin/python scripts/mit_position_steps.py --motor-id 0x03 --angle-deg 30 --duration 180 --velocity-deg-s 20
+
+    .venv/bin/python scripts/mit_position_steps.py --motor-id 0x03 --angle-deg 30 --duration 180 --velocity-deg-s 40 --motor-model AK80-6
 """
 # ruff: noqa: T201
 
@@ -31,9 +33,10 @@ if __package__ in {None, ""}:
     if str(repo_src) not in sys.path:
         sys.path.insert(0, str(repo_src))
 
+from motor_python import create_can_motor
 from motor_python.base_motor import MotorState
 from motor_python.can_utils import get_can_state, reset_can_interface
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN
 
 SEPARATOR = "=" * 72
 HEALTHY_TX_ERR_MAX = 96
@@ -120,7 +123,7 @@ def _ensure_can_ready(interface: str, bitrate: int) -> None:
         )
 
 
-def _read_status(motor: CubeMarsAK606v3CAN, timeout: float = 0.10) -> MotorState | None:
+def _read_status(motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN, timeout: float = 0.10) -> MotorState | None:
     """Get freshest available motor status sample."""
     status = motor._receive_feedback(timeout=timeout)
     if status is None:
@@ -154,7 +157,7 @@ def _print_tick_line(
 
 
 def _move_segment(  # noqa: PLR0913
-    motor: CubeMarsAK606v3CAN,
+    motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN,
     *,
     start_deg: float,
     delta_deg: float,
@@ -232,6 +235,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1_000_000,
         help="CAN bitrate (default: 1000000)",
+    )
+    parser.add_argument(
+        "--motor-model",
+        choices=["AK60-6", "AK80-6"],
+        default="AK60-6",
+        help="Motor model to instantiate (default: AK60-6)",
     )
     parser.add_argument(
         "--angle-deg",
@@ -349,9 +358,10 @@ def main() -> int:
     csv_path = _resolve_csv_path(args.csv_path, prefix="mit_position_steps")
 
     print(SEPARATOR)
-    print("AK60-6 MIT Position Steps (Long Ping-Pong)")
+    print(f"{args.motor_model} MIT Position Steps (Long Ping-Pong)")
     print(SEPARATOR)
     print(f"Interface            : {args.interface}")
+    print(f"Motor model          : {args.motor_model}")
     print(f"Motor ID             : 0x{args.motor_id:02X}")
     print(f"Bitrate              : {args.bitrate}")
     print(f"Step angle           : {args.angle_deg:.2f} deg")
@@ -372,7 +382,7 @@ def main() -> int:
             f"(requested [{args.min_deg:.2f}, {args.max_deg:.2f}] deg)."
         )
 
-    motor: CubeMarsAK606v3CAN | None = None
+    motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN | None = None
     csv_file = None
     csv_writer: csv.DictWriter | None = None
     run_start = 0.0
@@ -391,7 +401,8 @@ def main() -> int:
         else:
             _ensure_can_ready(args.interface, args.bitrate)
 
-        motor = CubeMarsAK606v3CAN(
+        motor = create_can_motor(
+            args.motor_model,
             motor_can_id=args.motor_id,
             interface=args.interface,
             bitrate=args.bitrate,

@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Minimal velocity spin test for one AK60-6 motor.
+"""Minimal velocity spin test for one AK60-6 motor or one AK80-6 motor.
 
 This script is intentionally tiny: set velocity, hold for duration, stop.
 
 Examples:
     .venv/bin/python scripts/simple_test.py --velocity-erpm 4000 --duration 1.5
     .venv/bin/python scripts/simple_test.py --velocity-erpm -3000 --duration 2.0
+
+    sudo ./setup_can.sh
+    .venv/bin/python scripts/simple_test.py --velocity-erpm 3000 --duration 2 --motor-model AK80-6
 
 """
 # ruff: noqa: T201
@@ -15,7 +18,7 @@ from __future__ import annotations
 import argparse
 import time
 
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+from motor_python import create_can_motor
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,6 +56,12 @@ def parse_args() -> argparse.Namespace:
         help="CAN bitrate (default: 1000000)",
     )
     parser.add_argument(
+        "--motor-model",
+        choices=("AK60-6", "AK80-6"),
+        default="AK60-6",
+        help="Motor model to instantiate (default: AK60-6)",
+    )
+    parser.add_argument(
         "--skip-check",
         action="store_true",
         help="Skip check_communication() before spinning.",
@@ -71,17 +80,19 @@ def main() -> int:
     """Run one simple velocity spin and stop."""
     args = parse_args()
 
-    print("Simple AK60-6 Velocity Spin")
+    print(f"Simple {args.motor_model} Velocity Spin")
     print("=" * 64)
     print(f"Interface      : {args.interface}")
+    print(f"Motor model    : {args.motor_model}")
     print(f"Motor ID       : 0x{args.motor_id:02X}")
     print(f"Velocity       : {args.velocity_erpm} ERPM")
     print(f"Duration       : {args.duration:.2f} s")
     print("Safety         : keep load clear; be ready to cut power")
 
-    motor: CubeMarsAK606v3CAN | None = None
+    motor = None
     try:
-        motor = CubeMarsAK606v3CAN(
+        motor = create_can_motor(
+            args.motor_model,
             motor_can_id=args.motor_id,
             interface=args.interface,
             bitrate=args.bitrate,
@@ -94,9 +105,27 @@ def main() -> int:
             print("FAIL: communication check failed")
             return 1
 
-        print("Sending velocity command...")
-        motor.set_velocity(args.velocity_erpm)
-        time.sleep(args.duration)
+        # TODO: discuss -->  motor doesn't respond to this part of code
+        # print("Sending velocity command...")
+        # motor.set_velocity(args.velocity_erpm)
+        # time.sleep(args.duration)
+
+        # TODO: discuss --> I think motor respond to this part of code  so we need to continuously send the command in a loop. However, it is not working everytime
+        print(f"Sending velocity command...{args.velocity_erpm} ERPM")
+        t0 = time.time()
+
+        while time.time() - t0 < args.duration:
+            # IMPORTANT: continuous command (NOT one-shot)
+            motor.set_velocity(args.velocity_erpm)
+
+            pos = motor.get_position()
+            vel = motor.get_speed()
+
+            print(f"pos={pos:.2f} deg  vel={vel:.2f}")
+
+            time.sleep(0.01)  # 100 Hz (remove the hardcoded value later)
+
+
 
         print("Stopping motor...")
         motor.stop()
