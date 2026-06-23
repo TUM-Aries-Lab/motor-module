@@ -57,6 +57,7 @@ import struct
 import time
 from datetime import datetime
 from pathlib import Path
+from motor_python.definitions import CAN_DEFAULTS
 
 import can
 
@@ -133,8 +134,8 @@ SAFETY_WARN_MARGIN = 20.0  # print a WARN line when arm is within this many deg 
 # ---------------------------------------------------------------------------
 # Loop / logging
 # ---------------------------------------------------------------------------
-LOOP_HZ         = 50
-SAMPLE_HZ       = 20
+LOOP_HZ         = CAN_DEFAULTS.motor_control_rate_hz
+SAMPLE_HZ       = CAN_DEFAULTS.motor_control_rate_hz / 5
 KEEPALIVE_TICKS = 3     # send ENABLE_CMD every N ticks (~16 Hz)
 
 WAYPOINT_SETTLE_DEG  = 5.0

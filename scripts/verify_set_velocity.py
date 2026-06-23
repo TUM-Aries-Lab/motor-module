@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from motor_python.base_motor import MotorState
+from motor_python.base_motor import MotorState, print_timing_stats
 from motor_python.can_utils import get_can_state, reset_can_interface
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
 from motor_python.definitions import CAN_DEFAULTS
@@ -83,13 +83,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--motor-id",
         type=lambda value: int(value, 0),
-        default=0x03,
+        default=CAN_DEFAULTS.motor_can_id,
         help="Motor CAN ID in decimal or hex (default: 0x03)",
     )
     parser.add_argument(
         "--bitrate",
         type=int,
-        default=1_000_000,
+        default=CAN_DEFAULTS.bitrate,
         help="CAN bitrate (default: 1000000)",
     )
     parser.add_argument(
@@ -121,7 +121,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--velocity-erpm",
         type=int,
-        default=1000,
+        default=3000,
         help="Test start velocity in ERPM (range: -5000..5000, default: 1000)",
     )
     parser.add_argument(
@@ -145,8 +145,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sample-hz",
         type=float,
-        default=50.0,
-        help="Feedback sampling rate in Hz (default: 50)",
+        default=CAN_DEFAULTS.motor_control_rate_hz,  # 100.0 Hz
+        help=(
+            f"Feedback sampling rate in Hz "
+            f"(default: {CAN_DEFAULTS.motor_control_rate_hz / 2.0:.1f} Hz, "
+            f"i.e. half of motor_control_rate_hz={CAN_DEFAULTS.motor_control_rate_hz} Hz)"
+        ),
     )
     parser.add_argument(
         "--min-informative-erpm",
@@ -466,6 +470,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
     csv_writer: csv.DictWriter | None = None
     run_start = 0.0
     results: list[PhaseResult] = []
+    total_feedback_samples = 0
     try:
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         csv_file = csv_path.open("w", newline="", encoding="utf-8")
@@ -473,6 +478,8 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
         csv_writer.writeheader()
 
         def write_sample_row(row: dict[str, str | int]) -> None:
+            nonlocal total_feedback_samples
+            total_feedback_samples += 1
             if csv_writer is None or csv_file is None:
                 return
             csv_writer.writerow(row)
@@ -493,6 +500,10 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
 
         if not motor.check_communication():
             print("FAIL: communication check failed (no feedback)")
+            try:
+                motor.disable_mit_mode()
+            except Exception:
+                pass  # Ignore cleanup failures
             return 1
 
         print("PASS: communication check")
@@ -538,12 +549,50 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
         print(f"\nFAIL: {exc}")
         return 1
     finally:
+        if motor is not None:
+            timing_stats = motor.get_timing_stats()
+
+            # Print timing stats summary in terminal
+            print_timing_stats(
+                    timing_stats,
+                    total_feedback_samples,
+                    SEPARATOR
+                    )
+
+            # Write timing stats summary to CSV
+            try:
+                if timing_stats.get("available", False):
+                    # Write timing stats to CSV
+                    timing_csv_path = csv_path.with_suffix(".timing_stats.csv")
+
+                    file_exists = timing_csv_path.exists()
+
+                    with timing_csv_path.open("a", newline="", encoding="utf-8") as timing_csv_file:
+                        writer = csv.writer(timing_csv_file)
+
+                        if not file_exists:
+                            writer.writerow(["metric", "value"])
+
+                        for key in sorted(timing_stats.keys()):
+                            writer.writerow([key, timing_stats.get(key)])
+
+                    print(f"Timing stats saved to: {timing_csv_path}")
+                else:
+                    print("Timing stats not available from motor.")
+
+            except Exception as exc:
+                print(f"WARN: Failed to write the timing stats to CSV: {exc}")
+
         if csv_file is not None:
             try:
                 csv_file.close()
             except Exception as exc:  # pragma: no cover - cleanup path
                 print(f"WARN: CSV close failed during cleanup: {exc}")
         if motor is not None:
+            try:
+                motor.stop()
+            except Exception as exc:  # pragma: no cover - cleanup path
+                print(f"WARN: stop() failed during cleanup: {exc}")
             try:
                 motor.close()
             except Exception as exc:  # pragma: no cover - cleanup path

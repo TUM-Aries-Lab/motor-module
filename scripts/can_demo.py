@@ -15,8 +15,9 @@ produces real movement.  Those sections are marked [ACK-ONLY].
 
 import time
 
-from motor_python.cube_mars_motor_can import CAN_ERROR_CODES, CubeMarsAK606v3CAN
-from motor_python.definitions import TendonAction
+from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+from motor_python.base_motor import CAN_ERROR_CODES
+from motor_python.definitions import TendonAction, CAN_DEFAULTS
 
 MOTOR_ID  = 0x03
 INTERFACE = "can0"
@@ -61,7 +62,7 @@ def main() -> None:
         # ── 2. enable_motor ────────────────────────────────────────────────
         section("2. enable_motor()")
         motor.enable_motor()
-        time.sleep(0.2)
+        time.sleep(CAN_DEFAULTS.can_reset_pause * 2) #0.2s
         result("enable_motor()", "sent ✓")
 
         # ── 3. get_status ──────────────────────────────────────────────────
@@ -104,26 +105,26 @@ def main() -> None:
         section("7. set_duty_cycle()  [CONFIRMED WORKING — spins shaft]")
         print("  Spinning forward at 10% duty for 1.5 s ...")
         motor.set_duty_cycle(0.10)
-        time.sleep(1.5)
+        time.sleep(CAN_DEFAULTS.can_reset_pause * 15)  #1.5s
         fb_mid = motor.get_status()
         if fb_mid:
             result("speed during spin", f"{fb_mid.speed_erpm} ERPM",
                    passed=abs(fb_mid.speed_erpm) > 100)
             result("current during spin", f"{fb_mid.current_amps:.2f} A")
         motor.set_duty_cycle(0.0)
-        time.sleep(0.3)
+        time.sleep(CAN_DEFAULTS.can_reset_pause * 3)  #0.3s
         motor.set_duty_cycle(-0.10)
         print("  Spinning reverse at 10% duty for 1.5 s ...")
-        time.sleep(1.5)
+        time.sleep(CAN_DEFAULTS.can_reset_pause * 15)  #1.5s
         motor.set_duty_cycle(0.0)
-        time.sleep(0.2)
+        time.sleep(CAN_DEFAULTS.can_reset_pause * 2)  #0.2s
         result("set_duty_cycle()", "fwd + rev ✓")
 
         # ── 8. set_velocity — ACK-ONLY on this firmware ────────────────────
         section("8. set_velocity()  [ACK-ONLY — no shaft rotation on this firmware]")
         print("  Sending velocity command (5000 ERPM) — expect no movement ...")
         motor.set_velocity(velocity_erpm=5000)
-        time.sleep(0.5)
+        time.sleep(CAN_DEFAULTS.can_reset_pause * 0.5)
         fb_vel = motor.get_status()
         if fb_vel:
             moved = abs(fb_vel.speed_erpm) > 500
@@ -137,7 +138,7 @@ def main() -> None:
         section("9. set_brake_current()  [holds shaft against load]")
         print("  Applying 2A brake current for 1s ...")
         motor.set_brake_current(2.0)
-        time.sleep(1.0)
+        time.sleep(CAN_DEFAULTS.can_reset_pause * 10)  #1.0s
         motor.stop()
         result("set_brake_current()", "sent ✓")
 
@@ -145,16 +146,16 @@ def main() -> None:
         section("10. control_exosuit_tendon()")
         print("  pull → release → stop (duty-based) ...")
         motor.control_exosuit_tendon(action=TendonAction.PULL,    velocity_erpm=5000)
-        time.sleep(0.4)
+        time.sleep(CAN_DEFAULTS.can_reset_pause * 4)  #0.4s
         motor.control_exosuit_tendon(action=TendonAction.RELEASE, velocity_erpm=5000)
-        time.sleep(0.4)
+        time.sleep(CAN_DEFAULTS.can_reset_pause * 4)  #0.4s
         motor.control_exosuit_tendon(action=TendonAction.STOP)
         result("control_exosuit_tendon()", "pull / release / stop ✓")
 
         # ── 11. stop ───────────────────────────────────────────────────────
         section("11. stop()")
         motor.stop()
-        time.sleep(0.2)
+        time.sleep(CAN_DEFAULTS.can_reset_pause * 2)  #0.2s
         fb_stop = motor.get_status()
         if fb_stop:
             result("speed after stop()", f"{fb_stop.speed_erpm} ERPM",

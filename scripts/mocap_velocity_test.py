@@ -677,7 +677,7 @@ def countdown(seconds: float) -> None:
 
     for remaining in range(total, 0, -1):
         print(f"Starting in {remaining}...")
-        time.sleep(1.0)
+        time.sleep(CAN_DEFAULTS.can_reset_pause * 10) # 1s
 
 
 def sample_to_csv_row(sample: LoggedSample) -> dict[str, Any]:

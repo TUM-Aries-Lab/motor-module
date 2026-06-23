@@ -29,6 +29,7 @@ repos:
       entry: make format
       language: system
       types: [python]
+      pass_filenames: false
 
 # --------------------------------------------------------
 #  Optional: run tests before commit
@@ -41,3 +42,5 @@ repos:
       entry: make test
       language: system
       types: [python]
+      pass_filenames: false
+      require_serial: true

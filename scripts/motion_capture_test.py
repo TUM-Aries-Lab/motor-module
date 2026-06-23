@@ -37,6 +37,7 @@ import struct
 import time
 from datetime import datetime
 from pathlib import Path
+from motor_python.definitions import CAN_DEFAULTS
 
 import can
 
@@ -97,8 +98,8 @@ MAX_SAFE_ERPM = 6000    # coast to a stop if speed exceeds this during sine swee
                         # NOTE: normal sine peaks at ~2560 ERPM; 6000 gives 2× margin
 BRAKE_ERPM    = 1500    # resume normal control once speed drops below this
 
-LOOP_HZ   = 50
-SAMPLE_HZ = 20
+LOOP_HZ         = CAN_DEFAULTS.motor_control_rate_hz
+SAMPLE_HZ       = CAN_DEFAULTS.motor_control_rate_hz / 5
 
 LOG_DIR = Path(__file__).parent.parent / "data" / "logs"
 

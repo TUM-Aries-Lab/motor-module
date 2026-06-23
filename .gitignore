@@ -185,5 +185,6 @@ tmp/
 .codex
 CSV/
 data/csv_logs/*.csv
+data/csv_logs/*.png
 !data/csv_logs/.gitkeep
 repo_tree.py
