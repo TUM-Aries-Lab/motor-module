@@ -10,6 +10,7 @@ __version__ = "0.0.7"
 from typing import Literal
 
 from motor_python.base_motor import BaseMotor
+from motor_python.motor_manager import MotorManager
 from motor_python.cube_mars_motor import CubeMarsAK606v3, CubeMarsAK806v2
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN
 from motor_python.definitions import (
@@ -73,8 +74,9 @@ __all__ = [
     "BaseMotor",
     "CubeMarsAK606v3",
     "CubeMarsAK606v3CAN",
+    "Motor",
+    "MotorManager",
     "CubeMarsAK806v2",
     "CubeMarsAK806v2CAN",
-    "Motor",
     "create_can_motor",
 ]

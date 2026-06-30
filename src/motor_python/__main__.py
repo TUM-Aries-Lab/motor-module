@@ -1,9 +1,21 @@
-"""Motor control main entry point — CAN interface (CubeMarsAK606v3CAN)."""
+"""Motor control main entry point — CAN interface (CubeMarsAK606v3CAN).
+
+Example usage:
+python -m motor_python --motor-ids 0x03
+python -m motor_python --motor-ids 0x03 0x04
+python -m motor_python --discover
+python -m motor_python --dual
+
+"""
 
 import argparse
 
 from loguru import logger
 
+from motor_python.definitions import CAN_DEFAULTS, DEFAULT_LOG_LEVEL, LogLevel
+from motor_python.examples_can import run_motor_demo_can, run_multi_motor_demo
+from motor_python.motor_manager import MotorManager
+from motor_python.utils import setup_logger
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
 from motor_python.definitions import (
     CAN_DEFAULTS,
@@ -17,13 +29,13 @@ from motor_python.examples_can import multi_motor_can_example, run_motor_demo_ca
 from motor_python.utils import setup_logger
 
 
-# ruff: noqa: PLR0913
-def main(
+def main(  # noqa: PLR0913
     log_level: str = DEFAULT_LOG_LEVEL,
     stderr_level: str = DEFAULT_LOG_LEVEL,
     dual: bool = False,
-    motor_id_left: int = CAN_DEFAULTS.motor_can_id,
-    motor_id_right: int = CAN_DEFAULTS.motor_can_id_2,
+    discover: bool = False,
+    motor_ids: list[int] | None = None,
+    interface: str = CAN_DEFAULTS.interface,
     motor_model: str = DEFAULT_MOTOR_SPEC.model_name,
 ) -> None:
     """Run the main CAN motor control loop.
@@ -34,8 +46,8 @@ def main(
     :param log_level: The log level to use.
     :param stderr_level: The std err level to use.
     :param dual: If True, run the two-motor synchronized demo instead.
-    :param motor_id_left: CAN ID for the left / primary motor (default: 0x03).
-    :param motor_id_right: CAN ID for the right / secondary motor (default: 0x04).
+    :param motor_ids: List of CAN motor IDs to control.
+    :param interface: The CAN interface to use.
     :return: None
     """
     setup_logger(log_level=log_level, stderr_level=stderr_level)
@@ -45,50 +57,58 @@ def main(
 
     # --- Two-motor mode ---
     if dual:
-        logger.info(
-            f"Starting dual-motor CAN demo "
-            f"(left=0x{motor_id_left:02X}, right=0x{motor_id_right:02X})..."
-        )
-        multi_motor_can_example(left_can_id=motor_id_left, right_can_id=motor_id_right)
-        logger.info("Dual-motor CAN demo complete!")
-        return
+        motor_ids = [CAN_DEFAULTS.motor_can_id, CAN_DEFAULTS.motor_can_id_2]
 
-    # --- Single-motor mode ---
-    logger.info("Starting CAN motor control loop...")
+    if motor_ids is None:
+        motor_ids = [CAN_DEFAULTS.motor_can_id]
 
     try:
-        motor = CubeMarsAK606v3CAN(motor_can_id=motor_id_left)
+        if discover:
+            manager = MotorManager.discover(
+                interface=interface
+            )  # sets the discovered ids as motor_ids
+        else:
+            logger.info(
+                f"Starting CAN motor control loop on interface '{interface}' with IDs: {motor_ids}"
+            )
+            manager = MotorManager(motor_ids=motor_ids, interface=interface)
     except Exception as e:
-        logger.error(f"Failed to initialize CAN motor controller: {e}")
+        logger.error(f"Failed to initialize CAN motor manager: {e}")
         return
 
-    with motor:
-        if not motor.connected:
+    with manager:
+        first_motor = next(iter(manager))
+        if not first_motor.connected:
             logger.warning(
                 "CAN bus not available. Run: sudo ip link set can0 up "
                 "type can bitrate 1000000 berr-reporting on restart-ms 100"
             )
             return
 
-        # Enter Servo mode before sending any control commands
-        motor.enable_motor()
-
-        if not motor.check_communication():
+        manager.enable_all()  # Enable all motors before checking communication
+        status = (
+            manager.check_all()
+        )  # Check communication with all motors before proceeding
+        if not any(status.values()):
             logger.warning(
-                "Motor not responding. Check power, CANH/CANL wiring, "
-                "120 ohm termination, and disconnect UART cable."
+                "No motors responding. Check power, CANH/CANL wiring, "
+                "120 ohm termination, and CAN IDs."
             )
             return
 
-        logger.info("Motor online - querying initial status...")
-        motor.get_status()
+        logger.info(
+            f"Motor communication verified for IDs: {[motor_id for motor_id, ok in status.items() if ok]}"
+        )
+        for motor in manager:
+            motor.get_status()
 
         try:
-            run_motor_demo_can(motor)
+            if len(manager) == 1:
+                run_motor_demo_can(next(iter(manager)))
+            else:
+                run_multi_motor_demo(manager)
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
-
-        # stop() + bus.shutdown() called automatically by context manager
 
     logger.info("CAN motor control loop complete!")
 
@@ -118,16 +138,25 @@ if __name__ == "__main__":  # pragma: no cover
         help="Run the two-motor synchronized demo (requires two motors on the bus).",
     )
     parser.add_argument(
-        "--motor-id-left",
-        default=CAN_DEFAULTS.motor_can_id,
-        type=lambda x: int(x, 0),  # accepts 0x03 or 3
-        help="CAN ID of the left / primary motor (default: 0x03).",
+        "--discover",
+        action="store_true",
+        default=False,
+        help="Automatically discover connected motors on the CAN bus.",
     )
     parser.add_argument(
-        "--motor-id-right",
-        default=CAN_DEFAULTS.motor_can_id_2,
+        "--motor-ids",
+        nargs="+",
         type=lambda x: int(x, 0),
-        help="CAN ID of the right / secondary motor (default: 0x04).",
+        default=None,
+        help=(
+            "List of CAN motor IDs to control. "
+            "Use space-separated values like --motor-ids 0x03 0x04."
+        ),
+    )
+    parser.add_argument(
+        "--interface",
+        default=CAN_DEFAULTS.interface,
+        help="SocketCAN interface to use (default: can0).",
     )
     parser.add_argument(
         "--motor-model",
@@ -142,7 +171,7 @@ if __name__ == "__main__":  # pragma: no cover
         log_level=args.log_level,
         stderr_level=args.stderr_level,
         dual=args.dual,
-        motor_id_left=args.motor_id_left,
-        motor_id_right=args.motor_id_right,
-        motor_model=args.motor_model,
+        discover=args.discover,
+        motor_ids=args.motor_ids,
+        interface=args.interface,
     )
