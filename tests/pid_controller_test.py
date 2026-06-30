@@ -296,3 +296,9 @@ def test_reset_restores_initial_condition():
 
     assert filt._state.feedback_state == pytest.approx(2.5)
     assert filt._state.filtered_output == pytest.approx(2.5)
+
+
+def test_motor_control_pid_import():
+    import motor_python.motor_control_using_pid
+
+    assert motor_python.motor_control_using_pid is not None

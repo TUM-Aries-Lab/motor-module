@@ -388,6 +388,7 @@ def main() -> int:
     csv_file = None
     csv_writer: csv.DictWriter | None = None
     run_start = 0.0
+    total_feedback_samples = 0
     try:
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         csv_file = csv_path.open("w", newline="", encoding="utf-8")
@@ -455,7 +456,6 @@ def main() -> int:
         tick_index = 0
         turnarounds = 0
         last_status = status0
-        total_feedback_samples = 0
 
         def log_sample(
             elapsed_s: float,
