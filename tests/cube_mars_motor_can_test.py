@@ -12,7 +12,7 @@ from motor_python.base_motor import MotorState
 from motor_python.can_protocol import CANControlMode
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
 from motor_python.definitions import CAN_DEFAULTS
-from motor_python.mit_mode_packer import AK60_6_MIT_LIMITS, pack_mit_frame
+from motor_python.mit_mode_packer import AK60_6_V3_0_MIT_LIMITS, pack_mit_frame
 
 
 def _make_feedback_msg(
@@ -205,7 +205,7 @@ class TestMITCommandPath:
             30.0,
             1.5,
             3.0,
-            limits=AK60_6_MIT_LIMITS,
+            limits=AK60_6_V3_0_MIT_LIMITS,
         )
         mit_arb_id = (CANControlMode.MIT_MODE << 8) | motor.motor_can_id
 

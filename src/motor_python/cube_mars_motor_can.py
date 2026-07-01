@@ -26,7 +26,7 @@ from motor_python.definitions import (
     PIDConfig,
 )
 from motor_python.mit_mode_packer import (
-    AK60_6_MIT_LIMITS,
+    AK60_6_V3_0_MIT_LIMITS,
     AK80_6_MIT_LIMITS,
     float_to_uint,
     uint_to_float,
@@ -387,7 +387,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
         kp: float,
         kd: float,
         t_ff: float,
-        limits: MITModeLimits = AK60_6_MIT_LIMITS,
+        limits: MITModeLimits = AK60_6_V3_0_MIT_LIMITS,
     ) -> bytes:
         """Pack Force Control Mode payload according to CubeMars manual layout.
 
