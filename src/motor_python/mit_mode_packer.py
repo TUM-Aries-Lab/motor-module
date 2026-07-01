@@ -22,7 +22,7 @@ class MITModeLimits:
 
 
 # AK60-6 limits from CubeMars manual force-control parameter table. (Page 39)
-AK60_6_MIT_LIMITS = MITModeLimits(
+AK60_6_V3_0_MIT_LIMITS = MITModeLimits(
     p_min=-12.56,
     p_max=12.56,
     v_min=-60.0,
@@ -43,6 +43,20 @@ AK80_6_MIT_LIMITS = MITModeLimits(
     v_max=76.0,
     t_min=-12.0,
     t_max=12.0,
+    kp_min=0.0,
+    kp_max=500.0,
+    kd_min=0.0,
+    kd_max=5.0,
+)
+
+# AK80-6 KV100 V2.0 limits (from CubeMars manual parameter table. (Page 63))
+AK60_6_V1_1_MIT_LIMITS = MITModeLimits(
+    p_min=-12.5,
+    p_max=12.5,
+    v_min=-45.0,
+    v_max=45.0,
+    t_min=-15.0,
+    t_max=15.0,
     kp_min=0.0,
     kp_max=500.0,
     kd_min=0.0,
@@ -83,7 +97,7 @@ def pack_mit_frame(  # noqa: PLR0913
     kp: float,
     kd: float,
     t_ff: float,
-    limits: MITModeLimits = AK60_6_MIT_LIMITS,
+    limits: MITModeLimits = AK60_6_V3_0_MIT_LIMITS,
 ) -> bytes:
     """Pack Force Control Mode payload according to CubeMars manual layout.
 

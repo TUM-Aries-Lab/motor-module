@@ -3,7 +3,7 @@
 import pytest
 
 from motor_python.mit_mode_packer import (
-    AK60_6_MIT_LIMITS,
+    AK60_6_V3_0_MIT_LIMITS,
     float_to_uint,
     pack_mit_frame,  # this might need to be changed, because pack_mit_frame has been moved
     uint_to_float,
@@ -23,11 +23,21 @@ def test_uint_to_float_round_trip_midpoint():
 
 def test_pack_mit_frame_uses_manual_byte_order():
     # Pick deterministic values and compare against manual byte mapping.
-    p_int = float_to_uint(1.0, AK60_6_MIT_LIMITS.p_min, AK60_6_MIT_LIMITS.p_max, 16)
-    v_int = float_to_uint(2.0, AK60_6_MIT_LIMITS.v_min, AK60_6_MIT_LIMITS.v_max, 12)
-    kp_int = float_to_uint(30.0, AK60_6_MIT_LIMITS.kp_min, AK60_6_MIT_LIMITS.kp_max, 12)
-    kd_int = float_to_uint(1.5, AK60_6_MIT_LIMITS.kd_min, AK60_6_MIT_LIMITS.kd_max, 12)
-    t_int = float_to_uint(3.0, AK60_6_MIT_LIMITS.t_min, AK60_6_MIT_LIMITS.t_max, 12)
+    p_int = float_to_uint(
+        1.0, AK60_6_V3_0_MIT_LIMITS.p_min, AK60_6_V3_0_MIT_LIMITS.p_max, 16
+    )
+    v_int = float_to_uint(
+        2.0, AK60_6_V3_0_MIT_LIMITS.v_min, AK60_6_V3_0_MIT_LIMITS.v_max, 12
+    )
+    kp_int = float_to_uint(
+        30.0, AK60_6_V3_0_MIT_LIMITS.kp_min, AK60_6_V3_0_MIT_LIMITS.kp_max, 12
+    )
+    kd_int = float_to_uint(
+        1.5, AK60_6_V3_0_MIT_LIMITS.kd_min, AK60_6_V3_0_MIT_LIMITS.kd_max, 12
+    )
+    t_int = float_to_uint(
+        3.0, AK60_6_V3_0_MIT_LIMITS.t_min, AK60_6_V3_0_MIT_LIMITS.t_max, 12
+    )
 
     expected = bytes(
         [
@@ -42,13 +52,13 @@ def test_pack_mit_frame_uses_manual_byte_order():
         ]
     )
 
-    payload = pack_mit_frame(1.0, 2.0, 30.0, 1.5, 3.0, limits=AK60_6_MIT_LIMITS)
+    payload = pack_mit_frame(1.0, 2.0, 30.0, 1.5, 3.0, limits=AK60_6_V3_0_MIT_LIMITS)
     assert payload == expected
 
 
 def test_pack_mit_frame_ak60_6_limits_are_enforced():
     payload = pack_mit_frame(
-        999.0, 999.0, 999.0, 999.0, 999.0, limits=AK60_6_MIT_LIMITS
+        999.0, 999.0, 999.0, 999.0, 999.0, limits=AK60_6_V3_0_MIT_LIMITS
     )
 
     # Decode only boundary-sensitive fields to confirm top saturation.

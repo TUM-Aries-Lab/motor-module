@@ -13,7 +13,7 @@ from motor_python.base_motor import BaseMotor
 from motor_python.cube_mars_motor import CubeMarsAK606v3, CubeMarsAK806v2
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN
 from motor_python.definitions import (
-    AK60_6_MOTOR_SPEC,
+    AK60_6_V3_0_MOTOR_SPEC,
     AK80_6_MOTOR_SPEC,
     CAN_DEFAULTS,
     MotorSpec,
@@ -48,7 +48,7 @@ def create_can_motor(
             bitrate=bitrate,
             feedback_can_id=feedback_can_id,
             mit_velocity_kd=mit_velocity_kd,
-            motor_spec=motor_spec if motor_spec is not None else AK60_6_MOTOR_SPEC,
+            motor_spec=motor_spec if motor_spec is not None else AK60_6_V3_0_MOTOR_SPEC,
             helper_policy=helper_policy,
             auto_recover_bus=auto_recover_bus,
             allow_legacy_feedback_ids=allow_legacy_feedback_ids,

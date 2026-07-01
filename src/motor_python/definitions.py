@@ -7,7 +7,8 @@ from pathlib import Path
 import numpy as np
 
 from motor_python.mit_mode_packer import (
-    AK60_6_MIT_LIMITS,
+    AK60_6_V1_1_MIT_LIMITS,
+    AK60_6_V3_0_MIT_LIMITS,
     AK80_6_MIT_LIMITS,
     MITModeLimits,
 )
@@ -123,14 +124,15 @@ class MotorSpec:
     mit_position_kp: float = 2.0
     mit_position_kd: float = 1.0
     mit_velocity_kd: float = 0.2
-    mit_mode_limits: MITModeLimits = AK60_6_MIT_LIMITS
+    mit_mode_limits: MITModeLimits = AK60_6_V3_0_MIT_LIMITS
 
 
 class MotorModel(StrEnum):
     """Canonical motor models supported by this package."""
 
-    AK60_6 = "AK60-6"
+    AK60_6V3 = "AK60-6_V3.0"
     AK80_6 = "AK80-6"
+    AK60_6V1 = "AK60-6_V1.1"
 
 
 @dataclass(frozen=True)
@@ -273,8 +275,8 @@ HARDWARE_TEST_DEFAULTS = HardwareTestDefaults()
 
 
 # Motor-specifications - from CubeMars site specifications
-AK60_6_MOTOR_SPEC = MotorSpec(
-    model_name="AK60-6",
+AK60_6_V3_0_MOTOR_SPEC = MotorSpec(
+    model_name=MotorModel.AK60_6V3,
     rated_voltage="24/48V",
     pole_pairs=14,
     gear_ratio=6,
@@ -288,12 +290,12 @@ AK60_6_MOTOR_SPEC = MotorSpec(
     mit_position_kp=20.0,
     mit_position_kd=1.0,
     mit_velocity_kd=0.2,
-    mit_mode_limits=AK60_6_MIT_LIMITS,
+    mit_mode_limits=AK60_6_V3_0_MIT_LIMITS,
 )
 
 # Motor-specifications - from CubeMars site specifications
 AK80_6_MOTOR_SPEC = MotorSpec(
-    model_name="AK80-6",
+    model_name=MotorModel.AK80_6,
     rated_voltage="48V",
     pole_pairs=21,
     gear_ratio=6,
@@ -310,15 +312,35 @@ AK80_6_MOTOR_SPEC = MotorSpec(
     mit_mode_limits=AK80_6_MIT_LIMITS,
 )
 
+# Motor-specifications - from CubeMars site specifications
+AK60_6_V1_1_MOTOR_SPEC = MotorSpec(
+    model_name=MotorModel.AK60_6V1,
+    rated_voltage="24V",
+    pole_pairs=14,
+    gear_ratio=6,
+    rated_torque_nm=3.0,
+    peak_torque_nm=9.0,
+    rated_current_amps=6.5,
+    peak_current_amps=22.7,
+    max_output_speed_rpm=560,
+    max_velocity_electrical_rpm=7840,  # 560 RPM * 14 pole pairs
+    min_velocity_electrical_rpm=-7840,  # -560 RPM * 14 pole pairs
+    mit_position_kp=0.0,  # TODO
+    mit_position_kd=0.0,  # TODO
+    mit_velocity_kd=1.0,  # TODO
+    mit_mode_limits=AK60_6_V1_1_MIT_LIMITS,
+)
+
 # Dictionary mapping motor model names to their specifications for easy lookup
 MOTOR_SPECS: dict[str, MotorSpec] = {
-    AK60_6_MOTOR_SPEC.model_name: AK60_6_MOTOR_SPEC,
+    AK60_6_V3_0_MOTOR_SPEC.model_name: AK60_6_V3_0_MOTOR_SPEC,
     AK80_6_MOTOR_SPEC.model_name: AK80_6_MOTOR_SPEC,
+    AK60_6_V1_1_MOTOR_SPEC.model_name: AK60_6_V1_1_MOTOR_SPEC,
 }
 
-# Setting default motor model and spec to AK60-6
-DEFAULT_MOTOR_SPEC = AK60_6_MOTOR_SPEC
-CURRENT_MOTOR_MODEL: MotorModel = MotorModel.AK60_6
+# Setting default motor model and spec to AK60-6 v3
+DEFAULT_MOTOR_SPEC = AK60_6_V3_0_MOTOR_SPEC
+CURRENT_MOTOR_MODEL: MotorModel = MotorModel.AK60_6V3
 CURRENT_MOTOR_SPEC: MotorSpec = MOTOR_SPECS[CURRENT_MOTOR_MODEL.value]
 
 
