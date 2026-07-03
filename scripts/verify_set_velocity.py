@@ -38,6 +38,8 @@ HEALTHY_TX_ERR_MAX = 96
 HEALTHY_RX_ERR_MAX = 64
 VERIFY_VELOCITY_MIN_ERPM = -5000
 VERIFY_VELOCITY_MAX_ERPM = 5000
+VERIFY_VELOCITY_MIN_RAD = -10.0
+VERIFY_VELOCITY_MAX_RAD = 10.0
 
 CSV_FIELDNAMES = [
     "wall_time_iso",
@@ -231,13 +233,21 @@ def validate_args(args: argparse.Namespace) -> None:  # noqa: C901
         raise ValueError("--max-missed-feedback must be >= 1")
     if args.velocity_kd < 0:
         raise ValueError("--velocity-kd must be >= 0")
-    velocity_cmd = int(args.velocity_erpm)
-    if velocity_cmd < VERIFY_VELOCITY_MIN_ERPM or velocity_cmd > VERIFY_VELOCITY_MAX_ERPM:
-        raise ValueError(
-            f"--velocity-erpm must be in [{VERIFY_VELOCITY_MIN_ERPM}, {VERIFY_VELOCITY_MAX_ERPM}]"
-        )
-    if velocity_cmd == 0:
-        raise ValueError("--velocity-erpm must be non-zero")
+    if args.velocity_rad is None:
+        velocity_cmd = int(args.velocity_erpm)
+        if velocity_cmd < VERIFY_VELOCITY_MIN_ERPM or velocity_cmd > VERIFY_VELOCITY_MAX_ERPM:
+            raise ValueError(
+                f"--velocity-erpm must be in [{VERIFY_VELOCITY_MIN_ERPM}, {VERIFY_VELOCITY_MAX_ERPM}]"
+            )
+        if velocity_cmd == 0:
+            raise ValueError("--velocity-erpm must be non-zero")
+    else:
+        if args.velocity_rad == 0.0:
+            raise ValueError("--velocity-rad must be non-zero")
+        if args.velocity_rad < VERIFY_VELOCITY_MIN_RAD or args.velocity_rad > VERIFY_VELOCITY_MAX_RAD:
+            raise ValueError(
+                f"--velocity-rad must be in [{VERIFY_VELOCITY_MIN_RAD}, {VERIFY_VELOCITY_MAX_RAD}]"
+            )
 
 
 def _is_can_state_healthy(state: dict[str, int | str]) -> bool:
@@ -295,10 +305,10 @@ def _command_phase(motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN, command_erpm:
     #     raise TypeError("Expected CubeMarsAK606v3CAN or CubeMarsAK806v2CAN motor instance")
     if command_rad_s is not None:
         # Command MIT mode directly in rad/s precision
-        if abs(command_rad_s) < 1e-12:
+        if abs(command_rad_s) < 1e-12 or command_rad_s == 0.0:
             motor.set_mit_mode(pos_rad=0.0, vel_rad_s=0.0, kp=0.0, kd=kd, torque_ff_nm=0.0)
         else:
-            motor.set_mit_mode(pos_rad=0.0, vel_rad_s=command_rad_s, kp=0.0, kd=kd, torque_ff_nm=0.0)
+            motor.set_velocity(motor._rad_s_to_erpm(command_rad_s))
         return
 
     if command_erpm == 0:

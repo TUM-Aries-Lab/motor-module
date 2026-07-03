@@ -33,6 +33,8 @@ from motor_python.mit_mode_packer import (
 )
 from motor_python.pid_controller import PIDController
 
+# ruff: noqa: ERA001
+
 
 class CubeMarsAK606v3CAN(BaseMotor):
     """AK60-6 Motor Controller over CAN with MIT force-control protocol.
@@ -592,10 +594,10 @@ class CubeMarsAK606v3CAN(BaseMotor):
                     self._pace_tx()
                     bus.send(msg, timeout=timeout)
                 self.clear_transport_fault()
-                logger.debug(
-                    f"TX CAN ID 0x{msg.arbitration_id:08X}: "
-                    f"{' '.join(f'{b:02X}' for b in msg.data)}"
-                )
+                # logger.debug(
+                #     f"TX CAN ID 0x{msg.arbitration_id:08X}: "
+                #     f"{' '.join(f'{b:02X}' for b in msg.data)}"
+                # )
                 if capture_response:
                     self._capture_response()
                 return True
@@ -1035,7 +1037,7 @@ class CubeMarsAK606v3CAN(BaseMotor):
     def set_position(self, position_degrees: float) -> None:
         """Position loop in MIT mode using default ``kp/kd`` gains."""
         pos_rad = float(np.deg2rad(position_degrees))
-        self.zero_position()  # TODO: discuss if it is needed here
+        # self.zero_position()  # TODO: discuss if it is needed here
         self.set_mit_mode(
             pos_rad=pos_rad,
             vel_rad_s=0.0,

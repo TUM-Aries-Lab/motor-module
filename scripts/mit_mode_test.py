@@ -30,6 +30,7 @@ from motor_python import create_can_motor
 from motor_python.base_motor import MotorState
 from motor_python.can_utils import get_can_state
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN
+from scripts.motor_data_logger import MotorDataLogger
 
 SEPARATOR = "=" * 72
 
@@ -163,7 +164,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--step-seconds",
         type=float,
-        default=1.0,
+        default=3.0,
         help="Duration per movement step (default: 0.8)",
     )
     parser.add_argument(
@@ -196,6 +197,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:  # noqa: C901, PLR0912
     """Run MIT function tests on one motor."""
     args = parse_args()
+    logger = MotorDataLogger(
+            f"data/logs/motor_log_{int(time.time())}.csv"
+        )
 
     section("AK60-6 MIT Mode Test (single motor)")
     if args.safe:
@@ -261,11 +265,21 @@ def main() -> int:  # noqa: C901, PLR0912
         motor.set_mit_mode(
             pos_rad=1.0,
             vel_rad_s=0.0,
-            kp=0.5 if args.safe else 1.0,
+            kp=0.5 if args.safe else 4,
             kd=0.2 if args.safe else 0.5,
             torque_ff_nm=0.0,
         )
         hold_and_log(motor, args.step_seconds, "set_mit_mode position")
+        status = motor.get_status()
+        logger.log(
+                cmd_pos=1.0,
+                cmd_vel=0,
+                cmd_tau=0.0,
+                act_pos=status.position_degrees,
+                act_vel=status.speed_erpm,
+                act_current=status.current_amps,
+                temperature=status.temperature_celsius,
+        )
 
         if args.include_spin_tests:
             print("- velocity damping")
@@ -279,17 +293,19 @@ def main() -> int:  # noqa: C901, PLR0912
             )
             hold_and_log(motor, args.step_seconds, "set_mit_mode velocity")
 
-            print("- torque feedforward")
-            motor.set_mit_mode(
-                pos_rad=0.0,
-                vel_rad_s=0.0,
-                kp=0.0,
-                kd=0.0,
-                torque_ff_nm=args.torque_nm,
-            )
-            hold_and_log(motor, args.step_seconds/2, "set_mit_mode torque")
-        else:
-            print("- velocity/torque MIT subtests skipped (use --include-spin-tests)")
+
+        # TODO: discuss if this is correct, because the motor spins extremely fast when we command a torque (even 0.5 Nm).
+        #     print("- torque feedforward")
+        #     motor.set_mit_mode(
+        #         pos_rad=0.0,
+        #         vel_rad_s=0.0,
+        #         kp=0.0,
+        #         kd=0.0,
+        #         torque_ff_nm=args.torque_nm,
+        #     )
+        #     hold_and_log(motor, args.step_seconds/2, "set_mit_mode torque")
+        # else:
+        #     print("- velocity/torque MIT subtests skipped (use --include-spin-tests)")
 
         section("4) set_position() helper (MIT-backed)")
         motor.zero_position()  # zero the encoder before position test
@@ -301,9 +317,10 @@ def main() -> int:  # noqa: C901, PLR0912
             motor.set_velocity(args.velocity_erpm)
             hold_and_log(motor, args.step_seconds, "set_velocity")
 
-            section("6) set_current() helper (maps to MIT torque)")
-            motor.set_current(args.torque_nm)
-            hold_and_log(motor, args.step_seconds, "set_current")
+            # TODO: discuss if this is correct, because the motor spins extremely fast when we command a torque (even 0.5 Nm).
+            # section("6) set_current() helper (maps to MIT torque)")
+            # motor.set_current(args.torque_nm)
+            # hold_and_log(motor, args.step_seconds, "set_current")
         else:
             section("5/6) spin-prone sections skipped")
             print("Skipped set_velocity()/set_current(). Use --include-spin-tests to run them.")

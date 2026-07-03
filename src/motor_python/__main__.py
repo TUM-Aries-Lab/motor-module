@@ -12,11 +12,6 @@ import argparse
 
 from loguru import logger
 
-from motor_python.definitions import CAN_DEFAULTS, DEFAULT_LOG_LEVEL, LogLevel
-from motor_python.examples_can import run_motor_demo_can, run_multi_motor_demo
-from motor_python.motor_manager import MotorManager
-from motor_python.utils import setup_logger
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
 from motor_python.definitions import (
     CAN_DEFAULTS,
     DEFAULT_LOG_LEVEL,
@@ -25,7 +20,11 @@ from motor_python.definitions import (
     MotorModel,
     set_current_motor_model_by_name,
 )
-from motor_python.examples_can import multi_motor_can_example, run_motor_demo_can
+from motor_python.examples_can import (
+    run_motor_demo_can,
+    run_multi_motor_demo,
+)
+from motor_python.motor_manager import MotorManager
 from motor_python.utils import setup_logger
 
 
@@ -173,5 +172,6 @@ if __name__ == "__main__":  # pragma: no cover
         dual=args.dual,
         discover=args.discover,
         motor_ids=args.motor_ids,
+        motor_model=args.motor_model,
         interface=args.interface,
     )
