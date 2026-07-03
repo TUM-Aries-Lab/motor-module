@@ -34,6 +34,7 @@ from motor_python import create_can_motor
 from motor_python.base_motor import MotorState
 from motor_python.can_utils import get_can_state
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN
+from scripts.motor_data_logger import MotorDataLogger
 
 SEPARATOR = "=" * 72
 CSV_FIELDNAMES = [
