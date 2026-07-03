@@ -51,7 +51,7 @@ MIN_TRAVEL_EPS_DEG = 0.5
 # ---------------------------------------------------------------------------
 DEFAULT_ANGLE_DEG = 50.0
 DEFAULT_DURATION_S = 180.0
-DEFAULT_VELOCITY_DEG_S = 100.0
+DEFAULT_VELOCITY_DEG_S = 50.0
 DEFAULT_TICK_PAUSE_S = 0.5
 DEFAULT_CONTROL_HZ = CAN_DEFAULTS.motor_control_rate_hz  # 100.0 Hz
 DEFAULT_SWEEP_MIN_DEG = -650.0
