@@ -24,7 +24,7 @@ from motor_python.mit_mode_packer import (
 
 
 # TODO: add tests
-class CubeMarsAK806v2CAN(CubeMarsAK606v3CAN):  # pragma: no cover
+class CubeMarsAK606v1CAN(CubeMarsAK606v3CAN):  # pragma: no cover
     """AK60-6 V1.1 Motor Controller over CAN with MIT force-control protocol."""
 
     def __init__(
@@ -40,7 +40,7 @@ class CubeMarsAK806v2CAN(CubeMarsAK606v3CAN):  # pragma: no cover
         allow_legacy_feedback_ids: bool = False,
         aggressive_bus_reset: bool = False,
     ) -> None:
-        """Initialize CAN motor connection for the AK80-6 V2.
+        """Initialize CAN motor connection for the AK60-6 V1.1.
 
         :param motor_spec: If not provided, defaults to AK60_6_V1_1_MOTOR_SPEC
         """
@@ -196,7 +196,7 @@ class CubeMarsAK806v2CAN(CubeMarsAK606v3CAN):  # pragma: no cover
         )
 
         logger.debug(
-            f"Packing AK80 MIT frame: p={p_des:.3f} rad (int {p_int}) "
+            f"Packing AK60-6 v1.1 MIT frame: p={p_des:.3f} rad (int {p_int}) "
             f"v={v_des:.3f} rad/s (int {v_int}) kp={kp:.2f} (int {kp_int}) "
             f"kd={kd:.2f} (int {kd_int}) t_ff={t_ff:.2f} Nm (int {t_int})"
         )
