@@ -16,23 +16,102 @@ Run:
     .venv/bin/python scripts/mit_mode_test.py --motor-model AK80-6 --include-spin-tests
 
     IMPORTANT FOR SAKSHI: The parts where torque is commanded (torque feedforward and set_current) are commented out to avoid unexpected fast spinning. If motor spins too fast, it is made to stop immediately. Thats what happens in these 2 parts
+    When I changed torque to 0.2, it is better now.
     """
 # ruff: noqa: T201, PLR0915, S110
 
 from __future__ import annotations
 
 import argparse
+import csv
 import subprocess
 import sys
 import time
+from datetime import datetime
+from pathlib import Path
 
 from motor_python import create_can_motor
 from motor_python.base_motor import MotorState
 from motor_python.can_utils import get_can_state
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN
-from scripts.motor_data_logger import MotorDataLogger
 
 SEPARATOR = "=" * 72
+CSV_FIELDNAMES = [
+    "wall_time_iso",
+    "wall_time_epoch_s",
+    "elapsed_s",
+    "step",
+    "command_mode",
+    "command_pos_rad",
+    "command_vel_rad_s",
+    "command_kp",
+    "command_kd",
+    "command_torque_ff_nm",
+    "command_position_deg",
+    "command_velocity_erpm",
+    "command_current_amps",
+    "feedback_position_deg",
+    "feedback_speed_erpm",
+    "feedback_current_amps",
+    "feedback_temperature_c",
+    "feedback_error_code",
+    "feedback_error_description",
+]
+
+
+def _resolve_csv_path(csv_path_arg: str | None) -> Path:
+    """Resolve CSV path from CLI arg or generate a timestamped default path."""
+    if csv_path_arg:
+        return Path(csv_path_arg).expanduser().resolve()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return (Path("data/csv_logs") / f"mit_mode_test_{timestamp}.csv").resolve()
+
+
+class MITStepCSVLogger:
+    """Write MIT command/feedback rows to a CSV file."""
+
+    def __init__(self, csv_path_arg: str | None) -> None:
+        self.path = _resolve_csv_path(csv_path_arg)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.file = self.path.open("w", newline="", encoding="utf-8")
+        self.writer = csv.DictWriter(self.file, fieldnames=CSV_FIELDNAMES)
+        self.writer.writeheader()
+        self.start_time = time.time()
+
+    def log(
+        self,
+        step: str,
+        command_mode: str,
+        command_values: dict[str, object],
+        status: MotorState | None,
+    ) -> None:
+        """Write one command/feedback row to the CSV file."""
+        row = {
+            "wall_time_iso": datetime.now().isoformat(),
+            "wall_time_epoch_s": time.time(),
+            "elapsed_s": time.time() - self.start_time,
+            "step": step,
+            "command_mode": command_mode,
+            "command_pos_rad": command_values.get("pos_rad", ""),
+            "command_vel_rad_s": command_values.get("vel_rad_s", ""),
+            "command_kp": command_values.get("kp", ""),
+            "command_kd": command_values.get("kd", ""),
+            "command_torque_ff_nm": command_values.get("torque_ff_nm", ""),
+            "command_position_deg": command_values.get("position_deg", ""),
+            "command_velocity_erpm": command_values.get("velocity_erpm", ""),
+            "command_current_amps": command_values.get("current_amps", ""),
+            "feedback_position_deg": "" if status is None else status.position_degrees,
+            "feedback_speed_erpm": "" if status is None else status.speed_erpm,
+            "feedback_current_amps": "" if status is None else status.current_amps,
+            "feedback_temperature_c": "" if status is None else status.temperature_celsius,
+            "feedback_error_code": "" if status is None else status.error_code,
+            "feedback_error_description": "" if status is None else status.error_description,
+        }
+        self.writer.writerow(row)
+        self.file.flush()
+
+    def close(self) -> None:
+        self.file.close()
 
 
 def _ensure_can_ready(interface: str) -> None:
@@ -158,13 +237,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--torque-nm",
         type=float,
-        default=0.5,
+        default=0.2,
         help="Torque helper test command in Nm (default: 0.5)",
     )
     parser.add_argument(
         "--step-seconds",
         type=float,
-        default=3.0,
+        default=2.0,
         help="Duration per movement step (default: 0.8)",
     )
     parser.add_argument(
@@ -191,15 +270,18 @@ def parse_args() -> argparse.Namespace:
         default="AK60-6",
         help="Motor model to instantiate (default: AK60-6)",
     )
+    parser.add_argument(
+        "--csv-path",
+        default=None,
+        help="Output CSV path for command/feedback logging",
+    )
     return parser.parse_args()
 
 
 def main() -> int:  # noqa: C901, PLR0912
     """Run MIT function tests on one motor."""
     args = parse_args()
-    logger = MotorDataLogger(
-            f"data/logs/motor_log_{int(time.time())}.csv"
-        )
+    logger = MITStepCSVLogger(args.csv_path)
 
     section("AK60-6 MIT Mode Test (single motor)")
     if args.safe:
@@ -215,6 +297,7 @@ def main() -> int:  # noqa: C901, PLR0912
     print(f"Safe mode : {args.safe}")
     print(f"Preflight : {'skip' if args.skip_preflight else 'auto-reset if needed'}")
     print(f"Spin tests: {args.include_spin_tests}")
+    print(f"CSV log   : {logger.path}")
     print("Safety    : keep load clear; be ready to cut power")
     if args.skip_preflight:
         state = get_can_state(args.interface)
@@ -253,12 +336,19 @@ def main() -> int:  # noqa: C901, PLR0912
         section("2) enable_mit_mode()")
         motor.enable_mit_mode()
         hold_and_log(motor, 0.7, "after enable_mit_mode")
+        logger.log("enable_mit_mode", "enable_mit_mode", {}, motor.get_status())
 
         section("3) set_mit_mode() direct calls")
         print("- passive float (all zeros)")
         motor.zero_position()
         motor.set_mit_mode(pos_rad=0.0, vel_rad_s=0.0, kp=0.0, kd=0.0, torque_ff_nm=0.0)
         hold_and_log(motor, args.step_seconds, "set_mit_mode passive")
+        logger.log(
+            "set_mit_mode_passive",
+            "set_mit_mode",
+            {"pos_rad": 0.0, "vel_rad_s": 0.0, "kp": 0.0, "kd": 0.0, "torque_ff_nm": 0.0},
+            motor.get_status(),
+        )
 
         print("- position impedance")
         motor.zero_position()  # zero the encoder before position test
@@ -270,15 +360,17 @@ def main() -> int:  # noqa: C901, PLR0912
             torque_ff_nm=0.0,
         )
         hold_and_log(motor, args.step_seconds, "set_mit_mode position")
-        status = motor.get_status()
         logger.log(
-                cmd_pos=1.0,
-                cmd_vel=0,
-                cmd_tau=0.0,
-                act_pos=status.position_degrees,
-                act_vel=status.speed_erpm,
-                act_current=status.current_amps,
-                temperature=status.temperature_celsius,
+            "set_mit_mode_position",
+            "set_mit_mode",
+            {
+                "pos_rad": 1.0,
+                "vel_rad_s": 0.0,
+                "kp": 0.5 if args.safe else 4,
+                "kd": 0.2 if args.safe else 0.5,
+                "torque_ff_nm": 0.0,
+            },
+            motor.get_status(),
         )
 
         if args.include_spin_tests:
@@ -292,35 +384,77 @@ def main() -> int:  # noqa: C901, PLR0912
                 torque_ff_nm=0.0,
             )
             hold_and_log(motor, args.step_seconds, "set_mit_mode velocity")
+            logger.log(
+                "set_mit_mode_velocity",
+                "set_mit_mode",
+                {
+                    "pos_rad": 0.0,
+                    "vel_rad_s": 1.2 if args.safe else 2.0,
+                    "kp": 0.0,
+                    "kd": 1.0 if args.safe else 2.0,
+                    "torque_ff_nm": 0.0,
+                },
+                motor.get_status(),
+            )
 
 
         # TODO: discuss if this is correct, because the motor spins extremely fast when we command a torque (even 0.5 Nm).
-        #     print("- torque feedforward")
-        #     motor.set_mit_mode(
-        #         pos_rad=0.0,
-        #         vel_rad_s=0.0,
-        #         kp=0.0,
-        #         kd=0.0,
-        #         torque_ff_nm=args.torque_nm,
-        #     )
-        #     hold_and_log(motor, args.step_seconds/2, "set_mit_mode torque")
-        # else:
-        #     print("- velocity/torque MIT subtests skipped (use --include-spin-tests)")
+            print("- torque feedforward")
+            motor.set_mit_mode(
+                pos_rad=0.0,
+                vel_rad_s=0.0,
+                kp=0.0,
+                kd=0.0,
+                torque_ff_nm=args.torque_nm,
+            )
+            hold_and_log(motor, args.step_seconds/2, "set_mit_mode torque")
+            logger.log(
+                "set_mit_mode_torque",
+                "set_mit_mode",
+                {
+                    "pos_rad": 0.0,
+                    "vel_rad_s": 0.0,
+                    "kp": 0.0,
+                    "kd": 0.0,
+                    "torque_ff_nm": args.torque_nm,
+                },
+                motor.get_status(),
+            )
+        else:
+            print("- velocity/torque MIT subtests skipped (use --include-spin-tests)")
 
         section("4) set_position() helper (MIT-backed)")
         motor.zero_position()  # zero the encoder before position test
         motor.set_position(args.position_deg)
         hold_and_log(motor, args.step_seconds, "set_position")
+        logger.log(
+            "set_position",
+            "set_position",
+            {"position_deg": args.position_deg},
+            motor.get_status(),
+        )
 
         if args.include_spin_tests:
             section("5) set_velocity() helper (MIT-backed)")
             motor.set_velocity(args.velocity_erpm)
             hold_and_log(motor, args.step_seconds, "set_velocity")
+            logger.log(
+                "set_velocity",
+                "set_velocity",
+                {"velocity_erpm": args.velocity_erpm},
+                motor.get_status(),
+            )
 
             # TODO: discuss if this is correct, because the motor spins extremely fast when we command a torque (even 0.5 Nm).
-            # section("6) set_current() helper (maps to MIT torque)")
-            # motor.set_current(args.torque_nm)
-            # hold_and_log(motor, args.step_seconds, "set_current")
+            section("6) set_current() helper (maps to MIT torque)")
+            motor.set_current(args.torque_nm)
+            hold_and_log(motor, args.step_seconds, "set_current")
+            logger.log(
+                "set_current",
+                "set_current",
+                {"current_amps": args.torque_nm},
+                motor.get_status(),
+            )
         else:
             section("5/6) spin-prone sections skipped")
             print("Skipped set_velocity()/set_current(). Use --include-spin-tests to run them.")
@@ -328,18 +462,22 @@ def main() -> int:  # noqa: C901, PLR0912
         section("7) stop()")
         motor.stop()
         hold_and_log(motor, 0.8, "after stop")
+        logger.log("stop", "stop", {}, motor.get_status())
 
         section("8) enable_motor()/disable_motor() aliases")
         print("- enable_motor() alias")
         motor.enable_motor()
         hold_and_log(motor, 0.5, "after enable_motor alias")
+        logger.log("enable_motor", "enable_motor", {}, motor.get_status())
 
         print("- disable_motor() alias")
         motor.disable_motor()
         hold_and_log(motor, 0.5, "after disable_motor alias")
+        logger.log("disable_motor", "disable_motor", {}, motor.get_status())
 
         section("9) disable_mit_mode() explicit")
         motor.disable_mit_mode()
+        logger.log("disable_mit_mode", "disable_mit_mode", {}, motor.get_status())
         print("PASS: MIT mode disabled")
 
         section("MIT test complete")
@@ -353,6 +491,11 @@ def main() -> int:  # noqa: C901, PLR0912
         print(f"\nFAIL: {exc}")
         return 1
     finally:
+        if logger is not None:
+            try:
+                logger.close()
+            except Exception:
+                pass
         if motor is not None:
             try:
                 motor.stop()
