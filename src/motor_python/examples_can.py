@@ -4,7 +4,10 @@ import time
 
 from loguru import logger
 
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+from motor_python.cube_mars_motor_can import (
+    CubeMarsAK606v3CAN,
+    CubeMarsBaseCAN,
+)
 from motor_python.definitions import (
     CAN_DEFAULTS,
     MOTOR_LIMITS,
@@ -18,7 +21,7 @@ from motor_python.motor_manager import MotorManager
 
 
 def run_velocity_control_can(
-    motor: CubeMarsAK606v3CAN,
+    motor: CubeMarsBaseCAN,
     velocity_erpm: int = MOTOR_LIMITS.default_velocity_demo_erpm,
 ) -> None:
     """Run forward/reverse velocity control and stop.
@@ -42,7 +45,7 @@ def run_velocity_control_can(
     motor.get_status()
 
 
-def run_position_control_can(motor: CubeMarsAK606v3CAN) -> None:
+def run_position_control_can(motor: CubeMarsBaseCAN) -> None:
     """Run position control demo: 90°, -90°, 180°, back to 0°.
 
     :param motor: CAN motor instance (must already be enabled).
@@ -70,7 +73,7 @@ def run_position_control_can(motor: CubeMarsAK606v3CAN) -> None:
     motor.stop()
 
 
-def run_exosuit_tendon_control_can(motor: CubeMarsAK606v3CAN) -> None:
+def run_exosuit_tendon_control_can(motor: CubeMarsBaseCAN) -> None:
     """Demonstrate PULL / RELEASE / STOP tendon control sequence.
 
     :param motor: CAN motor instance (must already be enabled).
@@ -90,9 +93,7 @@ def run_exosuit_tendon_control_can(motor: CubeMarsAK606v3CAN) -> None:
     motor.get_status()
 
 
-def run_max_rpm_test_can(
-    motor: CubeMarsAK606v3CAN, duration_seconds: float = 3.0
-) -> None:
+def run_max_rpm_test_can(motor: CubeMarsBaseCAN, duration_seconds: float = 3.0) -> None:
     """Spin at maximum safe ERPM for the given duration then stop.
 
     :param motor: CAN motor instance (must already be enabled).
@@ -109,7 +110,7 @@ def run_max_rpm_test_can(
     motor.get_status()
 
 
-def run_motor_demo_can(motor: CubeMarsAK606v3CAN) -> None:
+def run_motor_demo_can(motor: CubeMarsBaseCAN) -> None:
     """Run the full CAN motor control demonstration for exosuit use.
 
     Assumes the motor is already enabled (enable_motor() already called).
@@ -165,9 +166,7 @@ def basic_can_example() -> None:
     """Demonstrate basic CAN motor control (standalone — manages own motor)."""
     logger.info("Starting CAN motor control example")
 
-    with CubeMarsAK606v3CAN(
-        motor_can_id=0x03, interface="can0", bitrate=1000000
-    ) as motor:
+    with CubeMarsBaseCAN(motor_can_id=0x03, interface="can0", bitrate=1000000) as motor:
         motor.enable_motor()
 
         if not motor.check_communication():
@@ -237,37 +236,48 @@ def run_multi_motor_demo(manager: MotorManager) -> None:
     """Run a generalized multi-motor demo for any number of CAN motors."""
     motor_list = list(manager)
     motor_count = len(motor_list)
+    velocity_erpm = 4000
     logger.info(f"Starting multi-motor demo with {motor_count} motors")
 
     try:
         logger.info("=== Multi-motor demo: synchronized PULL ===")
         for motor in motor_list:
-            motor.control_exosuit_tendon(TendonAction.PULL, velocity_erpm=8000)
+            motor.control_exosuit_tendon(TendonAction.PULL, velocity_erpm=velocity_erpm)
         time.sleep(1.5)
         for motor in motor_list:
             motor.get_status()
 
         logger.info("=== Multi-motor demo: synchronized RELEASE ===")
         for motor in motor_list:
-            motor.control_exosuit_tendon(TendonAction.RELEASE, velocity_erpm=8000)
+            motor.control_exosuit_tendon(
+                TendonAction.RELEASE, velocity_erpm=velocity_erpm
+            )
         time.sleep(1.5)
 
         if motor_count == 2:
             left_motor, right_motor = motor_list
             logger.info("=== Multi-motor demo: left PULL / right RELEASE ===")
-            left_motor.control_exosuit_tendon(TendonAction.PULL, velocity_erpm=8000)
-            right_motor.control_exosuit_tendon(TendonAction.RELEASE, velocity_erpm=8000)
+            left_motor.control_exosuit_tendon(
+                TendonAction.PULL, velocity_erpm=velocity_erpm
+            )
+            right_motor.control_exosuit_tendon(
+                TendonAction.RELEASE, velocity_erpm=velocity_erpm
+            )
             time.sleep(1.5)
 
             logger.info("=== Multi-motor demo: right PULL / left RELEASE ===")
-            left_motor.control_exosuit_tendon(TendonAction.RELEASE, velocity_erpm=8000)
-            right_motor.control_exosuit_tendon(TendonAction.PULL, velocity_erpm=8000)
+            left_motor.control_exosuit_tendon(
+                TendonAction.RELEASE, velocity_erpm=velocity_erpm
+            )
+            right_motor.control_exosuit_tendon(
+                TendonAction.PULL, velocity_erpm=velocity_erpm
+            )
             time.sleep(1.5)
         elif motor_count > 2:
             logger.info("=== Multi-motor demo: alternating PULL/RELEASE ===")
             for idx, motor in enumerate(motor_list):
                 action = TendonAction.PULL if idx % 2 == 0 else TendonAction.RELEASE
-                motor.control_exosuit_tendon(action, velocity_erpm=8000)
+                motor.control_exosuit_tendon(action, velocity_erpm=velocity_erpm)
             time.sleep(1.5)
 
         logger.info("=== Multi-motor demo: STOP all ===")
@@ -278,63 +288,6 @@ def run_multi_motor_demo(manager: MotorManager) -> None:
         logger.info("Multi-motor demo interrupted by user")
         for motor in motor_list:
             motor.stop()
-
-
-# TODO:
-# This standalone function manually manages two motors with a bare try/finally.
-# Now that MotorManager exists, this is the obvious candidate for refactoring (or at least using with statements per motor).
-# As a standalone example it still works, but it's inconsistent with the module's new idioms.
-def multi_motor_can_example(
-    left_can_id: int = 0x03,
-    right_can_id: int = 0x04,
-) -> None:
-    """Control two motors on the same CAN bus (standalone).
-
-    Both motors share the can0 interface. Each listens only to its own
-    feedback ID (0x2900 | motor_can_id) so they do not interfere.
-
-    :param left_can_id: CAN ID of the left motor (default: 0x03).
-    :param right_can_id: CAN ID of the right motor (default: 0x04).
-    :return: None
-    """
-    logger.info(
-        f"Starting dual-motor CAN example "
-        f"(left=0x{left_can_id:02X}, right=0x{right_can_id:02X})"
-    )
-
-    motor_left = CubeMarsAK606v3CAN(motor_can_id=left_can_id, interface="can0")
-    motor_right = CubeMarsAK606v3CAN(motor_can_id=right_can_id, interface="can0")
-
-    try:
-        motor_left.enable_motor()
-        logger.debug(f"Left motor (ID 0x{left_can_id:02X}) enabled")
-        motor_right.enable_motor()
-        logger.debug(f"Right motor (ID 0x{right_can_id:02X}) enabled")
-
-        left_ok = motor_left.check_communication()
-        right_ok = motor_right.check_communication()
-
-        if not left_ok:
-            logger.error(
-                f"Left motor (0x{left_can_id:02X}) not responding — "
-                "check power, wiring, and CAN ID"
-            )
-        if not right_ok:
-            logger.error(
-                f"Right motor (0x{right_can_id:02X}) not responding — "
-                "check power, wiring, and CAN ID"
-            )
-        if not left_ok or not right_ok:
-            return
-
-        logger.info("Both motors online — starting synchronized demo...")
-        run_dual_motor_demo_can(motor_left, motor_right)
-        logger.success("Dual-motor example completed!")
-
-    finally:
-        logger.debug("Closing CAN motor connections")
-        motor_left.close()
-        motor_right.close()
 
 
 if __name__ == "__main__":

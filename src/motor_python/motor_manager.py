@@ -11,7 +11,9 @@ from collections.abc import Iterator, Mapping
 
 from loguru import logger
 
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+from motor_python.cube_mars_motor_can import (
+    CubeMarsBaseCAN,
+)
 
 
 class MotorManager:
@@ -22,15 +24,14 @@ class MotorManager:
         motor_ids: list[int],
         interface: str = "can0",
         labels: Mapping[str, int] | None = None,
+        motor_model: str = "AK60-6",
     ) -> None:
         # Checking if all motor IDs are unique
         if len(motor_ids) != len(set(motor_ids)):
             raise ValueError("motor_ids contains duplicate CAN IDs")
 
         self.interface = interface
-        self._motors: dict[
-            int, CubeMarsAK606v3CAN
-        ] = {}  # Maps CAN ID to motor instance
+        self._motors: dict[int, CubeMarsBaseCAN] = {}  # Maps CAN ID to motor instance
         self._label_to_id: dict[str, int] = {}  # Maps label to CAN ID
         self._closed = False
 
@@ -42,13 +43,16 @@ class MotorManager:
                         f"Label '{label}' references unknown motor ID 0x{motor_id:02X}"
                     )
 
+        from motor_python import create_can_motor  # noqa: PLC0415
+
         for motor_id in motor_ids:
-            self._motors[motor_id] = CubeMarsAK606v3CAN(
+            self._motors[motor_id] = create_can_motor(
+                motor_model,
                 motor_can_id=motor_id,
                 interface=interface,
             )
 
-    def __getitem__(self, key: int | str) -> CubeMarsAK606v3CAN:
+    def __getitem__(self, key: int | str) -> CubeMarsBaseCAN:
         """Return a motor instance by CAN ID or label."""
         if isinstance(key, str):  # Label-based access
             if key not in self._label_to_id:
@@ -66,7 +70,7 @@ class MotorManager:
         """Return the number of managed motors."""
         return len(self._motors)
 
-    def __iter__(self) -> Iterator[CubeMarsAK606v3CAN]:
+    def __iter__(self) -> Iterator[CubeMarsBaseCAN]:
         """Iterate over managed motor instances."""
         return iter(self._motors.values())
 
@@ -79,14 +83,18 @@ class MotorManager:
         return False
 
     @classmethod
-    def discover(cls, interface: str = "can0") -> MotorManager:
+    def discover(
+        cls, interface: str = "can0", motor_model: str = "AK60-6"
+    ) -> MotorManager:
         """Discover available CAN motors on the configured SocketCAN interface."""
         discovered_ids: list[int] = []
 
+        from motor_python import create_can_motor  # noqa: PLC0415
+
         for motor_id in range(1, 17):  # scan CAN IDs 0x01 to 0x10 (1-16)
             try:
-                with CubeMarsAK606v3CAN(
-                    motor_can_id=motor_id, interface=interface
+                with create_can_motor(
+                    motor_model=motor_model, motor_can_id=motor_id, interface=interface
                 ) as motor:
                     if motor.check_communication():
                         discovered_ids.append(motor_id)
@@ -99,6 +107,11 @@ class MotorManager:
 
         logger.info("Discovered {} motors: {}", len(discovered_ids), discovered_ids)
         return cls(motor_ids=discovered_ids, interface=interface)
+
+    def send_neutral_commands(self) -> None:
+        """Send neutral commands to all managed motors."""
+        for motor in self._motors.values():
+            motor.send_neutral_command()
 
     def enable_all(self) -> None:
         """Enable all managed motors."""
