@@ -332,7 +332,7 @@ def main() -> int:
 
     motor_left: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN | None
     motor_right: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN | None
-    csv_file: None
+    csv_file = None
     csv_writer: csv.DictWriter | None = None
     run_start = 0.0
     total_samples = 0
