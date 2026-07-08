@@ -16,6 +16,7 @@ from motor_python.base_motor import BaseMotor, MotorState
 from motor_python.can_protocol import CANControlMode
 from motor_python.can_utils import get_can_state, reset_can_interface
 from motor_python.definitions import (
+    AK60_6_V3_0_MOTOR_SPEC,
     AK80_6_MOTOR_SPEC,
     CAN_DEFAULTS,
     CURRENT_MOTOR_SPEC,
@@ -36,18 +37,11 @@ from motor_python.pid_controller import PIDController
 # ruff: noqa: ERA001
 
 
-class CubeMarsAK606v3CAN(BaseMotor):
-    """AK60-6 Motor Controller over CAN with MIT force-control protocol.
+class CubeMarsBaseCAN(BaseMotor):
+    """Base class for CubeMars CAN motor controllers.
 
-    Hardware target:
-    - Jetson Orin Nano (SocketCAN interface, typically ``can0``)
-    - CubeMars AK60-6
-
-    Protocol scope:
-    - Extended CAN IDs only.
-    - Control mode ID ``0x08`` (Force Control / MIT) only.
-    - Feedback parsing follows CubeMars status frame format:
-      ``pos(int16*0.1deg), speed(int16*10ERPM), current(int16*0.01A), temp(int8), err(uint8)``.
+    This class is not intended to be instantiated directly. Use one of the
+    derived classes for specific motor models.
     """
 
     _CAN_HELPER_ENABLE: bytes = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC])
@@ -1464,8 +1458,55 @@ class CubeMarsAK606v3CAN(BaseMotor):
         self.connected = False
 
 
+class CubeMarsAK606v3CAN(CubeMarsBaseCAN):
+    """AK60-6 Motor Controller over CAN with MIT force-control protocol.
+
+    Hardware target:
+    - Jetson Orin Nano (SocketCAN interface, typically ``can0``)
+    - CubeMars AK60-6
+
+    Protocol scope:
+    - Extended CAN IDs only.
+    - Control mode ID ``0x08`` (Force Control / MIT) only.
+    - Feedback parsing follows CubeMars status frame format:
+      ``pos(int16*0.1deg), speed(int16*10ERPM), current(int16*0.01A), temp(int8), err(uint8)``.
+    """
+
+    def __init__(
+        self,
+        motor_can_id: int = CAN_DEFAULTS.motor_can_id,
+        interface: str = CAN_DEFAULTS.interface,
+        bitrate: int = CAN_DEFAULTS.bitrate,
+        feedback_can_id: int | None = None,
+        mit_velocity_kd: float | None = None,
+        motor_spec: MotorSpec = CURRENT_MOTOR_SPEC,
+        helper_policy: Literal["strict", "fcfd", "legacy"] = "fcfd",
+        auto_recover_bus: bool = True,
+        allow_legacy_feedback_ids: bool = False,
+        aggressive_bus_reset: bool = False,
+    ) -> None:
+        """Initialize CAN motor connection for the AK60-6.
+
+        :param motor_spec: If not provided, defaults to AK60_6_V3_0_MOTOR_SPEC
+        """
+        if motor_spec is None:
+            motor_spec = AK60_6_V3_0_MOTOR_SPEC
+        super().__init__(
+            motor_can_id=motor_can_id,
+            interface=interface,
+            bitrate=bitrate,
+            feedback_can_id=feedback_can_id,
+            mit_velocity_kd=mit_velocity_kd,
+            motor_spec=motor_spec,
+            helper_policy=helper_policy,
+            auto_recover_bus=auto_recover_bus,
+            allow_legacy_feedback_ids=allow_legacy_feedback_ids,
+            aggressive_bus_reset=aggressive_bus_reset,
+        )
+
+
 # A subclass for the AK80-6 V2, which has the same CAN protocol but different motor specs and some different methods.
-class CubeMarsAK806v2CAN(CubeMarsAK606v3CAN):
+class CubeMarsAK806v2CAN(CubeMarsBaseCAN):
     """AK80-6 V2 Motor Controller over CAN with MIT force-control protocol."""
 
     def __init__(

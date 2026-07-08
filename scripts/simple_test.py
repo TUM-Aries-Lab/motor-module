@@ -9,7 +9,7 @@ Examples:
     .venv/bin/python scripts/simple_test.py --velocity-erpm -3000 --duration 2.0
 
     sudo ./setup_can.sh
-    .venv/bin/python scripts/simple_test.py --velocity-erpm 5000 --duration 2 --motor-model AK80-6
+    .venv/bin/python scripts/simple_test.py --velocity-erpm 3000 --duration 2 --motor-model AK80-6
 
 """
 # ruff: noqa: T201
