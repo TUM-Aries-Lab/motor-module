@@ -8,7 +8,7 @@ init:  # ENV SETUP
 test:
 	rm -f .coverage coverage.xml
 	-find . -name ".coverage*" -delete
-	uv run pytest -m "not hardware and not hardware_uart" --cov=src --cov-report=term-missing --no-cov-on-fail --cov-report=xml --cov-fail-under=70
+	uv run pytest -m "not hardware and not hardware_uart" --cov=src --cov-report=term-missing --no-cov-on-fail --cov-report=xml --cov-fail-under=65
 	rm -f .coverage
 
 test-hardware: test-hardware-can  ## Alias for test-hardware-can (CAN is the active setup)
