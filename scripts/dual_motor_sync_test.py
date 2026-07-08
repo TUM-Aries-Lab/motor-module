@@ -3,14 +3,12 @@ NOT YET TESTED
 
 Example:
     sudo ./setup_can.sh
-    .venv/bin/python scripts/dual_motor_sync_test.py
-        --left-id 0x01 --right-id 0x03
-        --left-motor-model AK60-6 --right-motor-model AK80-6 --amplitude-deg 30 --freq-hz 0.5 --duration 30
+    .venv/bin/python scripts/dual_motor_sync_test.py --left-id 0x03 --right-id 0x04 --left-motor-model AK80-6 --right-motor-model AK80-6 --amplitude-deg 60 --freq-hz 0.2 --duration 30
 
     # AK80-6 with wider amplitude
     .venv/bin/python scripts/dual_motor_sync_test.py
         --left-id 0x01 --right-id 0x02
-        --left-motor-model AK60-6 --right-motor-model AK80-6 --amplitude-deg 45 --freq-hz 0.8 --duration 60
+        --left-motor-model AK80-6 --right-motor-model AK80-6 --amplitude-deg 45 --freq-hz 0.8 --duration 60
 
 """
 
@@ -229,13 +227,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--left-id",
-        type=int,
+        type=lambda v: int(v, 0),
         default=CAN_DEFAULTS.motor_can_id,
         help=f"Left motor CAN ID (default: {CAN_DEFAULTS.motor_can_id})",
     )
     parser.add_argument(
         "--right-id",
-        type=int,
+        type=lambda v: int(v, 0),
         default=CAN_DEFAULTS.motor_can_id_2,
         help=f"Right motor CAN ID (default: {CAN_DEFAULTS.motor_can_id_2})",
     )
@@ -384,6 +382,9 @@ def main() -> int:
             print("Error: Right motor communication check failed.")
             return 1
         print("Right motor communication check passed.")
+
+        motor_left.zero_position()
+        motor_right.zero_position()
 
         # Read start position
         left_start_status = read_status(motor_left, timeout_s=0.5)

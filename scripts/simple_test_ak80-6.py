@@ -14,7 +14,7 @@ import time
 
 from motor_python import create_can_motor
 
-MOTOR_ID = 0x03
+MOTOR_ID = 0x04
 TORQUE = -1.0      # Nm
 DURATION = 2.0    # seconds
 

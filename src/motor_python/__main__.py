@@ -64,13 +64,15 @@ def main(  # noqa: PLR0913
     try:
         if discover:
             manager = MotorManager.discover(
-                interface=interface
+                interface=interface, motor_model=motor_model
             )  # sets the discovered ids as motor_ids
         else:
             logger.info(
                 f"Starting CAN motor control loop on interface '{interface}' with IDs: {motor_ids}"
             )
-            manager = MotorManager(motor_ids=motor_ids, interface=interface)
+            manager = MotorManager(
+                motor_ids=motor_ids, interface=interface, motor_model=motor_model
+            )
     except Exception as e:
         logger.error(f"Failed to initialize CAN motor manager: {e}")
         return
@@ -84,7 +86,8 @@ def main(  # noqa: PLR0913
             )
             return
 
-        manager.enable_all()  # Enable all motors before checking communication
+        manager.send_neutral_commands()  # Send neutral commands to all motors
+
         status = (
             manager.check_all()
         )  # Check communication with all motors before proceeding
@@ -94,6 +97,9 @@ def main(  # noqa: PLR0913
                 "120 ohm termination, and CAN IDs."
             )
             return
+
+        manager.enable_all()  # Enable all motors
+        logger.info("All motors enabled. Checking communication...")
 
         logger.info(
             f"Motor communication verified for IDs: {[motor_id for motor_id, ok in status.items() if ok]}"

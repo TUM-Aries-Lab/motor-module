@@ -24,7 +24,13 @@ def patch_motor_class(monkeypatch):
 
     motors = {}
 
-    def fake_init(self, motor_can_id, interface="can0"):
+    def fake_init(
+        self,
+        motor_can_id,
+        interface="can0",
+        *args,
+        **kwargs,
+    ):
         fake = create_fake_motor(motor_can_id)
         motors[motor_can_id] = fake
         self._fake = fake
@@ -37,7 +43,7 @@ def patch_motor_class(monkeypatch):
         self.disable_motor = fake.disable_motor
         self.check_communication = fake.check_communication
 
-    monkeypatch.setattr(mm.CubeMarsAK606v3CAN, "__init__", fake_init)
+    monkeypatch.setattr(mm.CubeMarsBaseCAN, "__init__", fake_init)
 
     return motors
 
