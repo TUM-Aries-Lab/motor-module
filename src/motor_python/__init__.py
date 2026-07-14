@@ -43,7 +43,7 @@ def create_can_motor(
 ) -> CubeMarsAK606v3CAN | CubeMarsAK806v2CAN | CubeMarsAK606v1CAN:
     """Build a CAN motor instance for the requested model."""
     model = motor_model.strip().upper()
-    if model in {"AK60-6", "AK60_6"}:
+    if model in {"AK60-6", "AK60_6", "AK60-6_V3.0"}:
         return CubeMarsAK606v3CAN(
             motor_can_id=motor_can_id,
             interface=interface,

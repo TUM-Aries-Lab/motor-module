@@ -20,6 +20,7 @@ import argparse
 import time
 
 from motor_python import create_can_motor
+from motor_python.definitions import MotorModel
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,8 +59,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--motor-model",
-        choices=("AK60-6", "AK80-6"),
-        default="AK60-6",
+        choices=list(MotorModel),
+        default=MotorModel.AK60_6V3,
         help="Motor model to instantiate (default: AK60-6)",
     )
     parser.add_argument(

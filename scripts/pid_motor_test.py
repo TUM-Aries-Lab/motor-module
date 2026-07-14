@@ -26,6 +26,7 @@ from loguru import logger
 
 from motor_python import create_can_motor
 from motor_python.motor_control_using_pid import PIDMotorController
+from motor_python.definitions import MotorModel
 
 
 def parse_args() -> argparse.Namespace:
@@ -69,8 +70,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--motor-model",
-        choices=("AK60-6", "AK80-6"),
-        default="AK60-6",
+        choices=list(MotorModel),
+        default=MotorModel.AK60_6V3,
         help="Motor model to instantiate (default: AK60-6)",
     )
 
@@ -93,7 +94,7 @@ def main() -> int:
     """Run PID position control test."""
     args = parse_args()
 
-    print("AK60-6 PID Position Test")
+    print(f"{args.motor_model.value} PID Position Test")
     print("=" * 64)
     print(f"Interface : {args.interface}")
     print(f"Motor ID  : 0x{args.motor_id:02X}")

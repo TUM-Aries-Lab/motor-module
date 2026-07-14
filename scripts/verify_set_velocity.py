@@ -30,8 +30,8 @@ from typing import Callable
 from motor_python.base_motor import MotorState, print_timing_stats
 from motor_python import create_can_motor
 from motor_python.can_utils import get_can_state, reset_can_interface
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN
-from motor_python.definitions import CAN_DEFAULTS
+from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN, CubeMarsBaseCAN
+from motor_python.definitions import CAN_DEFAULTS, MotorModel
 
 SEPARATOR = "=" * 78
 HEALTHY_TX_ERR_MAX = 96
@@ -94,8 +94,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--motor-model",
-        choices=("AK60-6", "AK80-6"),
-        default="AK60-6",
+        choices=list(MotorModel),
+        default=MotorModel.AK60_6V3,
         help="Motor model to instantiate (default: AK60-6)",
     )
     parser.add_argument(
@@ -291,7 +291,7 @@ def ensure_can_ready(interface: str, bitrate: int, *, mode: str) -> None:
         )
 
 
-def read_status(motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN, timeout: float) -> MotorState | None:
+def read_status(motor: CubeMarsBaseCAN, timeout: float) -> MotorState | None:
     """Read freshest available feedback without long blocking."""
     status = motor._receive_feedback(timeout=timeout)
     if status is not None:
@@ -299,10 +299,8 @@ def read_status(motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN, timeout: float) 
     return motor._last_feedback
 
 
-def _command_phase(motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN, command_erpm: int, command_rad_s: float | None = None, kd: float = 0.0) -> None:
+def _command_phase(motor: CubeMarsBaseCAN, command_erpm: int, command_rad_s: float | None = None, kd: float = 0.0) -> None:
     """Send one phase command."""
-    # if not motor.isinstance((CubeMarsAK606v3CAN, CubeMarsAK806v2CAN)):
-    #     raise TypeError("Expected CubeMarsAK606v3CAN or CubeMarsAK806v2CAN motor instance")
     if command_rad_s is not None:
         # Command MIT mode directly in rad/s precision
         if abs(command_rad_s) < 1e-12 or command_rad_s == 0.0:
@@ -341,7 +339,7 @@ def _sign(value: float) -> int:
 
 
 def run_phase(  # noqa: PLR0913
-    motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN,
+    motor: CubeMarsBaseCAN,
     *,
     phase_index: int,
     command_erpm: int,
@@ -506,7 +504,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
 
     ensure_can_ready(args.interface, bitrate=args.bitrate, mode=args.preflight_mode)
 
-    motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN | None = None
+    motor: CubeMarsBaseCAN | None = None
     csv_file = None
     csv_writer: csv.DictWriter | None = None
     run_start = 0.0

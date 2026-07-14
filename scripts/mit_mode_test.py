@@ -33,8 +33,8 @@ from pathlib import Path
 from motor_python import create_can_motor
 from motor_python.base_motor import MotorState
 from motor_python.can_utils import get_can_state
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN
-from scripts.motor_data_logger import MotorDataLogger
+from motor_python.cube_mars_motor_can import CubeMarsBaseCAN
+from motor_python.definitions import MotorModel
 
 SEPARATOR = "=" * 72
 CSV_FIELDNAMES = [
@@ -155,7 +155,7 @@ def section(title: str) -> None:
 
 
 def print_status(
-    motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN, label: str, timeout: float = 0.4
+    motor: CubeMarsBaseCAN , label: str, timeout: float = 0.4
 ) -> MotorState | None:
     """Print and return one status sample."""
     status = motor._receive_feedback(timeout=timeout)
@@ -181,7 +181,7 @@ def print_status(
     return status
 
 
-def hold_and_log(motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN, seconds: float, label: str) -> None:
+def hold_and_log(motor: CubeMarsBaseCAN, seconds: float, label: str) -> None:
     """Sleep for a short duration while printing live feedback and validating health."""
     end = time.time() + seconds
     no_feedback_count = 0
@@ -267,8 +267,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--motor-model",
-        choices=("AK60-6", "AK80-6"),
-        default="AK60-6",
+        choices=list(MotorModel),
+        default=MotorModel.AK60_6V3,
         help="Motor model to instantiate (default: AK60-6)",
     )
     parser.add_argument(

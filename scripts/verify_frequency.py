@@ -22,7 +22,7 @@ from pathlib import Path
 
 from motor_python.can_utils import get_can_state, reset_can_interface
 from motor_python.cube_mars_motor_can import CubeMarsBaseCAN, CubeMarsAK606v3CAN, CubeMarsAK806v2CAN
-from motor_python.definitions import CAN_DEFAULTS
+from motor_python.definitions import CAN_DEFAULTS, MotorModel
 from motor_python import create_can_motor
 
 CSV_FIELDNAMES = [
@@ -105,8 +105,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--motor-model",
-        choices=("AK60-6", "AK80-6"),
-        default="AK60-6",
+        choices=list(MotorModel),
+        default=MotorModel.AK60_6V3,
         help="Motor model to instantiate (default: AK60-6)",
     )
     parser.add_argument(
@@ -236,7 +236,7 @@ def _target_frequency_sequence(start_hz: float, end_hz: float, step_hz: float) -
 
 
 def measure_frequency(
-    motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN,
+    motor: CubeMarsBaseCAN,
     target_hz: float,
     command_erpm: int,
     warmup_seconds: float,
@@ -342,7 +342,7 @@ def main() -> int:
 
     ensure_can_ready(args.interface, bitrate=args.bitrate, mode=args.preflight_mode)
 
-    motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN | None = None
+    motor: CubeMarsBaseCAN | None = None
     results: list[FrequencyResult] = []
     try:
         motor = create_can_motor(

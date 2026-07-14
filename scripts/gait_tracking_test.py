@@ -42,6 +42,7 @@ from motor_python.definitions import CAN_DEFAULTS
 from motor_python import create_can_motor
 from motor_python.can_utils import get_can_state, reset_can_interface
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN
+from motor_python.definitions import MotorModel
 
 SEPARATOR = "=" * 72
 HEALTHY_TX_ERR_MAX = 96
@@ -362,8 +363,8 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--motor-model",
-        choices=["AK60-6", "AK80-6"],
-        default="AK60-6",
+        choices=list(MotorModel),
+        default=MotorModel.AK60_6V3,
     )
 
     # Optional right motor (dual-motor mode)
@@ -375,8 +376,8 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--right-motor-model",
-        choices=["AK60-6", "AK80-6"],
-        default="AK60-6",
+        choices=list(MotorModel),
+        default=MotorModel.AK60_6V3,
     )
 
     # Trajectory parameters
