@@ -27,6 +27,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
+from motor_python.definitions import MotorModel
 
 # Allow running as plain `python scripts/mit_position_steps.py` from repo root.
 if __package__ in {None, ""}:
@@ -38,7 +39,7 @@ from motor_python.base_motor import MotorState, print_timing_stats
 from motor_python.definitions import CAN_DEFAULTS
 from motor_python import create_can_motor
 from motor_python.can_utils import get_can_state, reset_can_interface
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN
+from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN, CubeMarsBaseCAN
 
 SEPARATOR = "=" * 72
 HEALTHY_TX_ERR_MAX = 96
@@ -240,8 +241,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--motor-model",
-        choices=["AK60-6", "AK80-6"],
-        default="AK60-6",
+        choices=list(MotorModel),
+        default=MotorModel.AK60_6V3,
         help="Motor model to instantiate (default: AK60-6)",
     )
     parser.add_argument(
@@ -384,7 +385,7 @@ def main() -> int:
             f"(requested [{args.min_deg:.2f}, {args.max_deg:.2f}] deg)."
         )
 
-    motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN | None = None
+    motor: CubeMarsBaseCAN | None = None
     csv_file = None
     csv_writer: csv.DictWriter | None = None
     run_start = 0.0

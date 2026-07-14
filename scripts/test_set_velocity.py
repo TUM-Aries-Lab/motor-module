@@ -8,7 +8,9 @@ velocity commands and that the direction changes as expected.
 
 
 import time
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+from motor_python.cube_mars_motor_can import CubeMarsBaseCAN
+from motor_python import create_can_motor
+from motor_python.definitions import MotorModel
 
 
 def main():
@@ -16,7 +18,8 @@ def main():
     VELOCITY_ERPM = 8000
     DURATION = 3  # seconds
 
-    motor = CubeMarsAK606v3CAN(
+    motor = create_can_motor(
+        MotorModel.AK60_6V3,
         motor_can_id=MOTOR_ID,
         interface="can0",
         bitrate=1000000,
@@ -30,6 +33,8 @@ def main():
         print("No communication with motor")
         motor.close()
         return
+
+    # motor.send_neutral_command()
 
     print("Connected. Starting test...")
 

@@ -20,9 +20,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from motor_python import create_can_motor
+from motor_python.definitions import MotorModel
 
 MOTOR_ID = 0x03
-MOTOR_MODEL = "AK60-6"
+MOTOR_MODEL = MotorModel.AK60_6V3
 INTERFACE = "can0"
 BITRATE = 1_000_000
 ROUNDS = 30  # Total test iterations
@@ -45,8 +46,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--motor-model",
-        choices=("AK60-6", "AK80-6"),
-        default="AK60-6",
+        choices=list(MotorModel),
+        default=MotorModel.AK60_6V3,
         help="Motor model to instantiate (default: AK60-6)",
     )
     return parser.parse_args()

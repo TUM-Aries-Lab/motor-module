@@ -30,7 +30,8 @@ if __package__ in {None, ""}:
 from motor_python import create_can_motor
 from motor_python.base_motor import MotorState
 from motor_python.can_utils import get_can_state, reset_can_interface
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN
+from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN, CubeMarsBaseCAN
+from motor_python.definitions import MotorModel
 
 SEPARATOR = "=" * 72
 MIT_POSITION_LIMIT_DEG = math.degrees(12.56)
@@ -130,8 +131,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--interface", default="can0")
     parser.add_argument("--motor-id", type=lambda v: int(v, 0), default=0x03)
     parser.add_argument("--motor-model",
-        choices=("AK60-6", "AK80-6"),
-        default="AK60-6",
+        choices=list(MotorModel),
+        default=MotorModel.AK60_6V3,
         help="Motor model to instantiate (default: AK60-6)",)
     parser.add_argument("--bitrate", type=int, default=1_000_000)
     parser.add_argument(
@@ -189,7 +190,7 @@ def main() -> int:
     print(f"Timeout              : {args.timeout:.1f} s")
     print(f"Preflight            : {'skip' if args.skip_preflight else 'auto-reset if needed'}")
 
-    motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN | None = None
+    motor: CubeMarsBaseCAN | None = None
     try:
         if args.skip_preflight:
             state = get_can_state(args.interface)

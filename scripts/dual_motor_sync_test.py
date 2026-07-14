@@ -34,8 +34,8 @@ from motor_python.base_motor import MotorState, print_timing_stats
 from motor_python.definitions import CAN_DEFAULTS
 from motor_python import create_can_motor
 from motor_python.can_utils import get_can_state, reset_can_interface
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN
-
+from motor_python.cube_mars_motor_can import CubeMarsBaseCAN
+from motor_python.definitions import MotorModel
 
 SEPARATOR = "=" * 72
 HEALTHY_TX_ERR_MAX = 96
@@ -123,7 +123,7 @@ def _ensure_can_ready(interface: str, bitrate: int) -> None:
         raise RuntimeError("CAN still unhealthy after reset. Check wiring/termination.")
 
 def read_status(
-    motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN,
+    motor: CubeMarsBaseCAN,
     timeout_s: float = 0.1,
 ) -> MotorState | None:
     """Read the motor status with a timeout."""
@@ -239,15 +239,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--left-motor-model",
-        choices=["AK60-6", "AK80-6"],
-        default="AK60-6",
-        help=f"Left motor model (default: AK60-6)",
+        choices=list(MotorModel),
+        default=MotorModel.AK60_6V3,
+        help=f"Left motor model (default: {MotorModel.AK60_6V3})",
     )
     parser.add_argument(
         "--right-motor-model",
-        choices=["AK60-6", "AK80-6"],
-        default="AK60-6",
-        help=f"Right motor model (default: AK60-6)",
+        choices=list(MotorModel),
+        default=MotorModel.AK60_6V3,
+        help=f"Right motor model (default: {MotorModel.AK60_6V3})",
     )
     parser.add_argument(
         "--duration",
@@ -328,8 +328,8 @@ def main() -> int:
     print("Safety       : keep load clear; be ready to cut power")
     print(SEPARATOR)
 
-    motor_left: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN | None
-    motor_right: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN | None
+    motor_left: CubeMarsBaseCAN | None
+    motor_right: CubeMarsBaseCAN | None
     csv_file = None
     csv_writer: csv.DictWriter | None = None
     run_start = 0.0
