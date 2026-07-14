@@ -40,7 +40,7 @@ def create_can_motor(
     auto_recover_bus: bool = True,
     allow_legacy_feedback_ids: bool = True,
     aggressive_bus_reset: bool = False,
-) -> CubeMarsAK606v3CAN | CubeMarsAK806v2CAN:
+) -> CubeMarsAK606v3CAN | CubeMarsAK806v2CAN | CubeMarsAK606v1CAN:
     """Build a CAN motor instance for the requested model."""
     model = motor_model.strip().upper()
     if model in {"AK60-6", "AK60_6"}:

@@ -7,7 +7,7 @@ produces a plot of set frequency vs actual frequency.
 
 Run:
     sudo ./setup_can.sh
-    .venv/bin/python scripts/verify_frequency.py
+    .venv/bin/python scripts/verify_frequency.py --motor-model AK80-6
 """
 
 from __future__ import annotations
@@ -21,8 +21,9 @@ from datetime import datetime
 from pathlib import Path
 
 from motor_python.can_utils import get_can_state, reset_can_interface
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+from motor_python.cube_mars_motor_can import CubeMarsBaseCAN, CubeMarsAK606v3CAN, CubeMarsAK806v2CAN
 from motor_python.definitions import CAN_DEFAULTS
+from motor_python import create_can_motor
 
 CSV_FIELDNAMES = [
     "target_hz",
@@ -101,6 +102,12 @@ def parse_args() -> argparse.Namespace:
             "strict=fail if bus unhealthy, auto=try `sudo ./setup_can.sh`, "
             "skip=do not gate start (default: auto)"
         ),
+    )
+    parser.add_argument(
+        "--motor-model",
+        choices=("AK60-6", "AK80-6"),
+        default="AK60-6",
+        help="Motor model to instantiate (default: AK60-6)",
     )
     parser.add_argument(
         "--start-hz",
@@ -229,12 +236,13 @@ def _target_frequency_sequence(start_hz: float, end_hz: float, step_hz: float) -
 
 
 def measure_frequency(
-    motor: CubeMarsAK606v3CAN,
+    motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN,
     target_hz: float,
     command_erpm: int,
     warmup_seconds: float,
     phase_seconds: float,
 ) -> FrequencyResult:
+    """Measure the actual loop frequency of the motor at a given target frequency."""
     if target_hz <= 0.0:
         raise ValueError("target_hz must be > 0")
 
@@ -334,10 +342,11 @@ def main() -> int:
 
     ensure_can_ready(args.interface, bitrate=args.bitrate, mode=args.preflight_mode)
 
-    motor: CubeMarsAK606v3CAN | None = None
+    motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN | None = None
     results: list[FrequencyResult] = []
     try:
-        motor = CubeMarsAK606v3CAN(
+        motor = create_can_motor(
+            motor_model=args.motor_model,
             motor_can_id=args.motor_id,
             interface=args.interface,
             bitrate=args.bitrate,
@@ -358,6 +367,8 @@ def main() -> int:
             print("FAIL: communication check failed (no feedback)")
             motor.disable_mit_mode()
             return 1
+
+        motor.send_neutral_command()
 
         print("PASS: communication check")
 
