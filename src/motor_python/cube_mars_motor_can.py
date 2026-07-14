@@ -274,7 +274,7 @@ class CubeMarsBaseCAN(BaseMotor):
 
     def _build_extended_id(self, mode: int) -> int:
         """AK60-6 only."""
-        if self.motor_model == "AK80-6":
+        if self.motor_model in {"AK80-6", "AK60-6_V1.1"}:
             raise ValueError("AK80-6 does not use extended ID format")
         return (mode << 8) | self.motor_can_id
 
@@ -567,7 +567,7 @@ class CubeMarsBaseCAN(BaseMotor):
             payload = data
 
         if force_extended is None:
-            is_extended = self.motor_model != "AK80-6"
+            is_extended = self.motor_model not in {"AK80-6", "AK60-6_V1.1"}
         else:
             is_extended = force_extended
 
@@ -685,7 +685,7 @@ class CubeMarsBaseCAN(BaseMotor):
         self, payload: bytes, *, capture_response: bool = True
     ) -> bool:
         """Send MIT command frame for AK60-6 or AK80-6."""
-        if self.motor_model == "AK80-6":
+        if self.motor_model in {"AK80-6", "AK60-6_V1.1"}:
             # AK80-6 uses STANDARD FRAME
             arbitration_id = self.motor_can_id
             is_extended = False

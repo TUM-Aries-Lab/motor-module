@@ -8,7 +8,7 @@ import numpy as np
 from loguru import logger
 
 from motor_python.base_motor import MotorState
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+from motor_python.cube_mars_motor_can import CubeMarsBaseCAN
 from motor_python.definitions import (
     AK60_6_V1_1_MOTOR_SPEC,
     CAN_DEFAULTS,
@@ -24,7 +24,7 @@ from motor_python.mit_mode_packer import (
 
 
 # TODO: add tests
-class CubeMarsAK606v1CAN(CubeMarsAK606v3CAN):  # pragma: no cover
+class CubeMarsAK606v1CAN(CubeMarsBaseCAN):  # pragma: no cover
     """AK60-6 V1.1 Motor Controller over CAN with MIT force-control protocol."""
 
     def __init__(
@@ -224,7 +224,7 @@ class CubeMarsAK606v1CAN(CubeMarsAK606v3CAN):  # pragma: no cover
             pos_rad=0.0,
             vel_rad_s=vel_rad_s,
             kp=0.0,
-            kd=3.0,
+            kd=1.0,
             torque_ff_nm=0.0,
         )
 
