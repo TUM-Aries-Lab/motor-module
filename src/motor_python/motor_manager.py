@@ -14,6 +14,7 @@ from loguru import logger
 from motor_python.cube_mars_motor_can import (
     CubeMarsBaseCAN,
 )
+from motor_python.definitions import MotorModel
 
 
 class MotorManager:
@@ -24,7 +25,7 @@ class MotorManager:
         motor_ids: list[int],
         interface: str = "can0",
         labels: Mapping[str, int] | None = None,
-        motor_model: str = "AK60-6",
+        motor_model: str = MotorModel.AK60_6V3,
     ) -> None:
         # Checking if all motor IDs are unique
         if len(motor_ids) != len(set(motor_ids)):
@@ -84,7 +85,7 @@ class MotorManager:
 
     @classmethod
     def discover(
-        cls, interface: str = "can0", motor_model: str = "AK60-6"
+        cls, interface: str = "can0", motor_model: str = MotorModel.AK60_6V3
     ) -> MotorManager:
         """Discover available CAN motors on the configured SocketCAN interface."""
         discovered_ids: list[int] = []

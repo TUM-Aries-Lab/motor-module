@@ -13,7 +13,7 @@ Run:
     .venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03
 
     sudo ./setup_can.sh
-    .venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03 --velocity-rad 2 --motor-model AK80-6
+    .venv/bin/python scripts/verify_set_velocity.py --motor-id 0x04 --velocity-erpm 3000 --motor-model AK80-6
 """
 # ruff: noqa: T201
 
@@ -37,7 +37,7 @@ SEPARATOR = "=" * 78
 HEALTHY_TX_ERR_MAX = 96
 HEALTHY_RX_ERR_MAX = 64
 VERIFY_VELOCITY_MIN_ERPM = -5000
-VERIFY_VELOCITY_MAX_ERPM = 5000
+VERIFY_VELOCITY_MAX_ERPM = 12000
 VERIFY_VELOCITY_MIN_RAD = -10.0
 VERIFY_VELOCITY_MAX_RAD = 10.0
 

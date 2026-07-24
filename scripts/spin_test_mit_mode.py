@@ -5,7 +5,7 @@ Demonstrates CAN communication in both directions.
 
 Run:
 sudo ./setup_can.sh && .venv/bin/python scripts/spin_test.py
-sudo ./setup_can.sh && .venv/bin/python scripts/spin_test_ak80_6.py --motor-model AK80-6
+sudo ./setup_can.sh && .venv/bin/python scripts/spin_test_mit_mode.py --motor-model AK80-6
 
 """
 import struct

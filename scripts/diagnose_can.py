@@ -19,6 +19,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from motor_python.definitions import MotorModel
 
 import can
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -389,8 +390,8 @@ def parse_args() -> DiagnosticConfig:
     )
     parser.add_argument(
         "--motor-model",
-        choices=("AK60-6", "AK80-6"),
-        default="AK60-6",
+        choices=list(MotorModel),
+        default=MotorModel.AK60_6V3,
         help="Motor model to diagnose (default: AK60-6)",
     )
     args = parser.parse_args()
