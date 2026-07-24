@@ -1406,10 +1406,10 @@ class CubeMarsBaseCAN(BaseMotor):
 
         self._start_refresh(payload)
 
-        logger.info(
-            f"MIT cmd: pos={pos_rad:.3f} rad vel={vel_rad_s:.3f} rad/s "
-            f"kpinfo={kp:.2f} kd={kd:.2f} tau={torque_ff_nm:.2f} Nm"
-        )
+        # logger.info(
+        #     f"MIT cmd: pos={pos_rad:.3f} rad vel={vel_rad_s:.3f} rad/s "
+        #     f"kpinfo={kp:.2f} kd={kd:.2f} tau={torque_ff_nm:.2f} Nm"
+        # )
 
     def stop(self) -> None:
         """Send neutral MIT command and disable MIT mode."""

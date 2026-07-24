@@ -12,12 +12,17 @@ from typing import Literal
 from motor_python.base_motor import BaseMotor
 from motor_python.cube_mars_motor import CubeMarsAK606v3, CubeMarsAK806v2
 from motor_python.cube_mars_motor_ak606v1_1 import CubeMarsAK606v1CAN
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN
+from motor_python.cube_mars_motor_can import (
+    CubeMarsAK606v3CAN,
+    CubeMarsAK806v2CAN,
+    CubeMarsBaseCAN,
+)
 from motor_python.definitions import (
     AK60_6_V1_1_MOTOR_SPEC,
     AK60_6_V3_0_MOTOR_SPEC,
     AK80_6_MOTOR_SPEC,
     CAN_DEFAULTS,
+    MotorModel,
     MotorSpec,
 )
 from motor_python.motor_manager import MotorManager
@@ -28,7 +33,7 @@ Motor = CubeMarsAK606v3CAN
 
 # ruff: noqa: PLR0913
 def create_can_motor(
-    motor_model: str = "AK60-6",
+    motor_model: str = MotorModel.AK60_6V3,
     *,
     motor_can_id: int = CAN_DEFAULTS.motor_can_id,
     interface: str = CAN_DEFAULTS.interface,
@@ -40,7 +45,7 @@ def create_can_motor(
     auto_recover_bus: bool = True,
     allow_legacy_feedback_ids: bool = True,
     aggressive_bus_reset: bool = False,
-) -> CubeMarsAK606v3CAN | CubeMarsAK806v2CAN | CubeMarsAK606v1CAN:
+) -> CubeMarsBaseCAN:
     """Build a CAN motor instance for the requested model."""
     model = motor_model.strip().upper()
     if model in {"AK60-6", "AK60_6", "AK60-6_V3.0"}:

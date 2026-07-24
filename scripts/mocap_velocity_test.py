@@ -64,6 +64,7 @@ from motor_python.can_utils import get_can_state, reset_can_interface
 from motor_python import create_can_motor, definitions
 from motor_python.definitions import CAN_DEFAULTS
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN
+from motor_python.definitions import MotorModel
 
 SEPARATOR = "=" * 84
 DEFAULT_SEQUENCE = "0:1.5,5000:2.5,7000:2.5,0:1.5,-5000:2.5,-7000:2.5,0:1.5"
@@ -300,8 +301,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--motor-model",
-        choices=("AK60-6", "AK80-6"),
-        default="AK60-6",
+        choices=list(MotorModel),
+        default=MotorModel.AK60_6V3,
         help="Motor model to instantiate (default: AK60-6)",
     )
     parser.add_argument(

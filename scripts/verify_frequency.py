@@ -7,7 +7,7 @@ produces a plot of set frequency vs actual frequency.
 
 Run:
     sudo ./setup_can.sh
-    .venv/bin/python scripts/verify_frequency.py --motor-model AK80-6
+    .venv/bin/python scripts/verify_frequency.py --motor-model AK80-6 --motor-id 0x04
 """
 
 from __future__ import annotations
@@ -67,14 +67,14 @@ def _resolve_csv_path(csv_path_arg: str | None, *, prefix: str) -> Path:
     if csv_path_arg:
         return Path(csv_path_arg).expanduser().resolve()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return (Path("data/csv_logs") / f"{prefix}_{timestamp}.csv").resolve()
+    return (Path("data/csv_logs") / f"{prefix}_{CAN_DEFAULTS.motor_control_rate_hz}hz_{timestamp}.csv").resolve()
 
 
 def _resolve_plot_path(plot_path_arg: str | None, *, prefix: str) -> Path:
     if plot_path_arg:
         return Path(plot_path_arg).expanduser().resolve()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return (Path("data/csv_logs") / f"{prefix}_{timestamp}.png").resolve()
+    return (Path("data/csv_logs") / f"{prefix}_{CAN_DEFAULTS.motor_control_rate_hz}hz_{timestamp}.png").resolve()
 
 
 def parse_args() -> argparse.Namespace:
@@ -225,6 +225,7 @@ def is_within_tolerance(target: float, actual: float, tol: float) -> bool:
 
 
 def _target_frequency_sequence(start_hz: float, end_hz: float, step_hz: float) -> list[float]:
+    """Gives a list of all the frequencies that needs to be tested"""
     values = []
     current = start_hz
     while current <= end_hz + 1e-9:
@@ -298,13 +299,27 @@ def plot_results(results: list[FrequencyResult], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     x = [result.target_hz for result in results]
     y = [result.actual_hz for result in results]
+    y_std = [
+        (result.loop_period_std_s / result.loop_period_mean_s ** 2)
+        if result.loop_period_std_s is not None and result.loop_period_mean_s is not None
+        else 0.0
+        for result in results
+    ]
 
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(x, y, marker="o", linestyle="-", color="#1f77b4", label="actual")
+    ax.plot(x, y, marker="o", linestyle="-", color="#286c9c", label="actual")
+    ax.fill_between(
+        x,
+        [value - std for value, std in zip(y, y_std)],
+        [value + std for value, std in zip(y, y_std)],
+        color="#1f77b4",
+        alpha=0.18,
+        label="mean ± std (Hz)",
+    )
     ax.plot(x, x, linestyle="--", color="#ff7f0e", label="ideal")
     ax.set_xlabel("Target refresh frequency (Hz)")
     ax.set_ylabel("Actual loop frequency (Hz)")
-    ax.set_title("Set frequency vs actual CAN refresh frequency")
+    ax.set_title(f"Set frequency vs actual CAN refresh frequency for {CAN_DEFAULTS.motor_control_rate_hz} Hz")
     ax.grid(alpha=0.3)
     ax.legend()
     fig.tight_layout()
