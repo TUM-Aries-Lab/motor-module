@@ -5,6 +5,11 @@ when the target refresh frequency is changed from a low value up to a high
 value. It writes a CSV recording the commanded vs actual frequency and
 produces a plot of set frequency vs actual frequency.
 
+actual_hz: mean frequency over multiple loop iterations
+
+The script produces a plot at the end which illustrates a line graph for target vs actual hz.
+It answer "Does the implemented refresh loop achieve the requested update frequency?"
+
 Run:
     sudo ./setup_can.sh
     .venv/bin/python scripts/verify_frequency.py --motor-model AK80-6 --motor-id 0x04
@@ -28,6 +33,8 @@ from motor_python import create_can_motor
 CSV_FIELDNAMES = [
     "target_hz",
     "actual_hz",
+    "frequency_error_hz",
+    "actual_speed_erpm",
     "loop_period_expected_s",
     "loop_period_mean_s",
     "loop_period_std_s",
@@ -60,6 +67,8 @@ class FrequencyResult:
     cumulative_send_failures: int
     cumulative_missed_feedback: int
     command_erpm: int
+    frequency_error_hz: float
+    actual_speed_erpm: int | None
     timestamp_iso: str
 
 
@@ -266,10 +275,12 @@ def measure_frequency(
 
     stats = motor.get_timing_stats()
     effective_hz = float(stats.get("loop_effective_hz", 0.0))
+    actual_speed_erpm = motor.get_speed()
 
     return FrequencyResult(
         target_hz=target_hz,
         actual_hz=effective_hz,
+        frequency_error_hz=effective_hz - target_hz,
         loop_period_expected_s=float(stats.get("loop_period_expected_s", 0.0)) if stats.get("available", False) else None,
         loop_period_mean_s=float(stats.get("loop_period_mean_s", 0.0)) if stats.get("available", False) else None,
         loop_period_std_s=float(stats.get("loop_period_std_s", 0.0)) if stats.get("available", False) else None,
@@ -281,11 +292,17 @@ def measure_frequency(
         cumulative_send_failures=int(getattr(motor, "_cumulative_refresh_send_failures", 0)),
         cumulative_missed_feedback=int(getattr(motor, "_cumulative_refresh_no_feedback", 0)),
         command_erpm=command_erpm,
+        actual_speed_erpm=actual_speed_erpm,
         timestamp_iso=datetime.now().isoformat(timespec="seconds"),
     )
 
 
-def plot_results(results: list[FrequencyResult], path: Path) -> None:
+def plot_results(
+    results: list[FrequencyResult],
+    path: Path,
+    max_stable_hz: float | None = None,
+    tolerance_hz: float | None = None,
+) -> None:
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -305,10 +322,33 @@ def plot_results(results: list[FrequencyResult], path: Path) -> None:
         else 0.0
         for result in results
     ]
+    error = [actual - target for actual, target in zip(y, x)]
+    relative_error = [
+        abs(err) / target * 100 if target != 0 else 0.0
+        for err, target in zip(error, x)
+    ]
 
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(x, y, marker="o", linestyle="-", color="#286c9c", label="actual")
-    ax.fill_between(
+    missed_feedback = [result.cumulative_missed_feedback for result in results]
+    jitter_ratio = [result.loop_jitter_ratio or 0.0 for result in results]
+    actual_speed = [float(result.actual_speed_erpm) if result.actual_speed_erpm is not None else float("nan") for result in results]
+    commanded_speed = [float(result.command_erpm) for result in results]
+
+    fig, (ax1, ax2, ax3, ax4, ax5) = plt.subplots(5, 1, figsize=(10, 17), sharex=True)
+    subtitle = (
+        f"Tolerance: ±{tolerance_hz:.1f} Hz"
+        if tolerance_hz is not None
+        else ""
+    )
+    fig.suptitle(
+        f"Set frequency vs actual CAN refresh frequency for {CAN_DEFAULTS.motor_control_rate_hz} Hz"
+        + (f"\n{subtitle}" if subtitle else ""),
+        fontsize=16,
+        fontweight="bold",
+    )
+    fig.subplots_adjust(top=0.92)
+
+    ax1.plot(x, y, marker="o", linestyle="-", color="#286c9c", label="actual")
+    ax1.fill_between(
         x,
         [value - std for value, std in zip(y, y_std)],
         [value + std for value, std in zip(y, y_std)],
@@ -316,12 +356,54 @@ def plot_results(results: list[FrequencyResult], path: Path) -> None:
         alpha=0.18,
         label="mean ± std (Hz)",
     )
-    ax.plot(x, x, linestyle="--", color="#ff7f0e", label="ideal")
-    ax.set_xlabel("Target refresh frequency (Hz)")
-    ax.set_ylabel("Actual loop frequency (Hz)")
-    ax.set_title(f"Set frequency vs actual CAN refresh frequency for {CAN_DEFAULTS.motor_control_rate_hz} Hz")
-    ax.grid(alpha=0.3)
-    ax.legend()
+    ax1.plot(x, x, linestyle="--", color="#ff7f0e", label="ideal")
+    if max_stable_hz is not None:
+        ax1.axvline(max_stable_hz, color="#d62728", linestyle=":", linewidth=2, label="max stable frequency")
+        ax1.annotate(
+            f"Max stable: {max_stable_hz:.1f} Hz",
+            xy=(max_stable_hz, max_stable_hz),
+            xytext=(max_stable_hz + 10, max_stable_hz - 40),
+            textcoords="data",
+            arrowprops={"arrowstyle": "->", "color": "#d62728"},
+            color="#d62728",
+        )
+    ax1.set_ylabel("Actual loop frequency (Hz)")
+    ax1.grid(alpha=0.3)
+    ax1.legend()
+
+    ax2.plot(x, error, marker="o", linestyle="-", color="#2ca02c", label="error (Hz)")
+    ax2.set_ylabel("Error (Hz)", color="#2ca02c")
+    ax2.tick_params(axis="y", labelcolor="#2ca02c")
+    ax2.grid(alpha=0.3)
+
+    ax2_secondary = ax2.twinx()
+    ax2_secondary.plot(x, relative_error, marker="s", linestyle="--", color="#9467bd", label="relative error (%)")
+    ax2_secondary.set_ylabel("Relative error (%)", color="#9467bd")
+    ax2_secondary.tick_params(axis="y", labelcolor="#9467bd")
+
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    handles2b, labels2b = ax2_secondary.get_legend_handles_labels()
+    ax2.legend(handles2 + handles2b, labels2 + labels2b, loc="upper left")
+
+    ax3.plot(x, missed_feedback, marker="D", linestyle="-", color="#d62728", label="missed feedback")
+    ax3.set_ylabel("Cumulative missed feedback", color="#d62728")
+    ax3.tick_params(axis="y", labelcolor="#d62728")
+    ax3.grid(alpha=0.3)
+    ax3.legend(loc="upper left")
+
+    ax4.plot(x, jitter_ratio, marker="^", linestyle="-", color="#17becf", label="jitter ratio")
+    ax4.set_ylabel("Jitter ratio", color="#17becf")
+    ax4.tick_params(axis="y", labelcolor="#17becf")
+    ax4.grid(alpha=0.3)
+    ax4.legend(loc="upper left")
+
+    ax5.plot(x, actual_speed, marker="o", linestyle="-", color="#1f77b4", label="actual speed")
+    ax5.plot(x, commanded_speed, linestyle="--", color="#ff7f0e", label="commanded speed")
+    ax5.set_xlabel("Target refresh frequency (Hz)")
+    ax5.set_ylabel("Speed (ERPM)")
+    ax5.grid(alpha=0.3)
+    ax5.legend(loc="upper left")
+
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)
@@ -403,6 +485,8 @@ def main() -> int:
             row = {
                 "target_hz": f"{result.target_hz:.3f}",
                 "actual_hz": f"{result.actual_hz:.3f}",
+                "frequency_error_hz": f"{result.frequency_error_hz:.3f}",
+                "actual_speed_erpm": "" if result.actual_speed_erpm is None else f"{result.actual_speed_erpm:d}",
                 "loop_period_expected_s": f"{result.loop_period_expected_s:.6f}" if result.loop_period_expected_s is not None else "",
                 "loop_period_mean_s": f"{result.loop_period_mean_s:.6f}" if result.loop_period_mean_s is not None else "",
                 "loop_period_std_s": f"{result.loop_period_std_s:.6f}" if result.loop_period_std_s is not None else "",
@@ -471,7 +555,12 @@ def main() -> int:
         print(SEPARATOR)
 
         try:
-            plot_results(results, plot_path)
+            plot_results(
+                results,
+                plot_path,
+                max_stable_hz=last_good_frequency,
+                tolerance_hz=args.tolerance_hz,
+            )
             print(f"Plot saved to: {plot_path}")
         except RuntimeError as exc:
             print(f"WARN: Plot skipped: {exc}")
