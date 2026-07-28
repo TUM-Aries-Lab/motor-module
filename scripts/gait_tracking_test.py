@@ -1,20 +1,28 @@
 """
-NOT YET TESTED with both motors
+Gait-profile position tracking test for one or two CAN-controlled motors.
 
-Example:
+This script replays a biomechanically inspired hip gait trajectory and sends
+it to the motor(s) as a position command while logging feedback from the
+controller. It is useful for evaluating tracking accuracy, timing stability,
+and synchronization between left and right motors when dual-motor mode is used.
+
+Typical use:
     sudo ./setup_can.sh
 
     # Single motor, AK60-6
-    .venv/bin/python scripts/gait_tracking_test.py --motor-id 0x01 --motor-model AK60-6 --cycles 5
+    .venv/bin/python scripts/gait_tracking_test.py \
+        --motor-id 0x04 --motor-model AK60-6 --cycles 5
 
     # Single motor, AK80-6, wider amplitude
-    sudo ./setup_can.sh
-    .venv/bin/python scripts/gait_tracking_test.py --motor-id 0x03 --motor-model AK80-6 --amplitude-deg 35 --cycles 10 --control-hz 100 --gait-freq-hz 0.2
+    .venv/bin/python scripts/gait_tracking_test.py \
+        --motor-id 0x03 --motor-model AK80-6 \
+        --amplitude-deg 35 --cycles 10 --control-hz 100 --gait-freq-hz 0.2
 
     # Dual motor (left + right hip)
-    .venv/bin/python scripts/gait_tracking_test.py --motor-id 0x01 --motor-model AK60-6 --right-id 0x03 --right-motor-model AK80-6 --amplitude-deg 30 --cycles 5
-
-    IMPORTANT: Maybe increase kp for a better performance?
+    .venv/bin/python scripts/gait_tracking_test.py \
+        --motor-id 0x04 --motor-model AK80-6 \
+        --right-id 0x03 --right-motor-model AK80-6 \
+        --amplitude-deg 30 --cycles 5
 """
 
 # ruff: noqa: T201

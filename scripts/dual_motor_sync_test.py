@@ -1,15 +1,24 @@
 """
-NOT YET TESTED
+Dual-motor position synchronization test for CAN-controlled motors.
 
-Example:
+This script drives two motors in lockstep with the same sinusoidal position
+trajectory and logs their feedback so you can evaluate how well they stay
+synchronized over time. It is intended for comparing the relative motion of
+both motors under the same command profile, including position tracking,
+sync error, and current asymmetry.
+
+Typical use:
     sudo ./setup_can.sh
-    .venv/bin/python scripts/dual_motor_sync_test.py --left-id 0x03 --right-id 0x04 --left-motor-model AK80-6 --right-motor-model AK80-6 --amplitude-deg 60 --freq-hz 0.2 --duration 30
+    .venv/bin/python scripts/dual_motor_sync_test.py \
+        --left-id 0x03 --right-id 0x04 \
+        --left-motor-model AK80-6 --right-motor-model AK80-6 \
+        --amplitude-deg 60 --freq-hz 0.2 --duration 30
 
-    # AK80-6 with wider amplitude
-    .venv/bin/python scripts/dual_motor_sync_test.py
-        --left-id 0x01 --right-id 0x02
-        --left-motor-model AK80-6 --right-motor-model AK80-6 --amplitude-deg 45 --freq-hz 0.8 --duration 60
-
+Example with a wider motion range:
+    .venv/bin/python scripts/dual_motor_sync_test.py \
+        --left-id 0x01 --right-id 0x02 \
+        --left-motor-model AK80-6 --right-motor-model AK80-6 \
+        --amplitude-deg 45 --freq-hz 0.8 --duration 60
 """
 
 # ruff: noqa: T201

@@ -1,12 +1,19 @@
 """
-Simple dual-motor velocity test for CAN motors.
 
-IMPORTANT TODO:
-The script is not yet working, because after set_velocity we do not do time.sleep()
+Dual-motor velocity-tracking test for CAN-controlled motors.
 
-Example:
+This script commands two motors with the same sinusoidal velocity profile and
+records their feedback so you can evaluate how closely they follow the target
+velocity and how well they stay synchronized with each other over time.
+It is useful for comparing left/right motor response, speed tracking error,
+and current draw during coordinated motion.
+
+Typical use:
     sudo ./setup_can.sh
-    .venv/bin/python scripts/dual_motor_velocity_test.py --left-id 0x03 --right-id 0x04 --left-motor-model AK80-6 --right-motor-model AK80-6 --amplitude-erpm 4000 --freq-hz 0.3 --duration 20
+    .venv/bin/python scripts/dual_motor_velocity_test.py \
+        --left-id 0x03 --right-id 0x04 \
+        --left-motor-model AK80-6 --right-motor-model AK80-6 \
+        --amplitude-erpm 4000 --control-hz 0.3 --duration 30
 """
 
 # ruff: noqa: T201
@@ -219,6 +226,7 @@ def parse_args() -> argparse.Namespace:
         default=MotorModel.AK60_6V3,
     )
     parser.add_argument("--duration", type=float, default=20.0)
+    parser.add_argument("--phase-seconds", type=float, default=3.0)
     parser.add_argument("--amplitude-erpm", type=float, default=4000.0)
     parser.add_argument("--freq-hz", type=float, default=0.5)
     parser.add_argument("--control-hz", type=float, default=CAN_DEFAULTS.motor_control_rate_hz)
@@ -237,7 +245,7 @@ def main() -> int:
     if args.amplitude_erpm <= 0:
         print("Error: Amplitude must be positive.")
         return 1
-    if args.freq_hz <= 0 or args.control_hz <= 0 or args.duration <= 0:
+    if args.freq_hz <= 0 or args.control_hz <= 0 or args.duration <= 0 or args.phase_seconds <= 0:
         print("Error: Frequency, control rate, and duration must be positive.")
         return 1
 
@@ -325,72 +333,61 @@ def main() -> int:
         sample_index = 0
         next_tick = run_start
         previous_command = 0
-        max_step_erpm = 50   # maximum ERPM change per loop
+        max_step_erpm = 500   # maximum ERPM change per loop
 
-        while time.monotonic() < deadline:
+        feedback_window_s = max(0.05, min(0.25, period_s))
+        feedback_interval_s = max(0.01, min(0.02, feedback_window_s / 10.0))
+
+        while time.monotonic() < deadline and previous_command < args.amplitude_erpm:
             elapsed_s = time.monotonic() - run_start
-            target_erpm = int(round(
-                args.amplitude_erpm *
-                math.sin(2 * math.pi * args.freq_hz * elapsed_s)
-            ))
+            target_erpm = previous_command + max_step_erpm
+            print(f"Target ERPM={target_erpm} erpm…")
 
-            # Limit change per loop
-            difference = target_erpm - previous_command
-
-            if abs(difference) > max_step_erpm:
-                commanded_erpm = previous_command + (
-                    max_step_erpm if difference > 0 else -max_step_erpm
-                )
-            else:
-                commanded_erpm = target_erpm
-
+            commanded_erpm = _clamp(target_erpm, -MIT_VELOCITY_LIMIT_ERPM, MIT_VELOCITY_LIMIT_ERPM)
             previous_command = commanded_erpm
-            # commanded_erpm = int(round(args.amplitude_erpm * math.sin(2 * math.pi * args.freq_hz * elapsed_s)))
-            # commanded_erpm = _clamp(commanded_erpm, -MIT_VELOCITY_LIMIT_ERPM, MIT_VELOCITY_LIMIT_ERPM)
-            # commanded_erpm = 1000 # Discuss --> this works, but variable velocity command does not
+            print(f"t={elapsed_s:.2f}s  cmd={commanded_erpm:+.0f} ERPM  sampling feedback …")
 
-            print(f"t={elapsed_s:.2f}s  cmd={commanded_erpm:+.0f} ERPM  sending command …")
-
-            # Send to both motors immediately to minimise inter-command delay,
-            # then wait a short settle time so MIT handshake/refresh and feedback
-            # have time to take effect before reading status.
             motor_left.set_velocity(commanded_erpm)
             motor_right.set_velocity(commanded_erpm)
-            # Short settle (20-50 ms) but never longer than the period.
-            time.sleep(min(0.1, period_s))
+            time.sleep(args.phase_seconds)
 
-            left_status = read_status(motor_left, timeout_s=min(0.5, period_s))
-            right_status = read_status(motor_right, timeout_s=min(0.5, period_s))
-            sample = VelocitySample(
-                commanded_velocity_erpm=commanded_erpm,
-                left=left_status,
-                right=right_status,
-            )
-
-            _check_fault_code(sample)
-
-            if csv_writer is not None:
-                _write_csv_row(
-                    writer=csv_writer,
-                    csv_file=csv_file,
-                    run_start_time=run_start,
-                    sample_index=sample_index,
-                    sample=sample,
+            sample_deadline = time.monotonic() + feedback_window_s
+            while time.monotonic() < sample_deadline:
+                left_status = read_status(motor_left, timeout_s=min(0.1, period_s))
+                right_status = read_status(motor_right, timeout_s=min(0.1, period_s))
+                sample = VelocitySample(
+                    commanded_velocity_erpm=commanded_erpm,
+                    left=left_status,
+                    right=right_status,
                 )
 
-            if sample.sync_error_erpm is not None:
-                sync_errors.append(abs(sample.sync_error_erpm))
+                _check_fault_code(sample)
 
-            total_samples += int(sample.left is not None) + int(sample.right is not None)
+                if csv_writer is not None:
+                    _write_csv_row(
+                        writer=csv_writer,
+                        csv_file=csv_file,
+                        run_start_time=run_start,
+                        sample_index=sample_index,
+                        sample=sample,
+                    )
 
-            if sample_index % 10 == 0:
-                _print_sample_line(elapsed_s, sample_index, sample)
+                if sample.sync_error_erpm is not None:
+                    sync_errors.append(abs(sample.sync_error_erpm))
 
-            sample_index += 1
+                total_samples += int(sample.left is not None) + int(sample.right is not None)
+
+                if sample_index % 10 == 0:
+                    _print_sample_line(elapsed_s, sample_index, sample)
+
+                sample_index += 1
+
+                if time.monotonic() < sample_deadline:
+                    time.sleep(feedback_interval_s)
+
             next_tick += period_s
             sleep_time = next_tick - time.monotonic()
             if sleep_time > 0:
-                print(f"Sleeping time: {sleep_time}")
                 time.sleep(sleep_time)
 
         print(SEPARATOR)
