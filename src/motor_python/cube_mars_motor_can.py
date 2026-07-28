@@ -1564,7 +1564,7 @@ class CubeMarsAK806v2CAN(CubeMarsBaseCAN):
         d = msg.data
 
         # AK80 MIT reply format from CubeMars manual
-        motor_id = d[0]
+        # motor_id = d[0]
         p_int = (d[1] << 8) | d[2]
         v_int = (d[3] << 4) | (d[4] >> 4)
         i_int = ((d[4] & 0x0F) << 8) | d[5]
@@ -1599,9 +1599,9 @@ class CubeMarsAK806v2CAN(CubeMarsBaseCAN):
         # Convert velocity to ERPM for compatibility with MotorState
         speed_erpm = self._rad_s_to_erpm(velocity_rad_s)
 
-        logger.debug(
-            f"Parsed AK80 MIT feedback ints: motor_id={motor_id} p={position_rad} v={velocity_rad_s} i={current_amps} temp={temperature_celsius} error={error_code}"
-        )
+        # logger.debug(
+        #     f"Parsed AK80 MIT feedback ints: motor_id={motor_id} p={position_rad} v={velocity_rad_s} i={current_amps} temp={temperature_celsius} error={error_code}"
+        # )
 
         feedback = MotorState(
             position_degrees=np.degrees(position_rad),
