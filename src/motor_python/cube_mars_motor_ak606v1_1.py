@@ -132,6 +132,8 @@ class CubeMarsAK606v1CAN(CubeMarsBaseCAN):  # pragma: no cover
             current_amps=current_amps,
             temperature_celsius=temperature_celsius,
             error_code=error_code,
+            timestamp_monotonic=time.monotonic(),
+            is_fresh=True,
         )
 
         if self._active_feedback_id != msg.arbitration_id:

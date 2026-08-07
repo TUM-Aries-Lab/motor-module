@@ -32,6 +32,7 @@ from motor_python import create_can_motor
 from motor_python.can_utils import get_can_state, reset_can_interface
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN, CubeMarsBaseCAN
 from motor_python.definitions import CAN_DEFAULTS, MotorModel
+from motor_python.utils import CsvStreamWriter
 
 SEPARATOR = "=" * 78
 HEALTHY_TX_ERR_MAX = 96
@@ -109,11 +110,6 @@ def parse_args() -> argparse.Namespace:
         choices=("strict", "fcfd", "legacy"),
         default="fcfd",
         help="MIT helper-frame policy (default: fcfd)",
-    )
-    parser.add_argument(
-        "--allow-legacy-feedback-ids",
-        action="store_true",
-        help="Accept legacy non-canonical feedback IDs while diagnosing firmware variants.",
     )
     parser.add_argument(
         "--feedback-can-id",
@@ -483,7 +479,6 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
     print(f"Bitrate        : {args.bitrate}")
     print(f"Motor ID       : 0x{args.motor_id:02X}")
     print(f"Helper policy  : {args.helper_policy}")
-    print(f"Legacy IDs     : {args.allow_legacy_feedback_ids}")
     if args.feedback_can_id is not None:
         print(f"Feedback CAN ID: 0x{args.feedback_can_id:08X}")
     if args.velocity_rad is not None:
@@ -505,24 +500,19 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
     ensure_can_ready(args.interface, bitrate=args.bitrate, mode=args.preflight_mode)
 
     motor: CubeMarsBaseCAN | None = None
-    csv_file = None
-    csv_writer: csv.DictWriter | None = None
+    csv_writer: CsvStreamWriter | None = None
     run_start = 0.0
     results: list[PhaseResult] = []
     total_feedback_samples = 0
     try:
-        csv_path.parent.mkdir(parents=True, exist_ok=True)
-        csv_file = csv_path.open("w", newline="", encoding="utf-8")
-        csv_writer = csv.DictWriter(csv_file, fieldnames=CSV_FIELDNAMES)
-        csv_writer.writeheader()
+        csv_writer = CsvStreamWriter(csv_path, CSV_FIELDNAMES)
 
         def write_sample_row(row: dict[str, str | int]) -> None:
             nonlocal total_feedback_samples
             total_feedback_samples += 1
-            if csv_writer is None or csv_file is None:
+            if csv_writer is None:
                 return
             csv_writer.writerow(row)
-            csv_file.flush()
 
         motor = create_can_motor(
                 args.motor_model,
@@ -531,7 +521,6 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
                 bitrate=args.bitrate,
                 mit_velocity_kd=args.velocity_kd,
                 helper_policy=args.helper_policy,
-                # allow_legacy_feedback_ids=args.allow_legacy_feedback_ids,
                 feedback_can_id=args.feedback_can_id,
         )
 
@@ -657,9 +646,9 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
             except Exception as exc:
                 print(f"WARN: Failed to write the timing stats to CSV: {exc}")
 
-        if csv_file is not None:
+        if csv_writer is not None:
             try:
-                csv_file.close()
+                csv_writer.close()
             except Exception as exc:  # pragma: no cover - cleanup path
                 print(f"WARN: CSV close failed during cleanup: {exc}")
         if motor is not None:

@@ -49,6 +49,8 @@ class MotorState:
     current_amps: float  # Phase current in amps
     temperature_celsius: int  # Driver board temperature in °C
     error_code: int  # Fault code (0 = OK)
+    timestamp_monotonic: float = 0.0
+    is_fresh: bool = True
 
     @property
     def error_description(self) -> str:
