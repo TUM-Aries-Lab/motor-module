@@ -1613,7 +1613,7 @@ class CubeMarsAK806v2CAN(CubeMarsBaseCAN):
 
         if self._active_feedback_id != msg.arbitration_id:
             self._active_feedback_id = msg.arbitration_id
-            logger.info(f"Active AK80 MIT feedback CAN ID: 0x{msg.arbitration_id:08X}")
+            # logger.info(f"Active AK80 MIT feedback CAN ID: 0x{msg.arbitration_id:08X}")
 
         return feedback
 
