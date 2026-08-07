@@ -10,7 +10,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from motor_python.definitions import CURRENT_MOTOR_SPEC
+
+from motor_python.definitions import MOTOR_SPECS, MotorSpec
 from motor_python.utils import write_summary_csv
 
 import numpy as np
@@ -21,10 +22,8 @@ if __package__ in {None, ""}:
     if str(repo_src) not in sys.path:
         sys.path.insert(0, str(repo_src))
 
-FRAME_RATE_HZ = 200.0
-MOTOR_POLE_PAIRS = CURRENT_MOTOR_SPEC.pole_pairs
-GEAR_RATIO = CURRENT_MOTOR_SPEC.gear_ratio
-MECH_DEG_PER_SEC_PER_ERPM = 6.0 / (MOTOR_POLE_PAIRS * GEAR_RATIO)
+DEFAULT_FRAME_RATE_HZ = 200.0
+DEFAULT_MOTOR_MODEL = "AK60-6_V3.0"
 POSITION_TARGETS = (30, 50, 90)
 VELOCITY_SPEEDS = (1000, 3000, 5000)
 POSITION_MOCAP_FILES = {
@@ -71,7 +70,8 @@ class FilePair:
 
     label: str
     motor_csv: Path
-    mocap_csv: Path
+    mocap_csv: Path | None
+    motor_model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -99,6 +99,7 @@ class MotorVelocityData:
     feedback_position_deg: np.ndarray
     feedback_speed_erpm: np.ndarray
     motor_mech_deg_s: np.ndarray
+    motor_model: str | None
 
 
 @dataclass(frozen=True)
@@ -193,6 +194,24 @@ def _to_int(value: str) -> int:
     return int(float(value.strip()))
 
 
+def _resolve_motor_spec(motor_model: str | None) -> MotorSpec:
+    """Resolve a motor spec from a model name, falling back to the default."""
+    resolved_name = motor_model or DEFAULT_MOTOR_MODEL
+    try:
+        return MOTOR_SPECS[resolved_name]
+    except KeyError as exc:
+        valid = ", ".join(MOTOR_SPECS)
+        raise ValueError(
+            f"Unknown motor model {resolved_name!r}. Valid models: {valid}"
+        ) from exc
+
+
+def _mechanical_deg_per_sec_per_erpm(motor_model: str | None) -> float:
+    """Return the mechanical deg/s per ERPM conversion factor for a motor model."""
+    spec = _resolve_motor_spec(motor_model)
+    return 6.0 / (spec.pole_pairs * spec.gear_ratio)
+
+
 def _moving_average(values: np.ndarray, window: int) -> np.ndarray:
     """Return a centered moving average with edge padding."""
     if window <= 1 or len(values) <= 2:
@@ -212,6 +231,49 @@ def _moving_average(values: np.ndarray, window: int) -> np.ndarray:
 def _unwrap_degrees(angle_deg: np.ndarray) -> np.ndarray:
     """Unwrap degree-valued angles into a continuous trace."""
     return np.rad2deg(np.unwrap(np.deg2rad(angle_deg)))
+
+
+def _unwrap_angle_trace(values_deg: np.ndarray) -> np.ndarray:
+    """Unwrap a degree-valued trace around the ±180° wrap point."""
+    unwrapped = np.asarray(values_deg, dtype=float).copy()
+    if unwrapped.size <= 1:
+        return unwrapped
+    for index in range(1, unwrapped.size):
+        if not np.isfinite(unwrapped[index - 1]) or not np.isfinite(unwrapped[index]):
+            continue
+        delta = unwrapped[index] - unwrapped[index - 1]
+        while delta > 180.0:
+            delta -= 360.0
+        while delta < -180.0:
+            delta += 360.0
+        unwrapped[index] = unwrapped[index - 1] + delta
+    return unwrapped
+
+
+def _insert_nan_gaps(
+    time_s: np.ndarray,
+    values: np.ndarray,
+    *,
+    max_gap_s: float = 0.05,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Break a trace across large temporal gaps by inserting NaN separators."""
+    if len(time_s) != len(values):
+        raise ValueError("Time and value arrays must have the same length.")
+    if len(time_s) <= 1:
+        return np.asarray(time_s, dtype=float), np.asarray(values, dtype=float)
+
+    out_time: list[float] = []
+    out_values: list[float] = []
+    prev_time = float(time_s[0])
+    for sample_time, sample_value in zip(time_s, values, strict=True):
+        sample_time = float(sample_time)
+        if out_time and (sample_time - prev_time) > max_gap_s:
+            out_time.append(np.nan)
+            out_values.append(np.nan)
+        out_time.append(sample_time)
+        out_values.append(float(sample_value))
+        prev_time = sample_time
+    return np.asarray(out_time, dtype=float), np.asarray(out_values, dtype=float)
 
 
 def _parse_number_list(raw: str, *, kind: str) -> list[int]:
@@ -281,6 +343,22 @@ def parse_args() -> argparse.Namespace:
             type=_time_shift_value,
             default="auto",
             help="Shift applied to mocap time before alignment, or 'auto' (default: auto)",
+        )
+        parser_obj.add_argument(
+            "--frame-rate-hz",
+            type=float,
+            default=DEFAULT_FRAME_RATE_HZ,
+            help="Motion-capture frame rate used to derive time [Hz] (default: 200)",
+        )
+        parser_obj.add_argument(
+            "--motor-model",
+            default=DEFAULT_MOTOR_MODEL,
+            help="Motor model name used for ERPM-to-mechanical-speed conversion (default: AK60-6_V3.0)",
+        )
+        parser_obj.add_argument(
+            "--motor-only",
+            action="store_true",
+            help="Skip mocap input and plot only the motor-side traces.",
         )
 
     position_parser = subparsers.add_parser(
@@ -400,6 +478,28 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated phase indices to analyze, or 'all' (default: all)",
     )
 
+    trace_parser = subparsers.add_parser(
+        "trace", help="Render an overlay-only trace for one motor/mocap pair."
+    )
+    add_common(trace_parser)
+    trace_parser.add_argument(
+        "--motor-csv",
+        type=Path,
+        default=None,
+        help="Explicit motor CSV path for a single debug run.",
+    )
+    trace_parser.add_argument(
+        "--mocap-csv",
+        type=Path,
+        default=None,
+        help="Explicit raw mocap CSV path for a single debug run.",
+    )
+    trace_parser.add_argument(
+        "--label",
+        default="trace",
+        help="Output label for the generated trace figure.",
+    )
+
     args = parser.parse_args()
     if not hasattr(args, "motor_csv"):
         args.motor_csv = None
@@ -428,13 +528,24 @@ def resolve_position_pairs(
     targets: Sequence[int] | None = None,
     motor_csv: Path | None = None,
     mocap_csv: Path | None = None,
+    motor_model: str | None = None,
+    motor_only: bool = False,
 ) -> list[FilePair]:
     """Resolve position-run motor/mocap pairs from the curated folder."""
-    if (motor_csv is None) != (mocap_csv is None):
-        raise ValueError("--motor-csv and --mocap-csv must be provided together.")
+    if motor_csv is None and mocap_csv is not None:
+        raise ValueError("--motor-csv is required when --mocap-csv is provided.")
+    if motor_csv is not None and mocap_csv is None and not motor_only:
+        raise ValueError("--mocap-csv is required unless --motor-only is set.")
     if motor_csv and mocap_csv:
         label = motor_csv.stem.removeprefix(f"{POSITION_MOTOR_PREFIX}_")
-        return [FilePair(label=label, motor_csv=motor_csv, mocap_csv=mocap_csv)]
+        return [
+            FilePair(
+                label=label,
+                motor_csv=motor_csv,
+                mocap_csv=mocap_csv,
+                motor_model=motor_model,
+            )
+        ]
 
     requested = POSITION_TARGETS if targets is None else tuple(targets)
     pairs: list[FilePair] = []
@@ -445,12 +556,21 @@ def resolve_position_pairs(
                 f"Supported targets: {', '.join(map(str, POSITION_TARGETS))}"
             )
         motor_path = data_root / f"{POSITION_MOTOR_PREFIX}_{target}.csv"
-        mocap_path = data_root / "motion-capture-data" / POSITION_MOCAP_FILES[target]
         if not motor_path.exists():
             raise FileNotFoundError(f"Missing position motor CSV: {motor_path}")
-        if not mocap_path.exists():
-            raise FileNotFoundError(f"Missing position mocap CSV: {mocap_path}")
-        pairs.append(FilePair(label=str(target), motor_csv=motor_path, mocap_csv=mocap_path))
+        mocap_path = None
+        if not motor_only:
+            mocap_path = data_root / "motion-capture-data" / POSITION_MOCAP_FILES[target]
+            if not mocap_path.exists():
+                raise FileNotFoundError(f"Missing position mocap CSV: {mocap_path}")
+        pairs.append(
+            FilePair(
+                label=str(target),
+                motor_csv=motor_path,
+                mocap_csv=mocap_path,
+                motor_model=motor_model,
+            )
+        )
     return pairs
 
 
@@ -460,13 +580,24 @@ def resolve_velocity_pairs(
     speeds: Sequence[int] | None = None,
     motor_csv: Path | None = None,
     mocap_csv: Path | None = None,
+    motor_model: str | None = None,
+    motor_only: bool = False,
 ) -> list[FilePair]:
     """Resolve velocity-run motor/mocap pairs from the curated folder."""
-    if (motor_csv is None) != (mocap_csv is None):
-        raise ValueError("--motor-csv and --mocap-csv must be provided together.")
+    if motor_csv is None and mocap_csv is not None:
+        raise ValueError("--motor-csv is required when --mocap-csv is provided.")
+    if motor_csv is not None and mocap_csv is None and not motor_only:
+        raise ValueError("--mocap-csv is required unless --motor-only is set.")
     if motor_csv and mocap_csv:
         label = motor_csv.stem.removeprefix(f"{VELOCITY_MOTOR_PREFIX}_")
-        return [FilePair(label=label, motor_csv=motor_csv, mocap_csv=mocap_csv)]
+        return [
+            FilePair(
+                label=label,
+                motor_csv=motor_csv,
+                mocap_csv=mocap_csv,
+                motor_model=motor_model,
+            )
+        ]
 
     requested = VELOCITY_SPEEDS if speeds is None else tuple(speeds)
     pairs: list[FilePair] = []
@@ -477,16 +608,25 @@ def resolve_velocity_pairs(
                 f"Supported speeds: {', '.join(map(str, VELOCITY_SPEEDS))}"
             )
         motor_path = data_root / f"{VELOCITY_MOTOR_PREFIX}_{speed}.csv"
-        mocap_path = data_root / "motion-capture-data" / VELOCITY_MOCAP_FILES[speed]
         if not motor_path.exists():
             raise FileNotFoundError(f"Missing velocity motor CSV: {motor_path}")
-        if not mocap_path.exists():
-            raise FileNotFoundError(f"Missing velocity mocap CSV: {mocap_path}")
-        pairs.append(FilePair(label=str(speed), motor_csv=motor_path, mocap_csv=mocap_path))
+        mocap_path = None
+        if not motor_only:
+            mocap_path = data_root / "motion-capture-data" / VELOCITY_MOCAP_FILES[speed]
+            if not mocap_path.exists():
+                raise FileNotFoundError(f"Missing velocity mocap CSV: {mocap_path}")
+        pairs.append(
+            FilePair(
+                label=str(speed),
+                motor_csv=motor_path,
+                mocap_csv=mocap_path,
+                motor_model=motor_model,
+            )
+        )
     return pairs
 
 
-def load_motor_position_csv(path: Path) -> MotorPositionData:
+def load_motor_position_csv(path: Path, *, motor_model: str | None = None) -> MotorPositionData:
     """Parse a MIT position-step motor CSV."""
     rows = _parse_csv_with_required_columns(path, POSITION_REQUIRED_COLUMNS)
     elapsed_s: list[float] = []
@@ -519,7 +659,9 @@ def load_motor_position_csv(path: Path) -> MotorPositionData:
     )
 
 
-def load_motor_velocity_csv(path: Path) -> MotorVelocityData:
+def load_motor_velocity_csv(
+    path: Path, *, motor_model: str | None = None
+) -> MotorVelocityData:
     """Parse a MIT velocity-validation motor CSV."""
     rows = _parse_csv_with_required_columns(path, VELOCITY_REQUIRED_COLUMNS)
     elapsed_s: list[float] = []
@@ -537,6 +679,7 @@ def load_motor_velocity_csv(path: Path) -> MotorVelocityData:
         feedback_speed_erpm.append(_to_float(row["feedback_speed_erpm"]))
 
     feedback_speed_array = np.asarray(feedback_speed_erpm, dtype=float)
+    conversion_factor = _mechanical_deg_per_sec_per_erpm(motor_model)
     return MotorVelocityData(
         elapsed_s=np.asarray(elapsed_s, dtype=float),
         phase_index=np.asarray(phase_index, dtype=int),
@@ -544,7 +687,8 @@ def load_motor_velocity_csv(path: Path) -> MotorVelocityData:
         command_erpm=np.asarray(command_erpm, dtype=int),
         feedback_position_deg=np.asarray(feedback_position_deg, dtype=float),
         feedback_speed_erpm=feedback_speed_array,
-        motor_mech_deg_s=feedback_speed_array * MECH_DEG_PER_SEC_PER_ERPM,
+        motor_mech_deg_s=feedback_speed_array * conversion_factor,
+        motor_model=motor_model,
     )
 
 
@@ -642,6 +786,7 @@ def process_raw_mocap(
     trim_frame: str | int,
     axis: str,
     invert_sign: bool,
+    frame_rate_hz: float = DEFAULT_FRAME_RATE_HZ,
 ) -> MocapSeries:
     """Convert raw RX/RY/RZ Vicon data into one aligned angle + velocity trace."""
     Rotation, _ = _require_analysis_runtime()
@@ -674,7 +819,7 @@ def process_raw_mocap(
     angle_deg = _unwrap_degrees(angle_deg - angle_deg[0])
     if invert_sign:
         angle_deg = -angle_deg
-    time_s = (frame - frame[0]) / FRAME_RATE_HZ
+    time_s = (frame - frame[0]) / frame_rate_hz
     velocity_deg_s = np.gradient(angle_deg, time_s, edge_order=1)
     velocity_deg_s = _moving_average(velocity_deg_s, window=5)
     return MocapSeries(
@@ -888,11 +1033,19 @@ def find_position_segments(
     return segments
 
 
-def _save_figure(fig: Any, path_without_suffix: Path) -> None:
-    """Save one figure as PNG and PDF."""
+def _save_figure(
+    fig: Any,
+    path_without_suffix: Path,
+    *,
+    summary: dict[str, Any] | None = None,
+) -> None:
+    """Save one figure as PNG and PDF and optionally report a one-line summary."""
     path_without_suffix.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path_without_suffix.with_suffix(".png"), dpi=200, bbox_inches="tight")
     fig.savefig(path_without_suffix.with_suffix(".pdf"), bbox_inches="tight")
+    if summary:
+        parts = [f"{key}={value:.4f}" if isinstance(value, float) else f"{key}={value}" for key, value in summary.items()]
+        print(f"Saved {path_without_suffix.name}: {', '.join(parts)}")
 
 
 def _normalize_by_mean_abs(values: np.ndarray) -> np.ndarray:
@@ -1052,38 +1205,51 @@ def analyze_position_pair(
     min_segment_s: float,
     min_angle_span_deg: float,
     time_shift_s: str | float,
+    frame_rate_hz: float,
+    motor_only: bool = False,
 ) -> list[dict[str, Any]]:
     """Analyze one position motor/mocap pair and write its figures."""
     _, plt = _require_analysis_runtime()
-    motor = load_motor_position_csv(pair.motor_csv)
-    raw_mocap = load_raw_mocap_csv(pair.mocap_csv)
-    mocap = process_raw_mocap(
-        raw_mocap,
-        trim_frame=trim_frame,
-        axis=axis,
-        invert_sign=invert_mocap_sign,
-    )
-    motor_feedback_speed_deg_s = motor.feedback_speed_erpm * MECH_DEG_PER_SEC_PER_ERPM
-    aligned_mocap_time_s, resolved_shift_s = _align_mocap_time(
-        motor.elapsed_s,
-        motor.feedback_position_deg,
-        motor_feedback_speed_deg_s,
-        mocap,
-        time_shift_s=time_shift_s,
-        velocity_floor_deg_s=10.0,
-    )
-    overlap_mask = _overlap_mask(motor.elapsed_s, aligned_mocap_time_s)
-    if not np.any(overlap_mask):
-        raise RuntimeError(f"No motor/mocap time overlap for position pair {pair.label}.")
+    motor = load_motor_position_csv(pair.motor_csv, motor_model=pair.motor_model)
+    motor_feedback_speed_deg_s = motor.feedback_speed_erpm * _mechanical_deg_per_sec_per_erpm(pair.motor_model)
+    mocap = None
+    if motor_only or pair.mocap_csv is None:
+        aligned_mocap_time_s = motor.elapsed_s
+        resolved_shift_s = 0.0
+        overlap_mask = np.ones_like(motor.elapsed_s, dtype=bool)
+        overlap_time_s = motor.elapsed_s
+        mocap_interp_angle_deg = np.asarray(motor.feedback_position_deg, dtype=float)
+        feedback_error_deg = np.zeros_like(motor.feedback_position_deg, dtype=float)
+        command_error_deg = np.zeros_like(motor.command_position_deg, dtype=float)
+    else:
+        raw_mocap = load_raw_mocap_csv(pair.mocap_csv)
+        mocap = process_raw_mocap(
+            raw_mocap,
+            trim_frame=trim_frame,
+            axis=axis,
+            invert_sign=invert_mocap_sign,
+            frame_rate_hz=frame_rate_hz,
+        )
+        aligned_mocap_time_s, resolved_shift_s = _align_mocap_time(
+            motor.elapsed_s,
+            motor.feedback_position_deg,
+            motor_feedback_speed_deg_s,
+            mocap,
+            time_shift_s=time_shift_s,
+            velocity_floor_deg_s=10.0,
+        )
+        overlap_mask = _overlap_mask(motor.elapsed_s, aligned_mocap_time_s)
+        if not np.any(overlap_mask):
+            raise RuntimeError(f"No motor/mocap time overlap for position pair {pair.label}.")
 
-    overlap_time_s = motor.elapsed_s[overlap_mask]
-    mocap_interp_angle_deg = _interp_series(
-        overlap_time_s, aligned_mocap_time_s, mocap.angle_deg
-    )
-    feedback_overlap = motor.feedback_position_deg[overlap_mask]
-    command_overlap = motor.command_position_deg[overlap_mask]
-    feedback_error_deg = feedback_overlap - mocap_interp_angle_deg
-    command_error_deg = command_overlap - mocap_interp_angle_deg
+        overlap_time_s = motor.elapsed_s[overlap_mask]
+        mocap_interp_angle_deg = _interp_series(
+            overlap_time_s, aligned_mocap_time_s, mocap.angle_deg
+        )
+        feedback_overlap = motor.feedback_position_deg[overlap_mask]
+        command_overlap = motor.command_position_deg[overlap_mask]
+        feedback_error_deg = feedback_overlap - mocap_interp_angle_deg
+        command_error_deg = command_overlap - mocap_interp_angle_deg
     segments = find_position_segments(
         motor,
         boundary_trim_s=boundary_trim_s,
@@ -1115,37 +1281,48 @@ def analyze_position_pair(
     )
     ax_top.plot(
         motor.elapsed_s,
-        motor.feedback_position_deg,
+        _unwrap_angle_trace(motor.feedback_position_deg),
         color=COLOR_MOTOR,
         label="Motor feedback",
         linewidth=1.4,
     )
-    ax_top.plot(
-        aligned_mocap_time_s,
-        mocap.angle_deg,
-        color=COLOR_MOCAP,
-        label="Motion capture",
-        linewidth=1.3,
-    )
+    if not motor_only and pair.mocap_csv is not None:
+        ax_top.plot(
+            aligned_mocap_time_s,
+            mocap.angle_deg,
+            color=COLOR_MOCAP,
+            label="Motion capture",
+            linewidth=1.3,
+        )
     ax_top.set_title(f"Position validation: {pair.label} deg run")
     ax_top.set_ylabel("Angle [deg]")
     ax_top.legend(loc="best")
     ax_top.grid(alpha=0.3)
 
-    ax_bottom.plot(
-        overlap_time_s,
-        feedback_error_deg,
-        color=COLOR_ERROR,
-        label="Motor - mocap",
-        linewidth=1.2,
-    )
-    ax_bottom.plot(
-        overlap_time_s,
-        command_error_deg,
-        color=COLOR_COMMAND,
-        label="Command - mocap",
-        linewidth=1.0,
-    )
+    if not motor_only and pair.mocap_csv is not None:
+        ax_bottom.plot(
+            overlap_time_s,
+            feedback_error_deg,
+            color=COLOR_ERROR,
+            label="Motor - mocap",
+            linewidth=1.2,
+        )
+        ax_bottom.plot(
+            overlap_time_s,
+            command_error_deg,
+            color=COLOR_COMMAND,
+            label="Command - mocap",
+            linewidth=1.0,
+        )
+    else:
+        ax_bottom.plot(
+            motor.elapsed_s,
+            np.zeros_like(motor.elapsed_s, dtype=float),
+            color="black",
+            linewidth=0.8,
+            alpha=0.5,
+            label="Reference",
+        )
     ax_bottom.axhline(0.0, color="black", linewidth=0.8, alpha=0.5)
     ax_bottom.set_xlabel("Time [s]")
     ax_bottom.set_ylabel("Error [deg]")
@@ -1191,8 +1368,8 @@ def analyze_position_pair(
                 "run_label": pair.label,
                 "motor_csv": str(pair.motor_csv),
                 "mocap_csv": str(pair.mocap_csv),
-                "trim_frame": mocap.trim_frame,
-                "selected_axis": mocap.selected_axis,
+                "trim_frame": 0 if mocap is None else mocap.trim_frame,
+                "selected_axis": "motor-only" if mocap is None else mocap.selected_axis,
                 "time_shift_s": round(resolved_shift_s, 6),
                 "invert_mocap_sign": int(invert_mocap_sign),
                 "segment_id": segment.segment_id,
@@ -1370,35 +1547,48 @@ def analyze_velocity_pair(
     settle_s: float,
     time_shift_s: str | float,
     phase_selection: str | Sequence[int],
+    frame_rate_hz: float,
+    motor_only: bool = False,
 ) -> tuple[list[dict[str, Any]], list[tuple[np.ndarray, np.ndarray, str]]]:
     """Analyze one velocity motor/mocap pair and write its figures."""
     _, plt = _require_analysis_runtime()
-    motor = load_motor_velocity_csv(pair.motor_csv)
-    raw_mocap = load_raw_mocap_csv(pair.mocap_csv)
-    mocap = process_raw_mocap(
-        raw_mocap,
-        trim_frame=trim_frame,
-        axis=axis,
-        invert_sign=invert_mocap_sign,
-    )
-    aligned_mocap_time_s, resolved_shift_s = _align_mocap_time(
-        motor.elapsed_s,
-        motor.feedback_position_deg,
-        motor.motor_mech_deg_s,
-        mocap,
-        time_shift_s=time_shift_s,
-        velocity_floor_deg_s=15.0,
-    )
-    overlap_mask = _overlap_mask(motor.elapsed_s, aligned_mocap_time_s)
-    if not np.any(overlap_mask):
-        raise RuntimeError(f"No motor/mocap time overlap for velocity pair {pair.label}.")
+    motor = load_motor_velocity_csv(pair.motor_csv, motor_model=pair.motor_model)
+    mocap = None
+    if motor_only or pair.mocap_csv is None:
+        aligned_mocap_time_s = motor.elapsed_s
+        resolved_shift_s = 0.0
+        overlap_mask = np.ones_like(motor.elapsed_s, dtype=bool)
+        overlap_time_s = motor.elapsed_s
+        mocap_interp_velocity = np.asarray(motor.motor_mech_deg_s, dtype=float)
+        full_velocity_error = np.zeros_like(motor.motor_mech_deg_s, dtype=float)
+    else:
+        raw_mocap = load_raw_mocap_csv(pair.mocap_csv)
+        mocap = process_raw_mocap(
+            raw_mocap,
+            trim_frame=trim_frame,
+            axis=axis,
+            invert_sign=invert_mocap_sign,
+            frame_rate_hz=frame_rate_hz,
+        )
+        aligned_mocap_time_s, resolved_shift_s = _align_mocap_time(
+            motor.elapsed_s,
+            motor.feedback_position_deg,
+            motor.motor_mech_deg_s,
+            mocap,
+            time_shift_s=time_shift_s,
+            velocity_floor_deg_s=15.0,
+        )
+        overlap_mask = _overlap_mask(motor.elapsed_s, aligned_mocap_time_s)
+        if not np.any(overlap_mask):
+            raise RuntimeError(f"No motor/mocap time overlap for velocity pair {pair.label}.")
 
-    overlap_time_s = motor.elapsed_s[overlap_mask]
-    mocap_interp_velocity = _interp_series(
-        overlap_time_s, aligned_mocap_time_s, mocap.velocity_deg_s
-    )
+        overlap_time_s = motor.elapsed_s[overlap_mask]
+        mocap_interp_velocity = _interp_series(
+            overlap_time_s, aligned_mocap_time_s, mocap.velocity_deg_s
+        )
+        motor_overlap_velocity = motor.motor_mech_deg_s[overlap_mask]
+        full_velocity_error = motor_overlap_velocity - mocap_interp_velocity
     motor_overlap_velocity = motor.motor_mech_deg_s[overlap_mask]
-    full_velocity_error = motor_overlap_velocity - mocap_interp_velocity
     plot_window_mask = _shared_active_velocity_window_mask(
         overlap_time_s,
         motor_overlap_velocity,
@@ -1410,6 +1600,11 @@ def analyze_velocity_pair(
     plot_motor_velocity = motor_overlap_velocity[plot_window_mask]
     plot_mocap_velocity = mocap_interp_velocity[plot_window_mask]
     plot_velocity_error = full_velocity_error[plot_window_mask]
+    plot_command_deg_s = np.interp(
+        plot_time_s,
+        motor.elapsed_s,
+        motor.command_erpm.astype(float) * _mechanical_deg_per_sec_per_erpm(pair.motor_model),
+    )
     plot_start_s = float(plot_time_s[0])
     plot_end_s = float(plot_time_s[-1])
 
@@ -1464,24 +1659,43 @@ def analyze_velocity_pair(
         linewidth=1.3,
         label="Motor mechanical speed",
     )
+    if not motor_only and pair.mocap_csv is not None:
+        ax_top.plot(
+            plot_time_relative_s,
+            plot_mocap_velocity,
+            color=COLOR_MOCAP,
+            linewidth=1.2,
+            label="Motion capture speed",
+        )
     ax_top.plot(
         plot_time_relative_s,
-        plot_mocap_velocity,
-        color=COLOR_MOCAP,
-        linewidth=1.2,
-        label="Motion capture speed",
+        plot_command_deg_s,
+        color="0.5",
+        linewidth=1.0,
+        linestyle="--",
+        label="Command",
     )
     ax_top.set_title(f"Velocity validation: {pair.label} ERPM run")
     ax_top.set_ylabel("Angular speed [deg/s]")
     ax_top.legend(loc="best")
     ax_top.grid(alpha=0.3)
-    ax_bottom.plot(
-        plot_time_relative_s,
-        plot_velocity_error,
-        color=COLOR_ERROR,
-        linewidth=1.2,
-        label="Motor - mocap",
-    )
+    if not motor_only and pair.mocap_csv is not None:
+        ax_bottom.plot(
+            plot_time_relative_s,
+            plot_velocity_error,
+            color=COLOR_ERROR,
+            linewidth=1.2,
+            label="Motor - mocap",
+        )
+    else:
+        ax_bottom.plot(
+            plot_time_relative_s,
+            np.zeros_like(plot_time_relative_s, dtype=float),
+            color="black",
+            linewidth=0.8,
+            alpha=0.5,
+            label="Reference",
+        )
     ax_bottom.axhline(0.0, color="black", linewidth=0.8, alpha=0.5)
     ax_bottom.set_xlabel("Shared-motion time [s]")
     ax_bottom.set_ylabel("Error [deg/s]")
@@ -1526,8 +1740,8 @@ def analyze_velocity_pair(
                 "run_label": pair.label,
                 "motor_csv": str(pair.motor_csv),
                 "mocap_csv": str(pair.mocap_csv),
-                "trim_frame": mocap.trim_frame,
-                "selected_axis": mocap.selected_axis,
+                "trim_frame": 0 if mocap is None else mocap.trim_frame,
+                "selected_axis": "motor-only" if mocap is None else mocap.selected_axis,
                 "time_shift_s": round(resolved_shift_s, 6),
                 "invert_mocap_sign": int(invert_mocap_sign),
                 "phase_index": phase_id,
@@ -1895,6 +2109,52 @@ def build_velocity_agreement_summary(
     plt.close(fig)
 
 
+def run_trace_mode(args: argparse.Namespace) -> None:
+    """Render a focused trace figure for one pair."""
+    _, plt = _require_analysis_runtime()
+    pair = resolve_position_pairs(
+        args.data_root,
+        motor_csv=args.motor_csv,
+        mocap_csv=args.mocap_csv,
+        motor_model=args.motor_model,
+        motor_only=args.motor_only,
+    )[0]
+    motor = load_motor_velocity_csv(pair.motor_csv, motor_model=pair.motor_model)
+    if pair.mocap_csv is None:
+        raise ValueError("Trace mode requires a mocap file unless --motor-only is set.")
+    raw_mocap = load_raw_mocap_csv(pair.mocap_csv)
+    mocap = process_raw_mocap(
+        raw_mocap,
+        trim_frame=args.trim_frame,
+        axis=args.axis,
+        invert_sign=args.invert_mocap_sign,
+        frame_rate_hz=args.frame_rate_hz,
+    )
+    aligned_time, _ = _align_mocap_time(
+        motor.elapsed_s,
+        motor.feedback_position_deg,
+        motor.motor_mech_deg_s,
+        mocap,
+        time_shift_s=args.time_shift_s,
+        velocity_floor_deg_s=15.0,
+    )
+    overlap_mask = _overlap_mask(motor.elapsed_s, aligned_time)
+    overlap_time_s = motor.elapsed_s[overlap_mask]
+    mocap_velocity = _interp_series(overlap_time_s, aligned_time, mocap.velocity_deg_s)
+    motor_velocity = motor.motor_mech_deg_s[overlap_mask]
+    fig, ax = plt.subplots(figsize=(8.5, 4.8), constrained_layout=True)
+    ax.plot(overlap_time_s - overlap_time_s[0], motor_velocity, color=COLOR_MOTOR, label="Motor")
+    if not args.motor_only:
+        ax.plot(overlap_time_s - overlap_time_s[0], mocap_velocity, color=COLOR_MOCAP, label="Mocap")
+    ax.set_title(f"Trace: {args.label}")
+    ax.set_xlabel("Time [s]")
+    ax.set_ylabel("Speed [deg/s]")
+    ax.grid(alpha=0.3)
+    ax.legend(loc="best")
+    _save_figure(fig, args.out_dir / f"trace_{args.label}")
+    plt.close(fig)
+
+
 def run_position_mode(args: argparse.Namespace) -> list[dict[str, Any]]:
     """Process all requested position pairs."""
     output_dir = args.out_dir / "position"
@@ -1903,6 +2163,8 @@ def run_position_mode(args: argparse.Namespace) -> list[dict[str, Any]]:
         targets=args.targets,
         motor_csv=args.motor_csv,
         mocap_csv=args.mocap_csv,
+        motor_model=args.motor_model,
+        motor_only=args.motor_only,
     )
     all_rows: list[dict[str, Any]] = []
     for pair in pairs:
@@ -1921,6 +2183,8 @@ def run_position_mode(args: argparse.Namespace) -> list[dict[str, Any]]:
                 min_segment_s=args.min_segment_s,
                 min_angle_span_deg=args.min_angle_span_deg,
                 time_shift_s=args.time_shift_s,
+                frame_rate_hz=args.frame_rate_hz,
+                motor_only=args.motor_only,
             )
         )
     write_summary_csv(output_dir / "position_summary.csv", all_rows)
@@ -1937,6 +2201,8 @@ def run_velocity_mode(args: argparse.Namespace) -> list[dict[str, Any]]:
         speeds=args.speeds,
         motor_csv=args.motor_csv,
         mocap_csv=args.mocap_csv,
+        motor_model=args.motor_model,
+        motor_only=args.motor_only,
     )
     all_rows: list[dict[str, Any]] = []
     scatter_points: list[tuple[np.ndarray, np.ndarray, str]] = []
@@ -1954,6 +2220,8 @@ def run_velocity_mode(args: argparse.Namespace) -> list[dict[str, Any]]:
             settle_s=args.settle_s,
             time_shift_s=args.time_shift_s,
             phase_selection=args.phase_index,
+            frame_rate_hz=args.frame_rate_hz,
+            motor_only=args.motor_only,
         )
         all_rows.extend(rows)
         scatter_points.extend(pair_scatter)
@@ -1971,6 +2239,8 @@ def main() -> int:
         run_position_mode(args)
     elif args.command == "velocity":
         run_velocity_mode(args)
+    elif args.command == "trace":
+        run_trace_mode(args)
     else:
         run_position_mode(args)
         run_velocity_mode(args)

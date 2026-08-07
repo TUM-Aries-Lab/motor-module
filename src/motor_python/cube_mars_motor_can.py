@@ -749,6 +749,8 @@ class CubeMarsBaseCAN(BaseMotor):
             current_amps=current_int * 0.01,
             temperature_celsius=temperature_celsius,
             error_code=error_code,
+            timestamp_monotonic=time.monotonic(),
+            is_fresh=True,
         )
         if self._active_feedback_id != msg.arbitration_id:
             self._active_feedback_id = msg.arbitration_id
@@ -826,7 +828,11 @@ class CubeMarsBaseCAN(BaseMotor):
             if self._last_feedback is not None:
                 age = time.monotonic() - self._last_feedback_monotonic
                 if age <= max(0.5, fresh_window):
-                    return self._last_feedback
+                    cached = self._last_feedback
+                    if cached is not None:
+                        cached.is_fresh = False
+
+                    return cached
 
             self._consecutive_no_response += 1
             return None
@@ -1609,6 +1615,8 @@ class CubeMarsAK806v2CAN(CubeMarsBaseCAN):
             current_amps=current_amps,
             temperature_celsius=temperature_celsius,
             error_code=error_code,
+            timestamp_monotonic=time.monotonic(),
+            is_fresh=True,
         )
 
         if self._active_feedback_id != msg.arbitration_id:

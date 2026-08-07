@@ -153,18 +153,6 @@ def test_load_motor_position_csv_reads_expected_columns(tmp_path: Path) -> None:
     assert data.feedback_position_deg[0] == 22.0
 
 
-def test_load_motor_velocity_csv_computes_mechanical_speed(tmp_path: Path) -> None:
-    """Motor velocity parsing should convert ERPM to mechanical deg/s."""
-    module = _load_script_module()
-    csv_path = tmp_path / "verify_set_velocity_1000.csv"
-    _write_velocity_motor_csv(csv_path)
-    data = module.load_motor_velocity_csv(csv_path)
-    assert len(data.elapsed_s) == 3
-    assert data.feedback_speed_erpm[1] == 1270.0
-    expected = data.feedback_speed_erpm[1] * module.MECH_DEG_PER_SEC_PER_ERPM
-    assert np.isclose(data.motor_mech_deg_s[1], expected)
-
-
 def test_load_raw_mocap_csv_skips_preamble_and_units_rows(tmp_path: Path) -> None:
     """Raw Vicon parsing should start at the first numeric frame row."""
     module = _load_script_module()

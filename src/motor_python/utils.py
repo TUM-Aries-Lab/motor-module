@@ -2,7 +2,8 @@
 
 import csv
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -83,14 +84,62 @@ def erpm_to_degrees_per_second(
     )
 
 
+class CsvStreamWriter:
+    """Small wrapper for writing dict rows to a CSV file with automatic flush."""
+
+    def __init__(
+        self, path: Path, fieldnames: Sequence[str], *, encoding: str = "utf-8"
+    ) -> None:
+        self.path = path
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.handle = path.open("w", newline="", encoding=encoding)
+        self.writer = csv.DictWriter(self.handle, fieldnames=list(fieldnames))
+        self.writer.writeheader()
+
+    def writerow(self, row: dict[str, Any]) -> None:
+        """Write a single row to the CSV file and flush."""
+        self.writer.writerow(row)
+        self.handle.flush()
+
+    def writerows(self, rows: Sequence[dict[str, Any]]) -> None:
+        """Write multiple rows to the CSV file and flush."""
+        self.writer.writerows(rows)
+        self.handle.flush()
+
+    def close(self) -> None:
+        """Close the CSV file."""
+        self.handle.close()
+
+    def __enter__(self) -> "CsvStreamWriter":
+        """Return self for use in a context manager."""
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        """Close the CSV file on exit."""
+        self.close()
+
+
+@contextmanager
+def open_csv_writer(
+    path: Path,
+    fieldnames: Sequence[str],
+    *,
+    encoding: str = "utf-8",
+) -> Iterator[CsvStreamWriter]:
+    """Open a CSV file for streaming dict rows with a shared header."""
+    writer = CsvStreamWriter(path, fieldnames, encoding=encoding)
+    try:
+        yield writer
+    finally:
+        writer.close()
+
+
 def write_summary_csv(path: Path, rows: Sequence[dict[str, Any]]) -> None:
     """Write summary rows to CSV."""
-    path.parent.mkdir(parents=True, exist_ok=True)
     if not rows:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("", encoding="utf-8")
         return
     fieldnames = list(rows[0].keys())
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
+    with open_csv_writer(path, fieldnames) as writer:
         writer.writerows(rows)

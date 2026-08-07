@@ -62,6 +62,7 @@ CSV_FIELDNAMES = [
     "left_feedback_temperature_c",
     "left_feedback_error_code",
     "left_feedback_error_description",
+    "left_is_fresh_feedback",
     "right_motor_id",
     "right_motor_label",
     "right_feedback_position_deg",
@@ -70,6 +71,7 @@ CSV_FIELDNAMES = [
     "right_feedback_temperature_c",
     "right_feedback_error_code",
     "right_feedback_error_description",
+    "right_is_fresh_feedback",
     "sync_error_deg",
 ]
 
@@ -90,7 +92,7 @@ def _resolve_csv_path(csv_path_arg: str | None, *, prefix: str) -> Path:
     if csv_path_arg:
         return Path(csv_path_arg).expanduser().resolve()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return (Path("data/csv_logs") / f"{prefix}_{timestamp}.csv").resolve()
+    return (Path("data/csv_logs") / f"{prefix}_{timestamp}_{CAN_DEFAULTS.motor_control_rate_hz}.csv").resolve()
 
 
 def _clamp(value: float, min_value: float, max_value: float) -> float:
@@ -326,6 +328,7 @@ def run_synchronized_phase(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     "left_feedback_temperature_c": statuses[0].temperature_celsius if len(statuses) > 0 and statuses[0] is not None else "",
                     "left_feedback_error_code": statuses[0].error_code if len(statuses) > 0 and statuses[0] is not None else "",
                     "left_feedback_error_description": statuses[0].error_description if len(statuses) > 0 and statuses[0] is not None else "",
+                    "left_is_fresh_feedback": statuses[0].is_fresh if len(statuses) > 0 and statuses[0] is not None else "",
                     "right_motor_id": f"0x{motor_entries[1][0]:02X}" if len(motor_entries) > 1 else "",
                     "right_motor_label": motor_entries[1][1] if len(motor_entries) > 1 else "",
                     "right_feedback_position_deg": f"{statuses[1].position_degrees:.6f}" if len(statuses) > 1 and statuses[1] is not None else "",
@@ -334,6 +337,7 @@ def run_synchronized_phase(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     "right_feedback_temperature_c": statuses[1].temperature_celsius if len(statuses) > 1 and statuses[1] is not None else "",
                     "right_feedback_error_code": statuses[1].error_code if len(statuses) > 1 and statuses[1] is not None else "",
                     "right_feedback_error_description": statuses[1].error_description if len(statuses) > 1 and statuses[1] is not None else "",
+                    "right_is_fresh_feedback": statuses[1].is_fresh if len(statuses) > 1 and statuses[1] is not None else "",
                     "sync_error_deg": "" if len(statuses) < 2 or statuses[0] is None or statuses[1] is None else f"{statuses[0].position_degrees - statuses[1].position_degrees:.2f}",
                 }
             )
@@ -404,6 +408,7 @@ def run_synchronized_phase(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     "left_feedback_temperature_c": statuses[0].temperature_celsius if len(statuses) > 0 and statuses[0] is not None else "",
                     "left_feedback_error_code": statuses[0].error_code if len(statuses) > 0 and statuses[0] is not None else "",
                     "left_feedback_error_description": statuses[0].error_description if len(statuses) > 0 and statuses[0] is not None else "",
+                    "left_is_fresh_feedback": statuses[0].is_fresh if len(statuses) > 0 and statuses[0] is not None else "",
                     "right_motor_id": f"0x{motor_entries[1][0]:02X}" if len(motor_entries) > 1 else "",
                     "right_motor_label": motor_entries[1][1] if len(motor_entries) > 1 else "",
                     "right_feedback_position_deg": f"{statuses[1].position_degrees:.6f}" if len(statuses) > 1 and statuses[1] is not None else "",
@@ -412,6 +417,7 @@ def run_synchronized_phase(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     "right_feedback_temperature_c": statuses[1].temperature_celsius if len(statuses) > 1 and statuses[1] is not None else "",
                     "right_feedback_error_code": statuses[1].error_code if len(statuses) > 1 and statuses[1] is not None else "",
                     "right_feedback_error_description": statuses[1].error_description if len(statuses) > 1 and statuses[1] is not None else "",
+                    "right_is_fresh_feedback": statuses[1].is_fresh if len(statuses) > 1 and statuses[1] is not None else "",
                     "sync_error_deg": "" if len(statuses) < 2 or statuses[0] is None or statuses[1] is None else f"{statuses[0].position_degrees - statuses[1].position_degrees:.2f}",
                 }
             )

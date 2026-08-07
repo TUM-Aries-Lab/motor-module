@@ -312,11 +312,6 @@ def parse_args() -> argparse.Namespace:
         help="MIT helper-frame policy (default: fcfd)",
     )
     parser.add_argument(
-        "--allow-legacy-feedback-ids",
-        action="store_true",
-        help="Accept legacy non-canonical feedback IDs",
-    )
-    parser.add_argument(
         "--skip-preflight",
         action="store_true",
         help="Skip automatic preflight reset.",
@@ -411,7 +406,6 @@ def main() -> int:
             interface=args.interface,
             bitrate=args.bitrate,
             helper_policy=args.helper_policy,
-            # allow_legacy_feedback_ids=args.allow_legacy_feedback_ids,
         )
         if not motor.connected:
             print("\nFAIL: CAN interface not connected")

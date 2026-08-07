@@ -37,6 +37,7 @@ from motor_python.base_motor import MotorState
 from motor_python.can_utils import get_can_state, reset_can_interface
 from motor_python.cube_mars_motor_can import CubeMarsBaseCAN
 from motor_python.definitions import CAN_DEFAULTS, MotorModel
+from motor_python.utils import CsvStreamWriter
 
 SEPARATOR = "=" * 78
 HEALTHY_TX_ERR_MAX = 96
@@ -486,14 +487,10 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
     motor_ids = _parse_motor_ids(args.motor_id, args.motor_ids)
     motors: list[CubeMarsBaseCAN] = []
     try:
-        csv_path.parent.mkdir(parents=True, exist_ok=True)
-        with csv_path.open("w", newline="", encoding="utf-8") as csv_file:
-            csv_writer = csv.DictWriter(csv_file, fieldnames=CSV_FIELDNAMES)
-            csv_writer.writeheader()
+        with CsvStreamWriter(csv_path, CSV_FIELDNAMES) as csv_writer:
 
             def write_sample_row(row: dict[str, str | int]) -> None:
                 csv_writer.writerow(row)
-                csv_file.flush()
 
             for motor_id, _label in motor_ids:
                 motor = create_can_motor(
