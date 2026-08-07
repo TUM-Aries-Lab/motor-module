@@ -74,7 +74,7 @@ def create_can_motor(
             allow_legacy_feedback_ids=allow_legacy_feedback_ids,
             aggressive_bus_reset=aggressive_bus_reset,
         )
-    if model in {"AK60-V1", "AK60-V1.1"}:
+    if model in {"AK60-V1", "AK60-V1.1", "AK60-6_V1.1"}:
         return CubeMarsAK606v1CAN(
             motor_can_id=motor_can_id,
             interface=interface,
