@@ -167,6 +167,9 @@ class CubeMarsBaseCAN(BaseMotor):
         # Canonical feedback IDs (extended) plus optional compatibility IDs.
         self._feedback_ids_ext: set[int] = {0x2900 | motor_can_id, 0x2900}
         self._feedback_ids_std: set[int] = set()
+        if self.motor_model in {"AK80-6", "AK60-6_V1.1"}:
+            # AK80/AK60 V1.1 use standard CAN frames for MIT telemetry.
+            self._feedback_ids_std.add(motor_can_id)
         if feedback_can_id is not None:
             self._feedback_ids_ext.add(feedback_can_id)
             if feedback_can_id <= 0x7FF:
@@ -828,9 +831,16 @@ class CubeMarsBaseCAN(BaseMotor):
             if self._last_feedback is not None:
                 age = time.monotonic() - self._last_feedback_monotonic
                 if age <= max(0.5, fresh_window):
-                    cached = self._last_feedback
-                    if cached is not None:
-                        cached.is_fresh = False
+                    # Create a copy so we don't modify the stored feedback object
+                    cached = MotorState(
+                        position_degrees=self._last_feedback.position_degrees,
+                        speed_erpm=self._last_feedback.speed_erpm,
+                        current_amps=self._last_feedback.current_amps,
+                        temperature_celsius=self._last_feedback.temperature_celsius,
+                        error_code=self._last_feedback.error_code,
+                        timestamp_monotonic=self._last_feedback.timestamp_monotonic,
+                        is_fresh=False,
+                    )
 
                     return cached
 
@@ -1667,11 +1677,11 @@ class CubeMarsAK806v2CAN(CubeMarsBaseCAN):
             12,
         )
 
-        logger.debug(
-            f"Packing AK80 MIT frame: p={p_des:.3f} rad (int {p_int}) "
-            f"v={v_des:.3f} rad/s (int {v_int}) kp={kp:.2f} (int {kp_int}) "
-            f"kd={kd:.2f} (int {kd_int}) t_ff={t_ff:.2f} Nm (int {t_int})"
-        )
+        # logger.debug(
+        #     f"Packing AK80 MIT frame: p={p_des:.3f} rad (int {p_int}) "
+        #     f"v={v_des:.3f} rad/s (int {v_int}) kp={kp:.2f} (int {kp_int}) "
+        #     f"kd={kd:.2f} (int {kd_int}) t_ff={t_ff:.2f} Nm (int {t_int})"
+        # )
 
         return bytes(
             [

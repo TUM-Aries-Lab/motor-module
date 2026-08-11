@@ -9,7 +9,9 @@ This script mirrors the ping-pong command pattern used by
 - calculate and print RMSE at the end.
 
 Examples:
-    .venv/bin/python scripts/evaluate_set_position.py --motor-id 0x03 --position-deg 45 --velocity-deg-s 25 --motor-model AK60-6_V3.0
+    sudo ./setup_can.sh
+    .venv/bin/python scripts/evaluate_set_position.py --motor-id 0x03 --position-deg 45 --velocity-deg-s 25 --motor-model AK80-6
+    .venv/bin/python scripts/evaluate_set_position.py --motor-ids 0x03,0x04 --position-deg 30 --velocity-deg-s 20 --motor-model AK60-6_V3.0
     .venv/bin/python scripts/evaluate_set_position.py --motor-ids 0x03,0x04 --position-deg 30 --velocity-deg-s 20 --motor-model AK80-6
 
 """
@@ -37,7 +39,7 @@ from motor_python import create_can_motor
 from motor_python.base_motor import MotorState, print_timing_stats
 from motor_python.can_utils import get_can_state, reset_can_interface
 from motor_python.cube_mars_motor_can import CubeMarsBaseCAN
-from motor_python.definitions import CAN_DEFAULTS, MotorModel
+from motor_python.definitions import CAN_DEFAULTS, MotorModel, MotorSpec
 
 SEPARATOR = "=" * 78
 HEALTHY_TX_ERR_MAX = 96
@@ -222,6 +224,40 @@ def plot_position_feedback(csv_path: Path, plot_path: Path | None = None) -> Pat
     plt.close()
     return plot_path
 
+def calculate_average_position_delay(
+    command_history: list[tuple[float, float]],
+    feedback_history: list[tuple[float, float]],
+) -> float | None:
+    """
+    Estimate average delay between commanded and measured position.
+    """
+
+    if len(command_history) < 2 or len(feedback_history) < 2:
+        return None
+
+    delays = []
+
+    command_times = [x[0] for x in command_history]
+    command_positions = [x[1] for x in command_history]
+
+    for feedback_time, feedback_position in feedback_history:
+
+        closest_index = min(
+            range(len(command_positions)),
+            key=lambda i: abs(command_positions[i] - feedback_position)
+        )
+
+        command_time = command_times[closest_index]
+
+        delay = feedback_time - command_time
+
+        if delay >= 0:
+            delays.append(delay)
+
+    if not delays:
+        return None
+
+    return sum(delays) / len(delays)
 
 def run_synchronized_phase(  # noqa: C901, PLR0912, PLR0913, PLR0915
     motors: list[CubeMarsBaseCAN],
@@ -248,6 +284,10 @@ def run_synchronized_phase(  # noqa: C901, PLR0912, PLR0913, PLR0915
     missed = [0] * len(motors)
     per_motor_errors: list[list[float]] = [[] for _ in motors]
     per_motor_positions: list[list[float]] = [[] for _ in motors]
+    per_motor_feedback_history: list[list[tuple[float, float]]] = [[] for _ in motors]
+    command_history: list[tuple[float, float]] = []
+    command_timestamps = []
+    feedback_latencies = [[] for _ in motors]
 
     # Move smoothly to the commanded target for every motor in the same time window.
     move_end = time.monotonic() + segment_time
@@ -259,7 +299,9 @@ def run_synchronized_phase(  # noqa: C901, PLR0912, PLR0913, PLR0915
         u = _clamp(step_progress, 0.0, 1.0)
         smooth_u = (3.0 * u * u) - (2.0 * u * u * u) #Reduces sudden changes in commanded position. Produces smoother acceleration and deceleration.
         cmd_deg = command_position_deg * smooth_u
-
+        command_history.append(   # store commanded position for logging
+            (time.monotonic(), cmd_deg)
+        )
         for motor in motors:
             motor.set_position(cmd_deg)
 
@@ -273,6 +315,15 @@ def run_synchronized_phase(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 )
 
             status = _read_status(motor, timeout=min(0.08, sample_period_s))
+            if status is not None:
+                feedback_time = status.timestamp_monotonic
+
+                if command_history:
+                    latest_command_time = command_history[-1][0]
+
+                    latency = feedback_time - latest_command_time
+
+                    feedback_latencies[motor_index].append(latency)
             feedback_ts = float(getattr(motor, "_last_feedback_monotonic", 0.0))
             fresh_feedback = status is not None and feedback_ts > last_feedback_ts[motor_index]
             if not fresh_feedback:
@@ -305,6 +356,7 @@ def run_synchronized_phase(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 continue
             per_motor_errors[motor_index].append(float(status.position_degrees - command_position_deg))
             per_motor_positions[motor_index].append(status.position_degrees)
+            per_motor_feedback_history[motor_index].append((time.monotonic(),status.position_degrees,))
 
         if sample_logger is not None:
             now_epoch = time.time()
@@ -385,6 +437,7 @@ def run_synchronized_phase(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 continue
             per_motor_errors[motor_index].append(float(status.position_degrees - cmd_deg))
             per_motor_positions[motor_index].append(status.position_degrees)
+            per_motor_feedback_history[motor_index].append((time.monotonic(),status.position_degrees,))
 
         if sample_logger is not None:
             now_epoch = time.time()
@@ -439,6 +492,39 @@ def run_synchronized_phase(  # noqa: C901, PLR0912, PLR0913, PLR0915
             )
         )
         print_phase_summary(motor_id, label, summaries[-1])
+
+        # Print the average delay between commanded and measured position for each motor
+        delay = calculate_average_position_delay(
+                command_history,
+                per_motor_feedback_history[motor_index],
+            )
+        if delay is not None:
+                print(
+                    f"Motor 0x{motor_id:02X} [{label}] | "
+                    f"Average position delay = {delay*1000:.2f} ms"
+                )
+        else:
+                print(
+                    f"Motor 0x{motor_id:02X} [{label}] | "
+                    "Average position delay unavailable"
+                )
+
+        if feedback_latencies[motor_index]:
+            avg_latency = (
+                sum(feedback_latencies[motor_index])
+                /
+                len(feedback_latencies[motor_index])
+            )
+            print(
+                f"Motor 0x{motor_id:02X} [{label}] | "
+                f"Average command-feedback latency = "
+                f"{avg_latency*1000:.3f} ms"
+            )
+        else:
+            print(
+                f"Motor 0x{motor_id:02X} [{label}] | "
+                "No latency samples"
+            )
 
     return summaries
 
