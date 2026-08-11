@@ -370,7 +370,6 @@ def main() -> int:
     print(f"Sweep window         : [{safe_min:.2f}, {safe_max:.2f}] deg")
     print(f"CSV log              : {csv_path}")
     print(f"Helper policy        : {args.helper_policy}")
-    print(f"Legacy feedback IDs  : {args.allow_legacy_feedback_ids}")
     print(f"Preflight            : {'skip' if args.skip_preflight else 'auto-reset if needed'}")
     print("Safety               : keep load clear; be ready to cut power")
 
