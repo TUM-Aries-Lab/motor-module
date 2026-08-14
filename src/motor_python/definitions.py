@@ -123,7 +123,7 @@ class MotorSpec:
     min_velocity_electrical_rpm: int
     mit_position_kp: float = 2.0
     mit_position_kd: float = 1.0
-    mit_velocity_kd: float = 0.2
+    mit_velocity_kd: float = 1.2
     mit_mode_limits: MITModeLimits = AK60_6_V3_0_MIT_LIMITS
 
 
@@ -285,11 +285,11 @@ AK60_6_V3_0_MOTOR_SPEC = MotorSpec(
     rated_current_amps=3.8,
     peak_current_amps=11.2,
     max_output_speed_rpm=640,
-    max_velocity_electrical_rpm=7840,  # 560 RPM * 14 pole pairs
-    min_velocity_electrical_rpm=-7840,  # -560 RPM * 14 pole pairs
+    max_velocity_electrical_rpm=12000,  # 560 RPM * 14 pole pairs
+    min_velocity_electrical_rpm=-12000,  # -560 RPM * 14 pole pairs
     mit_position_kp=20.0,
-    mit_position_kd=1.0,
-    mit_velocity_kd=0.2,
+    mit_position_kd=2.0,
+    mit_velocity_kd=1.2,
     mit_mode_limits=AK60_6_V3_0_MIT_LIMITS,
 )
 
@@ -308,7 +308,7 @@ AK80_6_MOTOR_SPEC = MotorSpec(
     min_velocity_electrical_rpm=-16800,  # -800 RPM * 21 pole pairs
     mit_position_kp=10.0,  # ideal
     mit_position_kd=1.0,
-    mit_velocity_kd=1.5,
+    mit_velocity_kd=1.2,
     mit_mode_limits=AK80_6_MIT_LIMITS,
 )
 
@@ -325,9 +325,9 @@ AK60_6_V1_1_MOTOR_SPEC = MotorSpec(
     max_output_speed_rpm=560,
     max_velocity_electrical_rpm=7840,  # 560 RPM * 14 pole pairs
     min_velocity_electrical_rpm=-7840,  # -560 RPM * 14 pole pairs
-    mit_position_kp=0.0,
-    mit_position_kd=0.0,
-    mit_velocity_kd=1.0,
+    mit_position_kp=10.0,
+    mit_position_kd=1.0,
+    mit_velocity_kd=1.2,
     mit_mode_limits=AK60_6_V1_1_MIT_LIMITS,
 )
 

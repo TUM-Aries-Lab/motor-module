@@ -126,6 +126,7 @@ class CubeMarsBaseCAN(BaseMotor):
         self._pending_feedback: MotorState | None = None
         self._refresh_feedback: MotorState | None = None
         self._refresh_feedback_monotonic: float = 0.0
+        self._last_returned_feedback_monotonic: float = 0.0
 
         # MIT command refresh thread (re-send active command at fixed rate)
         self._refresh_payload: bytes | None = None
@@ -532,6 +533,29 @@ class CubeMarsBaseCAN(BaseMotor):
 
         super().set_velocity(velocity_erpm_clamped)
 
+    def soft_start_velocity(
+        self,
+        target_erpm: int,
+        step_erpm: int = 500,
+        step_time_s: float = 0.05,
+    ) -> None:
+        """Gradually ramp the MIT velocity command to the target velocity."""
+        current_erpm = 0
+
+        direction = 1 if target_erpm >= 0 else -1
+        target_abs = abs(target_erpm)
+
+        while current_erpm < target_abs:
+            current_erpm = min(
+                current_erpm + step_erpm,
+                target_abs,
+            )
+
+            velocity = direction * current_erpm
+
+            self.set_velocity(velocity)
+            time.sleep(step_time_s)
+
     def _mit_neutral_payload(self) -> bytes:
         """Return a neutral MIT payload (no position/speed/torque command)."""
         return self.pack_mit_frame(
@@ -727,7 +751,7 @@ class CubeMarsBaseCAN(BaseMotor):
             logger.warning(f"Received short CAN message: {len(msg.data)} bytes")
             return None
 
-        logger.debug(f"RAW feedback bytes: {' '.join(f'{b:02X}' for b in msg.data)}")
+        # logger.debug(f"RAW feedback bytes: {' '.join(f'{b:02X}' for b in msg.data)}")
 
         pos_int = struct.unpack(">h", msg.data[0:2])[0]
         speed_int = struct.unpack(">h", msg.data[2:4])[0]
@@ -811,6 +835,7 @@ class CubeMarsBaseCAN(BaseMotor):
         if self._pending_feedback is not None:
             feedback = self._pending_feedback
             self._pending_feedback = None
+            self._last_returned_feedback_monotonic = feedback.timestamp_monotonic
             return feedback
 
         if not self.connected or self.bus is None:
@@ -825,13 +850,40 @@ class CubeMarsBaseCAN(BaseMotor):
                     if age <= fresh_window:
                         self._consecutive_no_response = 0
                         self.communicating = True
-                        return self._refresh_feedback
+
+                        # Fresh only if this is a NEW frame we haven't returned before —
+                        # not just recent in wall-clock time.
+                        is_new_frame = (
+                            self._refresh_feedback.timestamp_monotonic
+                            > self._last_returned_feedback_monotonic
+                        )
+                        self._last_returned_feedback_monotonic = (
+                            self._refresh_feedback.timestamp_monotonic
+                        )
+
+                        feedback = MotorState(
+                            position_degrees=self._refresh_feedback.position_degrees,
+                            speed_erpm=self._refresh_feedback.speed_erpm,
+                            current_amps=self._refresh_feedback.current_amps,
+                            temperature_celsius=self._refresh_feedback.temperature_celsius,
+                            error_code=self._refresh_feedback.error_code,
+                            timestamp_monotonic=self._refresh_feedback.timestamp_monotonic,
+                            is_fresh=is_new_frame,
+                        )
+                        return feedback
                 time.sleep(self._refresh_interval)
 
             if self._last_feedback is not None:
                 age = time.monotonic() - self._last_feedback_monotonic
                 if age <= max(0.5, fresh_window):
-                    # Create a copy so we don't modify the stored feedback object
+                    is_new_frame = (
+                        self._last_feedback.timestamp_monotonic
+                        > self._last_returned_feedback_monotonic
+                    )
+                    self._last_returned_feedback_monotonic = (
+                        self._last_feedback.timestamp_monotonic
+                    )
+
                     cached = MotorState(
                         position_degrees=self._last_feedback.position_degrees,
                         speed_erpm=self._last_feedback.speed_erpm,
@@ -839,9 +891,8 @@ class CubeMarsBaseCAN(BaseMotor):
                         temperature_celsius=self._last_feedback.temperature_celsius,
                         error_code=self._last_feedback.error_code,
                         timestamp_monotonic=self._last_feedback.timestamp_monotonic,
-                        is_fresh=False,
+                        is_fresh=is_new_frame,
                     )
-
                     return cached
 
             self._consecutive_no_response += 1
@@ -849,6 +900,7 @@ class CubeMarsBaseCAN(BaseMotor):
 
         feedback = self._capture_response(timeout=timeout)
         if feedback is not None:
+            self._last_returned_feedback_monotonic = feedback.timestamp_monotonic
             return feedback
 
         self._consecutive_no_response += 1
@@ -1578,6 +1630,7 @@ class CubeMarsAK806v2CAN(CubeMarsBaseCAN):
             return None
 
         d = msg.data
+        # print(f"Received feedback data: {d.hex()}")
 
         # AK80 MIT reply format from CubeMars manual
         # motor_id = d[0]
@@ -1706,7 +1759,7 @@ class CubeMarsAK806v2CAN(CubeMarsBaseCAN):
             pos_rad=0.0,
             vel_rad_s=vel_rad_s,
             kp=0.0,
-            kd=3.0,
+            kd=self._mit_velocity_kd,
             torque_ff_nm=0.0,
         )
 

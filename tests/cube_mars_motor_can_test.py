@@ -11,7 +11,6 @@ import pytest
 from motor_python.base_motor import MotorState
 from motor_python.can_protocol import CANControlMode
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
-from motor_python.definitions import CAN_DEFAULTS
 from motor_python.mit_mode_packer import AK60_6_V3_0_MIT_LIMITS, pack_mit_frame
 
 
@@ -225,8 +224,8 @@ class TestMITCommandPath:
         kwargs = mit.call_args.kwargs
         assert kwargs["pos_rad"] == pytest.approx(np.pi / 2, rel=1e-4)
         assert kwargs["vel_rad_s"] == 0.0
-        assert kwargs["kp"] == CAN_DEFAULTS.mit_position_kp
-        assert kwargs["kd"] == CAN_DEFAULTS.mit_position_kd
+        assert kwargs["kp"] == motor._motor_spec.mit_position_kp
+        assert kwargs["kd"] == motor._motor_spec.mit_position_kd
 
     def test_set_velocity_routes_through_mit_velocity_mode(self, motor):
         with patch.object(motor, "set_mit_mode") as mit:
@@ -242,7 +241,7 @@ class TestMITCommandPath:
         assert kwargs["pos_rad"] == 0.0
         assert kwargs["vel_rad_s"] == pytest.approx(expected_vel)
         assert kwargs["kp"] == 0.0
-        assert kwargs["kd"] == CAN_DEFAULTS.mit_velocity_kd
+        assert kwargs["kd"] == motor._motor_spec.mit_velocity_kd
 
     def test_set_velocity_uses_constructor_velocity_kd_override(self, mock_bus):
         motor = CubeMarsAK606v3CAN(mit_velocity_kd=0.5)

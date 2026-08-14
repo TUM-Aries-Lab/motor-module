@@ -58,7 +58,7 @@ def create_can_motor(
             motor_spec=motor_spec if motor_spec is not None else AK60_6_V3_0_MOTOR_SPEC,
             helper_policy=helper_policy,
             auto_recover_bus=auto_recover_bus,
-            allow_legacy_feedback_ids=allow_legacy_feedback_ids,
+            allow_legacy_feedback_ids=True,
             aggressive_bus_reset=aggressive_bus_reset,
         )
     if model in {"AK80-6", "AK80_6"}:
@@ -71,7 +71,7 @@ def create_can_motor(
             motor_spec=motor_spec if motor_spec is not None else AK80_6_MOTOR_SPEC,
             helper_policy=helper_policy,
             auto_recover_bus=auto_recover_bus,
-            allow_legacy_feedback_ids=allow_legacy_feedback_ids,
+            allow_legacy_feedback_ids=False,
             aggressive_bus_reset=aggressive_bus_reset,
         )
     if model in {"AK60-V1", "AK60-V1.1", "AK60-6_V1.1"}:
@@ -84,7 +84,7 @@ def create_can_motor(
             motor_spec=motor_spec if motor_spec is not None else AK60_6_V1_1_MOTOR_SPEC,
             helper_policy=helper_policy,
             auto_recover_bus=auto_recover_bus,
-            allow_legacy_feedback_ids=allow_legacy_feedback_ids,
+            allow_legacy_feedback_ids=False,
             aggressive_bus_reset=aggressive_bus_reset,
         )
     raise ValueError("Unknown motor model: must be AK60-6 or AK80-6")

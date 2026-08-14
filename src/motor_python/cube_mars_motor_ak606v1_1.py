@@ -22,8 +22,9 @@ from motor_python.mit_mode_packer import (
     uint_to_float,
 )
 
+# ruff: noqa: ERA001
 
-# TODO: add tests
+
 class CubeMarsAK606v1CAN(CubeMarsBaseCAN):  # pragma: no cover
     """AK60-6 V1.1 Motor Controller over CAN with MIT force-control protocol."""
 
@@ -90,7 +91,7 @@ class CubeMarsAK606v1CAN(CubeMarsBaseCAN):  # pragma: no cover
 
         d = msg.data
 
-        motor_id = d[0]
+        # motor_id = d[0]
         p_int = (d[1] << 8) | d[2]
         v_int = (d[3] << 4) | (d[4] >> 4)
         i_int = ((d[4] & 0x0F) << 8) | d[5]
@@ -121,10 +122,6 @@ class CubeMarsAK606v1CAN(CubeMarsBaseCAN):  # pragma: no cover
 
         # Convert velocity to ERPM for compatibility with MotorState
         speed_erpm = self._rad_s_to_erpm(velocity_rad_s)
-
-        logger.debug(
-            f"Parsed AK60 v1.1 MIT feedback ints: motor_id={motor_id} p={position_rad} v={velocity_rad_s} i={current_amps} temp={temperature_celsius} error={error_code}"
-        )
 
         feedback = MotorState(
             position_degrees=np.degrees(position_rad),
