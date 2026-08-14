@@ -11,8 +11,8 @@ and current draw during coordinated motion.
 Typical use:
     sudo ./setup_can.sh
     .venv/bin/python scripts/dual_motor_velocity_test.py \
-        --left-id 0x01 --right-id 0x02 \
-        --left-motor-model AK60-6_V1.1 --right-motor-model AK60-6_V1.1 \
+        --left-id 0x03 --right-id 0x04 \
+        --left-motor-model AK80-6 --right-motor-model AK80-6 \
         --amplitude-erpm 4000 --control-hz 0.3 --duration 30
 """
 

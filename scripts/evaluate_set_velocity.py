@@ -11,8 +11,8 @@ Examples:
 
     sudo ./setup_can.sh
     .venv/bin/python scripts/evaluate_set_velocity.py --motor-ids 0x01,0x02 --speed-erpm 2500 --motor-model AK60-6_V1.1
-    .venv/bin/python scripts/evaluate_set_velocity.py --motor-id 0x03 --speed-erpm 12000 --motor-model AK60-6_V3.0
-    .venv/bin/python scripts/evaluate_set_velocity.py --motor-ids 0x03,0x04 --speed-erpm 1000 --motor-model AK60-6_V3.0 --phase-seconds 1.5
+    .venv/bin/python scripts/evaluate_set_velocity.py --speed-erpm 12000 --motor-model AK80-6 --phase-seconds 1.5 --motor-id 0x03
+    .venv/bin/python scripts/evaluate_set_velocity.py --motor-ids 0x03,0x04 --speed-erpm 12000 --motor-model AK80-6 --phase-seconds 1.5
 
 """
 # ruff: noqa: T201
@@ -83,7 +83,7 @@ def _resolve_csv_path(csv_path_arg: str | None, *, prefix: str) -> Path:
         return Path(csv_path_arg).expanduser().resolve()
     args = parse_args()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return (Path("data/csv_logs") / f"{prefix}_{timestamp}_{args.speed_erpm}_dual_motor_ak60v3.csv").resolve()
+    return (Path("data/csv_logs") / f"{prefix}_{timestamp}_{args.speed_erpm}_single_motor_ak80_unloaded.csv").resolve()
 
 
 @dataclass(frozen=True)
