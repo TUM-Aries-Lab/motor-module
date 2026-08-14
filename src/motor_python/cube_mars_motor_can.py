@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import queue
 import struct
 import threading
 import time
@@ -35,6 +36,44 @@ from motor_python.mit_mode_packer import (
 from motor_python.pid_controller import PIDController
 
 # ruff: noqa: ERA001
+
+
+class CanBusDispatcher:
+    """The ONLY thing allowed to call bus.recv() for this motor's socket."""
+
+    def __init__(self, bus: can.BusABC):
+        self.bus = bus
+        self._queue: queue.Queue[can.Message] = queue.Queue(maxsize=4)
+        self._running = True
+        self._thread = threading.Thread(target=self._reader_loop, daemon=True)
+        self._thread.start()
+
+    def _reader_loop(self) -> None:
+        while self._running:
+            try:
+                msg = self.bus.recv(timeout=0.1)
+            except can.CanError:
+                continue
+            if msg is None:
+                continue
+            if self._queue.full():
+                try:
+                    self._queue.get_nowait()
+                except queue.Empty:
+                    pass
+            self._queue.put_nowait(msg)
+
+    def get(self, timeout: float) -> can.Message | None:
+        """Get the next CAN message from the queue, or None if timeout expires."""
+        try:
+            return self._queue.get(timeout=timeout)
+        except queue.Empty:
+            return None
+
+    def stop(self) -> None:
+        """Stop the reader thread and wait for it to finish."""
+        self._running = False
+        self._thread.join(timeout=1.0)
 
 
 class CubeMarsBaseCAN(BaseMotor):
@@ -95,6 +134,7 @@ class CubeMarsBaseCAN(BaseMotor):
         self.interface = interface
         self.bitrate = bitrate
         self.bus: can.BusABC | None = None
+        self._dispatcher: CanBusDispatcher | None = None
         policy = helper_policy.lower().strip()
         if policy not in self._HELPER_POLICIES:
             allowed = ", ".join(sorted(self._HELPER_POLICIES))
@@ -247,6 +287,7 @@ class CubeMarsBaseCAN(BaseMotor):
                 receive_own_messages=False,
                 ignore_rx_error_frames=True,
             )
+            self._dispatcher = CanBusDispatcher(self.bus)
 
             # Suppress CAN error frames to reduce recv flood on some mttcan setups.
             try:
@@ -294,19 +335,12 @@ class CubeMarsBaseCAN(BaseMotor):
         self._last_tx_monotonic = time.monotonic()
 
     def _drain_rx_queue(self, max_frames: int = 256) -> int:
-        """Drain queued receive frames to reduce socket backlog after send faults."""
-        if self.bus is None:
+        """Drain queued dispatcher frames to reduce backlog after send faults."""
+        if self._dispatcher is None:
             return 0
         drained = 0
         for _ in range(max_frames):
-            try:
-                with self._recv_lock:
-                    bus = self.bus
-                    if bus is None:
-                        break
-                    msg = bus.recv(timeout=0.0)
-            except (can.CanError, Exception):
-                break
+            msg = self._dispatcher.get(timeout=0.0)
             if msg is None:
                 break
             drained += 1
@@ -336,13 +370,17 @@ class CubeMarsBaseCAN(BaseMotor):
         )
 
     def _reconnect_transport(self) -> bool:
-        """Reconnect the local SocketCAN bus object to clear driver-side queues."""
         old_bus: can.BusABC | None
+        old_dispatcher: CanBusDispatcher | None
         with self._send_lock:
             old_bus = self.bus
+            old_dispatcher = self._dispatcher
             self.bus = None
+            self._dispatcher = None
             self.connected = False
 
+        if old_dispatcher is not None:
+            old_dispatcher.stop()  # stop the reader thread FIRST
         if old_bus is not None:
             try:
                 old_bus.shutdown()
@@ -801,11 +839,9 @@ class CubeMarsBaseCAN(BaseMotor):
                 return None
 
             try:
-                with self._recv_lock:
-                    bus = self.bus
-                    if bus is None:
-                        return None
-                    msg = bus.recv(timeout=remaining)
+                if self._dispatcher is None:
+                    return None
+                msg = self._dispatcher.get(timeout=remaining)
             except (can.CanError, Exception) as exc:
                 logger.debug(f"_capture_response recv error: {exc}")
                 return None
@@ -1513,7 +1549,11 @@ class CubeMarsBaseCAN(BaseMotor):
             logger.warning(f"disable_mit_mode() failed during stop: {disable_error}")
 
     def _stop_motor_transport(self) -> None:
-        """Stop motor and release CAN bus connection."""
+        if self._dispatcher is not None:
+            try:
+                self._dispatcher.stop()
+            except Exception as exc:
+                logger.debug(f"dispatcher.stop() during close raised: {exc}")
         try:
             self.stop()
         except Exception as exc:
@@ -1522,7 +1562,6 @@ class CubeMarsBaseCAN(BaseMotor):
         if self.bus is not None:
             self.bus.shutdown()
             self.bus = None
-
         self.connected = False
 
 

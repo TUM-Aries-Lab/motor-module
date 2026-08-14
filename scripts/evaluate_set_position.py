@@ -11,8 +11,8 @@ This script mirrors the ping-pong command pattern used by
 Examples:
     sudo ./setup_can.sh
     .venv/bin/python scripts/evaluate_set_position.py --motor-ids 0x02,0x01 --position-deg 45 --velocity-deg-s 25 --motor-model AK60-6_V1.1
-    .venv/bin/python scripts/evaluate_set_position.py --motor-ids 0x03,0x04 --position-deg 30 --velocity-deg-s 20 --motor-model AK60-6_V3.0
-    .venv/bin/python scripts/evaluate_set_position.py --motor-id 0x04 --position-deg 30 --velocity-deg-s 90 --motor-model AK80-6
+    .venv/bin/python scripts/evaluate_set_position.py --motor-ids 0x03,0x04 --position-deg 650 --velocity-deg-s 360 --motor-model AK80-6
+    .venv/bin/python scripts/evaluate_set_position.py --position-deg 650 --velocity-deg-s 180 --motor-model AK80-6 --motor-id 0x03
 
 """
 # ruff: noqa: T201
@@ -94,7 +94,8 @@ def _resolve_csv_path(csv_path_arg: str | None, *, prefix: str) -> Path:
     if csv_path_arg:
         return Path(csv_path_arg).expanduser().resolve()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return (Path("data/csv_logs") / f"{prefix}_{timestamp}_{CAN_DEFAULTS.motor_control_rate_hz}.csv").resolve()
+    args = parse_args()
+    return (Path("data/csv_logs") / f"{prefix}_{timestamp}_{args.position_deg}.csv").resolve()
 
 
 def _clamp(value: float, min_value: float, max_value: float) -> float:
