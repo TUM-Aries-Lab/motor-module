@@ -11,8 +11,8 @@ and current draw during coordinated motion.
 Typical use:
     sudo ./setup_can.sh
     .venv/bin/python scripts/dual_motor_velocity_test.py \
-        --left-id 0x03 --right-id 0x04 \
-        --left-motor-model AK60-6_V3.0 --right-motor-model AK60-6_V3.0 \
+        --left-id 0x01 --right-id 0x02 \
+        --left-motor-model AK60-6_V1.1 --right-motor-model AK60-6_V1.1 \
         --amplitude-erpm 4000 --control-hz 0.3 --duration 30
 """
 
@@ -28,6 +28,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
+try:
+    import matplotlib.pyplot as plt
+except ImportError:  # pragma: no cover
+    plt = None
 
 if __package__ in {None, ""}:
     repo_src = Path(__file__).resolve().parents[1] / "src"
@@ -150,6 +154,70 @@ def _check_fault_code(sample: VelocitySample) -> None:
 def _clamp(value: float, min_value: float, max_value: float) -> float:
     """Clamp a value to a range."""
     return max(min_value, min(max_value, value))
+
+
+def _resolve_plot_path(csv_path: Path) -> Path:
+    """Return a PNG path that matches the CSV path, replacing the extension with .png."""
+    if csv_path.suffix.lower() == ".csv":
+        return csv_path.with_suffix(".png")
+    return csv_path.with_suffix(csv_path.suffix + ".png")
+
+
+def plot_position_feedback(csv_path: Path, plot_path: Path | None = None) -> Path:
+    """Build and save a PNG plot from the position evaluator CSV output."""
+    if plot_path is None:
+        plot_path = _resolve_plot_path(csv_path)
+
+    if plt is None:
+        raise RuntimeError(
+            "matplotlib is required to generate plots. Install it and retry."
+        )
+
+    elapsed: list[float] = []
+    command_erpm: list[float] = []
+    left_erpm: list[float] = []
+    right_erpm: list[float] = []
+
+    with csv_path.open("r", encoding="utf-8", newline="") as csv_file:
+        reader = csv.DictReader(csv_file)
+        for row in reader:
+            if not row:
+                continue
+            elapsed_s = row.get("elapsed_s", "")
+            command_value = row.get("commanded_velocity_erpm", "")
+            left_value = row.get("left_speed_erpm", "")
+            right_value = row.get("right_speed_erpm", "")
+            if command_value == "":
+                continue
+            try:
+                elapsed.append(float(elapsed_s) if elapsed_s else float(len(elapsed)))
+            except ValueError:
+                elapsed.append(float(len(elapsed)))
+            command_erpm.append(float(command_value))
+            left_erpm.append(float(left_value) if left_value else float("nan"))
+            right_erpm.append(float(right_value) if right_value else float("nan"))
+
+    if not command_erpm:
+        raise RuntimeError("No velocity rows found in CSV to plot.")
+
+    plt.figure(figsize=(12, 6))
+    x_values = elapsed
+    plt.plot(x_values, command_erpm, label="cmd_erpm", color="#1f77b4", linewidth=1.5)
+    if any(not math.isnan(value) for value in left_erpm):
+        plt.plot(x_values, left_erpm, label="left_feedback_erpm", color="#ff7f0e", linewidth=1.5)
+    if any(not math.isnan(value) for value in right_erpm):
+        plt.plot(x_values, right_erpm, label="right_feedback_erpm", color="#2ca02c", linewidth=1.5)
+
+    plt.xlabel("Elapsed time (s)")
+    plt.ylabel("Velocity (erpm)")
+    plt.title("Velocity command vs left/right motor feedback")
+    plt.legend()
+    plt.grid(True, linestyle="--", alpha=0.4)
+    plt.tight_layout()
+    plot_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(plot_path, dpi=150)
+    plt.close()
+    return plot_path
 
 def _write_csv_row(
     writer: csv.DictWriter,
@@ -349,40 +417,44 @@ def main() -> int:
 
             motor_left.set_velocity(commanded_erpm)
             motor_right.set_velocity(commanded_erpm)
-            time.sleep(args.phase_seconds)
 
-            sample_deadline = time.monotonic() + feedback_window_s
-            while time.monotonic() < sample_deadline:
-                left_status = read_status(motor_left, timeout_s=min(0.1, period_s))
-                right_status = read_status(motor_right, timeout_s=min(0.1, period_s))
-                sample = VelocitySample(
-                    commanded_velocity_erpm=commanded_erpm,
-                    left=left_status,
-                    right=right_status,
-                )
+            while time.monotonic() < deadline and previous_command < args.amplitude_erpm:
+                elapsed_s = time.monotonic() - run_start
+                target_erpm = previous_command + max_step_erpm
+                commanded_erpm = _clamp(target_erpm, -MIT_VELOCITY_LIMIT_ERPM, MIT_VELOCITY_LIMIT_ERPM)
+                previous_command = commanded_erpm
+                print(f"t={elapsed_s:.2f}s  cmd={commanded_erpm:+.0f} ERPM")
 
-                _check_fault_code(sample)
+                motor_left.set_velocity(commanded_erpm)
+                motor_right.set_velocity(commanded_erpm)
 
-                if csv_writer is not None:
-                    _write_csv_row(
-                        writer=csv_writer,
-                        csv_file=csv_file,
-                        run_start_time=run_start,
-                        sample_index=sample_index,
-                        sample=sample,
+                # Sample for the ENTIRE phase, not just a short burst after a silent sleep.
+                phase_deadline = time.monotonic() + args.phase_seconds
+                while time.monotonic() < phase_deadline:
+                    left_status = read_status(motor_left, timeout_s=min(0.1, period_s))
+                    right_status = read_status(motor_right, timeout_s=min(0.1, period_s))
+                    sample = VelocitySample(
+                        commanded_velocity_erpm=commanded_erpm,
+                        left=left_status,
+                        right=right_status,
                     )
+                    _check_fault_code(sample)
 
-                if sample.sync_error_erpm is not None:
-                    sync_errors.append(abs(sample.sync_error_erpm))
+                    if csv_writer is not None:
+                        _write_csv_row(
+                            writer=csv_writer,
+                            csv_file=csv_file,
+                            run_start_time=run_start,
+                            sample_index=sample_index,
+                            sample=sample,
+                        )
+                    if sample.sync_error_erpm is not None:
+                        sync_errors.append(abs(sample.sync_error_erpm))
+                    total_samples += int(sample.left is not None) + int(sample.right is not None)
+                    if sample_index % 10 == 0:
+                        _print_sample_line(elapsed_s, sample_index, sample)
+                    sample_index += 1
 
-                total_samples += int(sample.left is not None) + int(sample.right is not None)
-
-                if sample_index % 10 == 0:
-                    _print_sample_line(elapsed_s, sample_index, sample)
-
-                sample_index += 1
-
-                if time.monotonic() < sample_deadline:
                     time.sleep(feedback_interval_s)
 
             next_tick += period_s
@@ -399,6 +471,13 @@ def main() -> int:
                 f"max={max(sync_errors):.2f} ERPM  "
                 f"mean={sum(sync_errors)/len(sync_errors):.2f} ERPM"
             )
+
+        try:
+            plot_path = plot_position_feedback(csv_path)
+            print(f"Plot saved to: {plot_path}")
+        except Exception as exc:
+            print(f"Position plot not generated: {exc}")
+
         print(f"CSV log saved to: {csv_path}")
         return 0
 

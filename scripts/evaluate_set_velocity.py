@@ -8,8 +8,11 @@ This script mirrors the verification flow from `verify_set_velocity.py` but adds
 - RMSE reporting at the end.
 
 Examples:
-    .venv/bin/python scripts/evaluate_set_velocity.py --motor-id 0x03 --speed-erpm 3000 --motor-model AK60-6_V3.0
-    .venv/bin/python scripts/evaluate_set_velocity.py --motor-ids 0x03,0x04 --speed-erpm 2500 --motor-model AK80-6
+
+    sudo ./setup_can.sh
+    .venv/bin/python scripts/evaluate_set_velocity.py --motor-ids 0x01,0x02 --speed-erpm 2500 --motor-model AK60-6_V1.1
+    .venv/bin/python scripts/evaluate_set_velocity.py --motor-id 0x03 --speed-erpm 12000 --motor-model AK60-6_V3.0
+    .venv/bin/python scripts/evaluate_set_velocity.py --motor-ids 0x03,0x04 --speed-erpm 1000 --motor-model AK60-6_V3.0 --phase-seconds 1.5
 
 """
 # ruff: noqa: T201
@@ -78,8 +81,9 @@ def _resolve_csv_path(csv_path_arg: str | None, *, prefix: str) -> Path:
     """Resolve CSV output path from CLI args or timestamped default."""
     if csv_path_arg:
         return Path(csv_path_arg).expanduser().resolve()
+    args = parse_args()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return (Path("data/csv_logs") / f"{prefix}_{timestamp}.csv").resolve()
+    return (Path("data/csv_logs") / f"{prefix}_{timestamp}_{args.speed_erpm}_dual_motor_ak60v3.csv").resolve()
 
 
 @dataclass(frozen=True)
@@ -150,7 +154,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--phase-seconds",
         type=float,
-        default=5.0,
+        default=5,
         help="Duration of each signed velocity phase in seconds (default: 5.0)",
     )
     parser.add_argument(
@@ -244,13 +248,14 @@ def _command_phase(motor: CubeMarsBaseCAN, command_erpm: int) -> None:
     if command_erpm == 0:
         motor.set_mit_mode(pos_rad=0.0, vel_rad_s=0.0, kp=0.0, kd=2.0, torque_ff_nm=0.0)
         return
+    # motor.soft_start_velocity(command_erpm)
     motor.set_velocity(command_erpm)
 
 
 def _read_status(motor: CubeMarsBaseCAN, timeout: float):
     """Read freshest available feedback without long blocking."""
     status = motor._receive_feedback(timeout=timeout)
-    return status if status is not None else motor._last_feedback
+    return status
 
 
 def _resolve_plot_path(csv_path: Path) -> Path:
@@ -337,6 +342,7 @@ def run_synchronized_phase(  # noqa: C901, PLR0913
 ) -> list[PhaseSummary]:
     """Evaluate one synchronized phase and log both motors in one CSV row per sample."""
     for motor in motors:
+        print(f"Setting velocity for motor 0x{motor_entries[motors.index(motor)][0]:02X} to {command_erpm:+d} ERPM")
         _command_phase(motor, command_erpm)
 
     period_s = 1.0 / sample_hz

@@ -10,7 +10,8 @@ Primary controls:
 - --velocity-deg-s  : movement speed used for each segment
 
 Example:
-    .venv/bin/python scripts/mit_position_steps.py --motor-id 0x03 --angle-deg 30 --duration 180 --velocity-deg-s 20
+    sudo ./setup_can.sh
+    .venv/bin/python scripts/mit_position_steps.py --motor-id 0x01 --angle-deg 30 --duration 180 --velocity-deg-s 20 --motor-model AK60-6_V1.1
 
     sudo ./setup_can.sh
     .venv/bin/python scripts/mit_position_steps.py --motor-id 0x04 --angle-deg 30 --duration 180 --velocity-deg-s 40 --motor-model AK80-6

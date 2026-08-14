@@ -11,7 +11,7 @@ Typical use:
     sudo ./setup_can.sh
     .venv/bin/python scripts/dual_motor_sync_test.py \
         --left-id 0x03 --right-id 0x04 \
-        --left-motor-model AK80-6 --right-motor-model AK80-6 \
+        --left-motor-model AK60-6_V3.0 --right-motor-model AK60-6_V3.0 \
         --amplitude-deg 60 --freq-hz 0.2 --duration 30
 
 Example with a wider motion range:
@@ -32,6 +32,11 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
+
+try:
+    import matplotlib.pyplot as plt
+except ImportError:  # pragma: no cover
+    plt = None
 
 
 if __package__ in {None, ""}:
@@ -213,6 +218,91 @@ def _print_sample_line(elapsed_s: float, sample_index: int, sample: DualMotorSam
         f"sync={sync_str}{warn}"
     )
 
+
+# ---------------------------------------------------------------------------
+# Plotting
+# ---------------------------------------------------------------------------
+
+def _resolve_plot_path(csv_path: Path) -> Path:
+    """Return a PNG path that matches the CSV path, replacing the extension with .png."""
+    if csv_path.suffix.lower() == ".csv":
+        return csv_path.with_suffix(".png")
+    return csv_path.with_suffix(csv_path.suffix + ".png")
+
+
+def plot_dual_sync_feedback(csv_path: Path, plot_path: Path | None = None) -> Path:
+    """Build and save a PNG plot from the dual-motor sync test CSV output.
+
+    Plots commanded_position_deg, left_position_deg, and right_position_deg
+    against elapsed_s, so gaps in real time are shown honestly (unlike a
+    spreadsheet's default categorical x-axis, which spaces every row evenly
+    regardless of the actual time gap between samples).
+    """
+    if plot_path is None:
+        plot_path = _resolve_plot_path(csv_path)
+
+    if plt is None:
+        raise RuntimeError("matplotlib is required to generate plots. Install it and retry.")
+
+    elapsed: list[float] = []
+    command_deg: list[float] = []
+    left_deg: list[float] = []
+    right_deg: list[float] = []
+    sync_error_deg: list[float] = []
+
+    with csv_path.open("r", encoding="utf-8", newline="") as csv_file:
+        reader = csv.DictReader(csv_file)
+        for row in reader:
+            if not row:
+                continue
+            elapsed_s = row.get("elapsed_s", "")
+            command_value = row.get("commanded_position_deg", "")
+            left_value = row.get("left_position_deg", "")
+            right_value = row.get("right_position_deg", "")
+            sync_value = row.get("sync_error_deg", "")
+            if command_value == "":
+                continue
+            try:
+                elapsed.append(float(elapsed_s) if elapsed_s else float(len(elapsed)))
+            except ValueError:
+                elapsed.append(float(len(elapsed)))
+            command_deg.append(float(command_value))
+            left_deg.append(float(left_value) if left_value else float("nan"))
+            right_deg.append(float(right_value) if right_value else float("nan"))
+            sync_error_deg.append(float(sync_value) if sync_value else float("nan"))
+
+    if not command_deg:
+        raise RuntimeError("No position rows found in CSV to plot.")
+
+    fig, (ax_pos, ax_sync) = plt.subplots(
+        2, 1, figsize=(12, 8), sharex=True, gridspec_kw={"height_ratios": [3, 1]}
+    )
+
+    ax_pos.plot(elapsed, command_deg, label="commanded_position_deg", color="#1f77b4", linewidth=1.5)
+    if any(not math.isnan(value) for value in left_deg):
+        ax_pos.plot(elapsed, left_deg, label="left_position_deg", color="#ff7f0e", linewidth=1.5)
+    if any(not math.isnan(value) for value in right_deg):
+        ax_pos.plot(elapsed, right_deg, label="right_position_deg", color="#2ca02c", linewidth=1.5)
+    ax_pos.set_ylabel("Position (deg)")
+    ax_pos.set_title("Dual-motor sync test — commanded vs left/right position")
+    ax_pos.legend()
+    ax_pos.grid(True, linestyle="--", alpha=0.4)
+
+    if any(not math.isnan(value) for value in sync_error_deg):
+        ax_sync.plot(elapsed, sync_error_deg, color="#d62728", linewidth=1.2, label="sync_error_deg")
+        ax_sync.axhline(0.0, color="black", linewidth=0.8, alpha=0.5)
+        ax_sync.axhline(SYNC_DIFFERENCE_THRESHOLD_DEG, color="gray", linewidth=0.8, linestyle=":")
+        ax_sync.axhline(-SYNC_DIFFERENCE_THRESHOLD_DEG, color="gray", linewidth=0.8, linestyle=":")
+    ax_sync.set_xlabel("Elapsed time (s)")
+    ax_sync.set_ylabel("Sync error (deg)")
+    ax_sync.legend(loc="upper right", fontsize=8)
+    ax_sync.grid(True, linestyle="--", alpha=0.4)
+
+    plt.tight_layout()
+    plot_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(plot_path, dpi=150)
+    plt.close(fig)
+    return plot_path
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -426,6 +516,37 @@ def main() -> int:
             motor_left.set_position(target_position_deg)
             motor_right.set_position(target_position_deg)
 
+        # Read start position
+        left_start_status = read_status(motor_left, timeout_s=0.5)
+        right_start_status = read_status(motor_right, timeout_s=0.5)
+        if left_start_status is not None:
+            print(f"Left motor start position: {left_start_status.position_degrees:.2f}°")
+        if right_start_status is not None:
+            print(f"Right motor start position: {right_start_status.position_degrees:.2f}°")
+
+        # ---------------------------------------------------------------
+        # Main control loop — sinusoidal trajectory, same command to both
+        # ---------------------------------------------------------------
+        print(f"\nStarting synchronised sinusoidal sweep …")
+        print(f"  cmd(t) = {args.amplitude_deg:.1f}° · sin(2π · {args.freq_hz:.2f}Hz · t)\n")
+
+        run_start = time.monotonic()
+        deadline = run_start + args.duration
+        sample_index = 0
+        sync_errors: list[float] = []
+
+        next_tick = run_start
+        while time.monotonic() < deadline:
+            elapsed_s = time.monotonic() - run_start
+            commanded_deg = args.amplitude_deg * math.sin(2 * math.pi * args.freq_hz * elapsed_s)
+
+            target_position_deg = _clamp(commanded_deg, -MIT_POSITION_LIMIT_DEG, MIT_POSITION_LIMIT_DEG)
+
+            print(f"t={elapsed_s:.2f}s  cmd={target_position_deg:+.2f}°  sending command …")
+
+            motor_left.set_position(target_position_deg)
+            motor_right.set_position(target_position_deg)
+
             # Read feedback from both motors
             left_status = read_status(motor_left, timeout_s=min(0.5, period_s))
             right_status = read_status(motor_right, timeout_s=min(0.5, period_s))
@@ -472,6 +593,13 @@ def main() -> int:
             print(f"Sync error: min={min(sync_errors):.2f}°  max={max(sync_errors):.2f}°  mean={sum(sync_errors)/len(sync_errors):.2f}°")
             over_threshold = sum(1 for e in sync_errors if e > SYNC_DIFFERENCE_THRESHOLD_DEG)
             print(f"Samples over sync threshold ({SYNC_DIFFERENCE_THRESHOLD_DEG}°): {over_threshold} ({100*over_threshold/len(sync_errors):.1f}%)")
+
+        try:
+            plot_path = plot_dual_sync_feedback(csv_path)
+            print(f"Plot saved to: {plot_path}")
+        except Exception as exc:
+            print(f"Position plot not generated: {exc}")
+
         print(F"CSV log saved to: {csv_path}")
         return 0
 

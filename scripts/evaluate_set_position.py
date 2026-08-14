@@ -10,9 +10,9 @@ This script mirrors the ping-pong command pattern used by
 
 Examples:
     sudo ./setup_can.sh
-    .venv/bin/python scripts/evaluate_set_position.py --motor-id 0x03 --position-deg 45 --velocity-deg-s 25 --motor-model AK80-6
+    .venv/bin/python scripts/evaluate_set_position.py --motor-ids 0x02,0x01 --position-deg 45 --velocity-deg-s 25 --motor-model AK60-6_V1.1
     .venv/bin/python scripts/evaluate_set_position.py --motor-ids 0x03,0x04 --position-deg 30 --velocity-deg-s 20 --motor-model AK60-6_V3.0
-    .venv/bin/python scripts/evaluate_set_position.py --motor-ids 0x03,0x04 --position-deg 30 --velocity-deg-s 20 --motor-model AK80-6
+    .venv/bin/python scripts/evaluate_set_position.py --motor-id 0x04 --position-deg 30 --velocity-deg-s 90 --motor-model AK80-6
 
 """
 # ruff: noqa: T201
@@ -270,10 +270,13 @@ def run_synchronized_phase(  # noqa: C901, PLR0912, PLR0913, PLR0915
     control_hz: float,
     sample_hz: float,
     run_start: float,
+    start_position_deg: float = 0.0,
     sample_logger: Callable[[dict[str, str | int]], None] | None = None,
 ) -> list[PhaseSummary]:
     """Command one position target to both motors in sync and log paired rows."""
-    segment_time = abs(command_position_deg) / max(velocity_deg_s, 1e-9)
+
+    ramp_distance_deg = abs(command_position_deg - start_position_deg)
+    segment_time = ramp_distance_deg / max(velocity_deg_s, 1e-9)
     phase_duration_s = segment_time + hold_seconds
     sample_period_s = 1.0 / sample_hz
     move_steps = max(1, round(segment_time * control_hz))
@@ -289,16 +292,20 @@ def run_synchronized_phase(  # noqa: C901, PLR0912, PLR0913, PLR0915
     command_timestamps = []
     feedback_latencies = [[] for _ in motors]
 
-    # Move smoothly to the commanded target for every motor in the same time window.
-    move_end = time.monotonic() + segment_time
+
+    move_start = time.monotonic()
+    move_end = move_start + segment_time
     while time.monotonic() < move_end:
         if time.monotonic() >= deadline:
             break
 
-        step_progress = (time.monotonic() - (move_end - segment_time)) / max(segment_time, 1e-9)
-        u = _clamp(step_progress, 0.0, 1.0)
-        smooth_u = (3.0 * u * u) - (2.0 * u * u * u) #Reduces sudden changes in commanded position. Produces smoother acceleration and deceleration.
-        cmd_deg = command_position_deg * smooth_u
+        elapsed_move = time.monotonic() - move_start
+        u = _clamp(elapsed_move / max(segment_time, 1e-9), 0.0, 1.0)
+        smooth_u = 0.5 * (1.0 - math.cos(math.pi * u))
+
+        # Ramp from start_position_deg -> command_position_deg, not 0 -> command_position_deg.
+        cmd_deg = start_position_deg + (command_position_deg - start_position_deg) * smooth_u
+
         command_history.append(   # store commanded position for logging
             (time.monotonic(), cmd_deg)
         )
@@ -709,6 +716,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
             run_start = time.monotonic()
             all_errors: list[float] = []
             phase_count = 0
+            next_start_position_deg = 0.0
 
             for cycle in range(1, args.repeats + 1):
                 for direction in (+1, -1):
@@ -725,8 +733,11 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
                         control_hz=args.control_hz,
                         sample_hz=args.sample_hz,
                         run_start=run_start,
+                        start_position_deg = next_start_position_deg,
                         sample_logger=write_sample_row,
                     )
+                    last_status = _read_status(motors[0], timeout=0.1)  # or average across motors if needed
+                    next_start_position_deg = target_deg
                     for phase_summary in phase_summaries:
                         if phase_summary.sample_errors_deg:
                             all_errors.extend(phase_summary.sample_errors_deg)
