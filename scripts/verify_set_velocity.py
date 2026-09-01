@@ -10,10 +10,10 @@ This script is intentionally simple and strict:
 
 Run:
     sudo ./setup_can.sh
-    .venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03
+    .venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03 --phase-seconds 5
 
     sudo ./setup_can.sh
-    .venv/bin/python scripts/verify_set_velocity.py --motor-id 0x04 --velocity-erpm 3000 --motor-model AK80-6
+    .venv/bin/python scripts/verify_set_velocity.py --motor-id 0x03 --phase-seconds 5 --velocity-erpm -12000 --motor-model AK80-6 --forward-only
 """
 # ruff: noqa: T201
 
@@ -37,7 +37,7 @@ from motor_python.utils import CsvStreamWriter
 SEPARATOR = "=" * 78
 HEALTHY_TX_ERR_MAX = 96
 HEALTHY_RX_ERR_MAX = 64
-VERIFY_VELOCITY_MIN_ERPM = -5000
+VERIFY_VELOCITY_MIN_ERPM = -12000
 VERIFY_VELOCITY_MAX_ERPM = 12000
 VERIFY_VELOCITY_MIN_RAD = -10.0
 VERIFY_VELOCITY_MAX_RAD = 10.0
@@ -147,7 +147,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--phase-seconds",
         type=float,
-        default=120.0,
+        default=5.0,
         help="Duration for each velocity phase in seconds (default: 120.0)",
     )
     parser.add_argument(
@@ -530,6 +530,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
         print("PASS: motor communication verified")
 
         motor.send_neutral_command()
+        motor.zero_position()
 
         if not motor.check_communication():
             print("FAIL: communication check failed (no feedback)")

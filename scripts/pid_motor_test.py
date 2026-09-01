@@ -12,7 +12,7 @@ This script is intentionally simple and strict:
 Example:
 
     sudo ./setup_can.sh
-    .venv/bin/python scripts/pid_motor_test.py --target 120 --duration 3
+    .venv/bin/python scripts/pid_motor_test.py --target 50 --duration 3
 """
 
 # ruff: noqa: T201
