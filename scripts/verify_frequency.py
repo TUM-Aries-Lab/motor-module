@@ -12,7 +12,7 @@ It answer "Does the implemented refresh loop achieve the requested update freque
 
 Run:
     sudo ./setup_can.sh
-    .venv/bin/python scripts/verify_frequency.py --motor-model AK80-6 --motor-id 0x04
+    .venv/bin/python scripts/verify_frequency.py --motor-model AK80-6 --motor-id 0x03
 """
 
 from __future__ import annotations
@@ -332,17 +332,19 @@ def plot_results(
     jitter_ratio = [result.loop_jitter_ratio or 0.0 for result in results]
     actual_speed = [float(result.actual_speed_erpm) if result.actual_speed_erpm is not None else float("nan") for result in results]
     commanded_speed = [float(result.command_erpm) for result in results]
+    args = parse_args()
 
-    fig, (ax1, ax2, ax3, ax4, ax5) = plt.subplots(5, 1, figsize=(10, 17), sharex=True)
+    # fig, (ax1, ax2, ax3, ax4, ax5) = plt.subplots(5, 1, figsize=(10, 17), sharex=True)
+    fig, (ax1) = plt.subplots(1, 1, figsize=(18, 12), sharex=True)
     subtitle = (
         f"Tolerance: ±{tolerance_hz:.1f} Hz"
         if tolerance_hz is not None
         else ""
     )
     fig.suptitle(
-        f"Set frequency vs actual CAN refresh frequency for {CAN_DEFAULTS.motor_control_rate_hz} Hz"
+        f"Set frequency vs actual CAN refresh frequency for {args.motor_model} Hz"
         + (f"\n{subtitle}" if subtitle else ""),
-        fontsize=16,
+        fontsize=20,
         fontweight="bold",
     )
     fig.subplots_adjust(top=0.92)
@@ -360,49 +362,52 @@ def plot_results(
     if max_stable_hz is not None:
         ax1.axvline(max_stable_hz, color="#d62728", linestyle=":", linewidth=2, label="max stable frequency")
         ax1.annotate(
-            f"Max stable: {max_stable_hz:.1f} Hz",
+            f"Max stable: ~{max_stable_hz:.1f} Hz",
             xy=(max_stable_hz, max_stable_hz),
             xytext=(max_stable_hz + 10, max_stable_hz - 40),
             textcoords="data",
             arrowprops={"arrowstyle": "->", "color": "#d62728"},
             color="#d62728",
+            fontsize=22,
         )
-    ax1.set_ylabel("Actual loop frequency (Hz)")
+    ax1.set_ylabel("Actual loop frequency (Hz)", fontsize=20)
+    ax1.set_xlabel("Set frequency (Hz)", fontsize=20)
+    ax1.tick_params(axis="both", labelsize=20)
     ax1.grid(alpha=0.3)
-    ax1.legend()
+    ax1.legend(fontsize=20)
 
-    ax2.plot(x, error, marker="o", linestyle="-", color="#2ca02c", label="error (Hz)")
-    ax2.set_ylabel("Error (Hz)", color="#2ca02c")
-    ax2.tick_params(axis="y", labelcolor="#2ca02c")
-    ax2.grid(alpha=0.3)
+    # ax2.plot(x, error, marker="o", linestyle="-", color="#2ca02c", label="error (Hz)")
+    # ax2.set_ylabel("Error (Hz)", color="#2ca02c")
+    # ax2.tick_params(axis="y", labelcolor="#2ca02c")
+    # ax2.grid(alpha=0.3)
 
-    ax2_secondary = ax2.twinx()
-    ax2_secondary.plot(x, relative_error, marker="s", linestyle="--", color="#9467bd", label="relative error (%)")
-    ax2_secondary.set_ylabel("Relative error (%)", color="#9467bd")
-    ax2_secondary.tick_params(axis="y", labelcolor="#9467bd")
+    # ax2_secondary = ax2.twinx()
+    # ax2_secondary.plot(x, relative_error, marker="s", linestyle="--", color="#9467bd", label="relative error (%)")
+    # ax2_secondary.set_ylabel("Relative error (%)", color="#9467bd")
+    # ax2_secondary.tick_params(axis="y", labelcolor="#9467bd")
 
-    handles2, labels2 = ax2.get_legend_handles_labels()
-    handles2b, labels2b = ax2_secondary.get_legend_handles_labels()
-    ax2.legend(handles2 + handles2b, labels2 + labels2b, loc="upper left")
+    # handles2, labels2 = ax2.get_legend_handles_labels()
+    # handles2b, labels2b = ax2_secondary.get_legend_handles_labels()
+    # ax2.legend(handles2 + handles2b, labels2 + labels2b, loc="upper left")
 
-    ax3.plot(x, missed_feedback, marker="D", linestyle="-", color="#d62728", label="missed feedback")
-    ax3.set_ylabel("Cumulative missed feedback", color="#d62728")
-    ax3.tick_params(axis="y", labelcolor="#d62728")
-    ax3.grid(alpha=0.3)
-    ax3.legend(loc="upper left")
+    # ax3.plot(x, missed_feedback, marker="D", linestyle="-", color="#d62728", label="missed feedback")
+    # ax3.set_ylabel("Cumulative missed feedback", color="#d62728")
+    # ax3.tick_params(axis="y", labelcolor="#d62728")
+    # ax3.grid(alpha=0.3)
+    # ax3.legend(loc="upper left")
 
-    ax4.plot(x, jitter_ratio, marker="^", linestyle="-", color="#17becf", label="jitter ratio")
-    ax4.set_ylabel("Jitter ratio", color="#17becf")
-    ax4.tick_params(axis="y", labelcolor="#17becf")
-    ax4.grid(alpha=0.3)
-    ax4.legend(loc="upper left")
+    # ax4.plot(x, jitter_ratio, marker="^", linestyle="-", color="#17becf", label="jitter ratio")
+    # ax4.set_ylabel("Jitter ratio", color="#17becf")
+    # ax4.tick_params(axis="y", labelcolor="#17becf")
+    # ax4.grid(alpha=0.3)
+    # ax4.legend(loc="upper left")
 
-    ax5.plot(x, actual_speed, marker="o", linestyle="-", color="#1f77b4", label="actual speed")
-    ax5.plot(x, commanded_speed, linestyle="--", color="#ff7f0e", label="commanded speed")
-    ax5.set_xlabel("Target refresh frequency (Hz)")
-    ax5.set_ylabel("Speed (ERPM)")
-    ax5.grid(alpha=0.3)
-    ax5.legend(loc="upper left")
+    # ax5.plot(x, actual_speed, marker="o", linestyle="-", color="#1f77b4", label="actual speed")
+    # ax5.plot(x, commanded_speed, linestyle="--", color="#ff7f0e", label="commanded speed")
+    # ax5.set_xlabel("Target refresh frequency (Hz)")
+    # ax5.set_ylabel("Speed (ERPM)")
+    # ax5.grid(alpha=0.3)
+    # ax5.legend(loc="upper left")
 
     fig.tight_layout()
     fig.savefig(path, dpi=150)

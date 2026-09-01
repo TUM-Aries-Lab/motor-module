@@ -12,13 +12,13 @@ Typical use:
     .venv/bin/python scripts/dual_motor_sync_test.py \
         --left-id 0x03 --right-id 0x04 \
         --left-motor-model AK60-6_V3.0 --right-motor-model AK60-6_V3.0 \
-        --amplitude-deg 60 --freq-hz 0.2 --duration 30
+        --amplitude-deg 45 --freq-hz 0.8 --duration 20
 
 Example with a wider motion range:
     .venv/bin/python scripts/dual_motor_sync_test.py \
-        --left-id 0x01 --right-id 0x02 \
+        --left-id 0x03 --right-id 0x04 \
         --left-motor-model AK80-6 --right-motor-model AK80-6 \
-        --amplitude-deg 45 --freq-hz 0.8 --duration 60
+        --amplitude-deg 60 --freq-hz 0.8 --duration 20
 """
 
 # ruff: noqa: T201
@@ -411,7 +411,7 @@ def main() -> int:
     csv_path = (
         Path(args.csv_path)
         if args.csv_path is not None
-        else Path("data/csv_logs") / f"dual_sync_{timestamp}.csv"
+        else Path("data/csv_logs") / f"dual_sync_{args.amplitude_deg}_loaded_{timestamp}.csv"
     )
 
     print(SEPARATOR)
@@ -511,8 +511,6 @@ def main() -> int:
 
             target_position_deg = _clamp(commanded_deg, -MIT_POSITION_LIMIT_DEG, MIT_POSITION_LIMIT_DEG)
 
-            print(f"t={elapsed_s:.2f}s  cmd={target_position_deg:+.2f}°  sending command …")
-
             motor_left.set_position(target_position_deg)
             motor_right.set_position(target_position_deg)
 
@@ -541,8 +539,6 @@ def main() -> int:
             commanded_deg = args.amplitude_deg * math.sin(2 * math.pi * args.freq_hz * elapsed_s)
 
             target_position_deg = _clamp(commanded_deg, -MIT_POSITION_LIMIT_DEG, MIT_POSITION_LIMIT_DEG)
-
-            print(f"t={elapsed_s:.2f}s  cmd={target_position_deg:+.2f}°  sending command …")
 
             motor_left.set_position(target_position_deg)
             motor_right.set_position(target_position_deg)

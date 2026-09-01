@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Evaluate `set_position()` for single or dual CAN motors.
 
-This script mirrors the ping-pong command pattern used by
-`mit_position_steps.py`, but it is geared toward evaluation:
+This script runs the motor in the ping-pong command pattern and it is geared toward evaluation:
 - choose a single motor or two motors from the CLI,
 - command `+position_deg` and `-position_deg` repeatedly,
 - log all feedback samples into a CSV,
@@ -11,8 +10,8 @@ This script mirrors the ping-pong command pattern used by
 Examples:
     sudo ./setup_can.sh
     .venv/bin/python scripts/evaluate_set_position.py --motor-ids 0x02,0x01 --position-deg 45 --velocity-deg-s 25 --motor-model AK60-6_V1.1
-    .venv/bin/python scripts/evaluate_set_position.py --motor-ids 0x03,0x04 --position-deg 650 --velocity-deg-s 360 --motor-model AK80-6
-    .venv/bin/python scripts/evaluate_set_position.py --position-deg 650 --velocity-deg-s 180 --motor-model AK80-6 --motor-id 0x03
+    .venv/bin/python scripts/evaluate_set_position.py --position-deg 650 --velocity-deg-s 360 --motor-model AK60-6_V3.0 --motor-ids 0x03,0x04
+    .venv/bin/python scripts/evaluate_set_position.py --position-deg 650 --velocity-deg-s 360 --motor-model AK60-6_V3.0 --motor-id 0x03
 
 """
 # ruff: noqa: T201
@@ -95,7 +94,7 @@ def _resolve_csv_path(csv_path_arg: str | None, *, prefix: str) -> Path:
         return Path(csv_path_arg).expanduser().resolve()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     args = parse_args()
-    return (Path("data/csv_logs") / f"{prefix}_{timestamp}_{args.position_deg}.csv").resolve()
+    return (Path("data/csv_logs") / f"{prefix}_dual_{args.position_deg}_deg_loaded_{timestamp}.csv").resolve()
 
 
 def _clamp(value: float, min_value: float, max_value: float) -> float:
@@ -743,6 +742,24 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
                         if phase_summary.sample_errors_deg:
                             all_errors.extend(phase_summary.sample_errors_deg)
 
+            # Return motor to zero position after the evaluation
+            print("\nReturning motor to zero position...")
+
+            run_synchronized_phase(
+                motors,
+                motor_ids,
+                phase_index=phase_count + 1,
+                command_position_deg=0.0,
+                velocity_deg_s=args.velocity_deg_s,
+                hold_seconds=args.hold_seconds,
+                control_hz=args.control_hz,
+                sample_hz=args.sample_hz,
+                run_start=run_start,
+                start_position_deg=next_start_position_deg,
+                sample_logger=write_sample_row,
+            )
+
+            next_start_position_deg = 0.0
             total_rmse = _rmse(all_errors)
             print(f"\n{SEPARATOR}")
             if total_rmse is None:
