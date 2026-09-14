@@ -108,40 +108,11 @@ def main() -> int:
             print("FAIL: communication check failed")
             return 1
 
-        # TODO: discuss -->  motor only responds when you do a get_status after set_velocity
         print("Sending velocity command...")
         motor.send_neutral_command()  # send neutral command to keep motor in MIT mode
         motor.set_velocity(args.velocity_erpm)
-        # status = motor.get_status()
-        # # print(f"pos={status.position_degrees:.2f} deg  vel={status.speed_erpm:.2f}")
-        # motor.send_neutral_command()  # send neutral command to keep motor in MIT mode
         print(f"Holding for {args.duration:.2f} seconds...")
         time.sleep(args.duration)
-
-        # TODO: discuss --> I think motor respond to this part of code  so we need to continuously send the command in a loop. However, it is not working everytime
-        # print(f"Sending velocity command...{args.velocity_erpm} ERPM")
-        # t0 = time.time()
-
-        # while time.time() - t0 < args.duration:
-        #     # IMPORTANT: continuous command (NOT one-shot)
-        #     motor.set_velocity(args.velocity_erpm)
-
-        #     status = motor.get_status()
-
-        #     logger.log(
-        #         cmd_pos=0.0,
-        #         cmd_vel=args.velocity_erpm,
-        #         cmd_tau=0.0,
-        #         act_pos=status.position_degrees,
-        #         act_vel=status.speed_erpm,
-        #         act_current=status.current_amps,
-        #         temperature=status.temperature_celsius,
-        #     )
-
-        #     print(f"pos={status.position_degrees:.2f} deg  vel={status.speed_erpm:.2f}")
-
-        #     time.sleep(0.01)  # 100 Hz (remove the hardcoded value later)
-
 
 
         print("Stopping motor...")

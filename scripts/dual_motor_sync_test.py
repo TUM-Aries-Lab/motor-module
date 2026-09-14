@@ -55,8 +55,8 @@ SEPARATOR = "=" * 72
 HEALTHY_TX_ERR_MAX = 96
 HEALTHY_RX_ERR_MAX = 64
 
-MIT_POSITION_LIMIT_DEG = math.degrees(12.5) # TODO: do this in main
-SYNC_DIFFERENCE_THRESHOLD_DEG = 5.0  # degrees...also move this to main
+MIT_POSITION_LIMIT_DEG = math.degrees(12.5)
+SYNC_DIFFERENCE_THRESHOLD_DEG = 5.0
 
 
 CSV_FIELDNAMES = [

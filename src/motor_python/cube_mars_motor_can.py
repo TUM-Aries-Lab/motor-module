@@ -1135,7 +1135,6 @@ class CubeMarsBaseCAN(BaseMotor):
     def set_position(self, position_degrees: float) -> None:
         """Position loop in MIT mode using default ``kp/kd`` gains."""
         pos_rad = float(np.deg2rad(position_degrees))
-        # self.zero_position()  # TODO: discuss if it is needed here
         self.set_mit_mode(
             pos_rad=pos_rad,
             vel_rad_s=0.0,

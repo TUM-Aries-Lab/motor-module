@@ -15,8 +15,6 @@ Run:
     sudo ./setup_can.sh
     .venv/bin/python scripts/mit_mode_test.py --motor-model AK80-6 --include-spin-tests
 
-    IMPORTANT FOR SAKSHI: The parts where torque is commanded (torque feedforward and set_current) are commented out to avoid unexpected fast spinning. If motor spins too fast, it is made to stop immediately. Thats what happens in these 2 parts
-    When I changed torque to 0.2, it is better now.
     """
 # ruff: noqa: T201, PLR0915, S110
 
@@ -399,7 +397,6 @@ def main() -> int:  # noqa: C901, PLR0912
             )
 
 
-        # TODO: discuss if this is correct, because the motor spins extremely fast when we command a torque (even 0.5 Nm).
             print("- torque feedforward")
             motor.set_mit_mode(
                 pos_rad=0.0,
@@ -446,7 +443,6 @@ def main() -> int:  # noqa: C901, PLR0912
                 motor.get_status(),
             )
 
-            # TODO: discuss if this is correct, because the motor spins extremely fast when we command a torque (even 0.5 Nm).
             section("6) set_current() helper (maps to MIT torque)")
             motor.set_current(args.torque_nm)
             hold_and_log(motor, args.step_seconds, "set_current")

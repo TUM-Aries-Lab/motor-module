@@ -10,7 +10,7 @@ This script runs the motor in the ping-pong command pattern and it is geared tow
 Examples:
     sudo ./setup_can.sh
     .venv/bin/python scripts/evaluate_set_position.py --motor-ids 0x02,0x01 --position-deg 45 --velocity-deg-s 25 --motor-model AK60-6_V1.1
-    .venv/bin/python scripts/evaluate_set_position.py --position-deg 650 --velocity-deg-s 360 --motor-model AK60-6_V3.0 --motor-ids 0x03,0x04
+    .venv/bin/python scripts/evaluate_set_position.py --position-deg 360 --velocity-deg-s 360 --motor-model AK80-6 --motor-ids 0x03,0x04
     .venv/bin/python scripts/evaluate_set_position.py --position-deg 650 --velocity-deg-s 360 --motor-model AK60-6_V3.0 --motor-id 0x03
 
 """
