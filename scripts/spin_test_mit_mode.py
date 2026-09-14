@@ -73,39 +73,6 @@ def spin(motor: CubeMarsAK606v3CAN | CubeMarsAK806v2CAN, direction: int, duratio
     motor.set_velocity(erpm)
     time.sleep(duration)  # give the motor a moment to respond
 
-    # t0 = time.time()
-    # while time.time() - t0 < duration:
-    #     # TODO: Both are working right now, check which one makes sense to use here
-    #     # motor.set_mit_mode(
-    #     #     pos_rad=0.0,
-    #     #     vel_rad_s=2.0 * direction,
-    #     #     kp=0.5,
-    #     #     kd=0.2,
-    #     #     torque_ff_nm=3.0 * direction
-    #     # )
-    #     motor.set_velocity(erpm)
-
-    #     status = motor.get_status()
-
-    #     pos = motor.get_position()
-    #     vel = motor.get_speed()
-
-    #     logger.log(
-    #             cmd_pos=0.0,
-    #             cmd_vel=erpm,
-    #             cmd_tau=0.0,
-    #             act_pos=status.position_degrees,
-    #             act_vel=status.speed_erpm,
-    #             act_current=status.current_amps,
-    #             temperature=status.temperature_celsius,
-    #         )
-
-
-    #     if pos is not None:
-    #         print(f"pos={pos:.2f} deg  vel={vel:.2f}")
-
-        # time.sleep(0.01)
-
     motor.stop()
 
 

@@ -1,7 +1,5 @@
 """Clock-arm motor accuracy test.
 
-TODO: discuss why this class still uses set_duty_cycle even though we use MIT mode. The method is not even implemented
-
 Attaches to the motor via CAN and moves the arm through clock-like positions
 using only the CubeMarsAK606v3CAN class methods — no raw CAN structs, no
 manual PID.

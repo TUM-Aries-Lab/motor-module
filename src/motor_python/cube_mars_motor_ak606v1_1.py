@@ -219,7 +219,7 @@ class CubeMarsAK606v1CAN(CubeMarsBaseCAN):  # pragma: no cover
             f"Sending velocity command: {velocity_erpm} ERPM ({vel_rad_s:.3f} rad/s)"
         )
 
-        self.set_mit_mode(  # TODO
+        self.set_mit_mode(
             pos_rad=0.0,
             vel_rad_s=vel_rad_s,
             kp=0.0,

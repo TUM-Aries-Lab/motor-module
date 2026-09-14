@@ -186,9 +186,5 @@ tmp/
 CSV/
 data/csv_logs/*.csv
 data/csv_logs/*.png
-data/csv_logs_old/*.csv
-data/csv_logs_old/*.png
-data/test/*.csv
-data/test/*.png
 !data/csv_logs/.gitkeep
 repo_tree.py
