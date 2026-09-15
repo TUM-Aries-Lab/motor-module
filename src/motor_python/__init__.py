@@ -11,8 +11,8 @@ from typing import Literal
 
 from motor_python.base_motor import BaseMotor
 from motor_python.cube_mars_motor import CubeMarsAK606v3, CubeMarsAK806v2
-from motor_python.cube_mars_motor_ak606v1_1 import CubeMarsAK606v1CAN
 from motor_python.cube_mars_motor_can import (
+    CubeMarsAK606v1CAN,
     CubeMarsAK606v3CAN,
     CubeMarsAK806v2CAN,
     CubeMarsBaseCAN,

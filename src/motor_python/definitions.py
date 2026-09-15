@@ -327,7 +327,7 @@ AK60_6_V1_1_MOTOR_SPEC = MotorSpec(
     min_velocity_electrical_rpm=-7840,  # -560 RPM * 14 pole pairs
     mit_position_kp=10.0,
     mit_position_kd=1.0,
-    mit_velocity_kd=1.8,
+    mit_velocity_kd=1.0,
     mit_mode_limits=AK60_6_V1_1_MIT_LIMITS,
 )
 
