@@ -84,6 +84,33 @@ def erpm_to_degrees_per_second(
     )
 
 
+def float_to_uint(value: float, v_min: float, v_max: float, n_bits: int) -> int:
+    """Convert a float to an n-bit unsigned integer with saturation."""
+    span = v_max - v_min
+    if span <= 0:
+        raise ValueError("Invalid range: v_max must be greater than v_min")
+    if n_bits <= 0:
+        raise ValueError("n_bits must be > 0")
+
+    max_int = (1 << n_bits) - 1
+    value_clamped = min(max(value, v_min), v_max)
+    if value_clamped <= v_min:
+        return 0
+    if value_clamped >= v_max:
+        return max_int
+    raw = int(((value_clamped - v_min) * max_int) / span)
+    return max(0, min(raw, max_int))
+
+
+def uint_to_float(raw: int, v_min: float, v_max: float, n_bits: int) -> float:
+    """Convert an n-bit unsigned integer back to a physical float value."""
+    max_int = (1 << n_bits) - 1
+    if max_int <= 0:
+        raise ValueError("n_bits must be > 0")
+    raw_clamped = max(0, min(int(raw), max_int))
+    return (raw_clamped * (v_max - v_min) / max_int) + v_min
+
+
 class CsvStreamWriter:
     """Small wrapper for writing dict rows to a CSV file with automatic flush."""
 

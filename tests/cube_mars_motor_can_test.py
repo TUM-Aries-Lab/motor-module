@@ -11,7 +11,7 @@ import pytest
 from motor_python.base_motor import MotorState
 from motor_python.can_protocol import CANControlMode
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
-from motor_python.mit_mode_packer import AK60_6_V3_0_MIT_LIMITS, pack_mit_frame
+from motor_python.utils import float_to_uint
 
 
 def _make_feedback_msg(
@@ -198,14 +198,7 @@ class TestMITCommandPath:
             pos_rad=1.0, vel_rad_s=2.0, kp=30.0, kd=1.5, torque_ff_nm=3.0
         )
 
-        expected = pack_mit_frame(
-            1.0,
-            2.0,
-            30.0,
-            1.5,
-            3.0,
-            limits=AK60_6_V3_0_MIT_LIMITS,
-        )
+        expected = b"\x0fT\xcc\x8a0\x849\xff"
         mit_arb_id = (CANControlMode.MIT_MODE << 8) | motor.motor_can_id
 
         mit_msgs = [
@@ -329,3 +322,76 @@ class TestFeedbackAndCommunication:
         feedback = motor._parse_feedback_msg(msg)
         assert feedback is not None
         assert feedback.error_code == 9
+
+
+class TestPackMITFrame:
+    def test_pack_mit_frame_uses_manual_byte_order(self, motor):
+        # Pick deterministic values and compare against manual byte mapping.
+        p_int = float_to_uint(
+            1.0,
+            motor._motor_spec.mit_mode_limits.p_min,
+            motor._motor_spec.mit_mode_limits.p_max,
+            16,
+        )
+        v_int = float_to_uint(
+            2.0,
+            motor._motor_spec.mit_mode_limits.v_min,
+            motor._motor_spec.mit_mode_limits.v_max,
+            12,
+        )
+        kp_int = float_to_uint(
+            30.0,
+            motor._motor_spec.mit_mode_limits.kp_min,
+            motor._motor_spec.mit_mode_limits.kp_max,
+            12,
+        )
+        kd_int = float_to_uint(
+            1.5,
+            motor._motor_spec.mit_mode_limits.kd_min,
+            motor._motor_spec.mit_mode_limits.kd_max,
+            12,
+        )
+        t_int = float_to_uint(
+            3.0,
+            motor._motor_spec.mit_mode_limits.t_min,
+            motor._motor_spec.mit_mode_limits.t_max,
+            12,
+        )
+
+        expected = bytes(
+            [
+                kp_int >> 4,
+                ((kp_int & 0xF) << 4) | (kd_int >> 8),
+                kd_int & 0xFF,
+                p_int >> 8,
+                p_int & 0xFF,
+                v_int >> 4,
+                ((v_int & 0xF) << 4) | (t_int >> 8),
+                t_int & 0xFF,
+            ]
+        )
+
+        payload = motor.pack_mit_frame(
+            1.0, 2.0, 30.0, 1.5, 3.0, limits=motor._motor_spec.mit_mode_limits
+        )
+        assert payload == expected
+
+    def test_pack_mit_frame_ak60_6_limits_are_enforced(self, motor):
+        payload = motor.pack_mit_frame(
+            999.0, 999.0, 999.0, 999.0, 999.0, limits=motor._motor_spec.mit_mode_limits
+        )
+
+        # Decode only boundary-sensitive fields to confirm top saturation.
+        kp_high = payload[0]
+        kp_low = payload[1] >> 4
+        kp_raw = (kp_high << 4) | kp_low
+
+        kd_high = payload[1] & 0xF
+        kd_low = payload[2]
+        kd_raw = (kd_high << 8) | kd_low
+
+        pos_raw = (payload[3] << 8) | payload[4]
+
+        assert kp_raw == (1 << 12) - 1
+        assert kd_raw == (1 << 12) - 1
+        assert pos_raw == (1 << 16) - 1

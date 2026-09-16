@@ -6,13 +6,6 @@ from pathlib import Path
 
 import numpy as np
 
-from motor_python.mit_mode_packer import (
-    AK60_6_V1_1_MIT_LIMITS,
-    AK60_6_V3_0_MIT_LIMITS,
-    AK80_6_MIT_LIMITS,
-    MITModeLimits,
-)
-
 np.set_printoptions(precision=3, floatmode="fixed", suppress=True)
 
 
@@ -104,6 +97,65 @@ class CANDefaults:
     mit_velocity_kd: float = 0.2  # Conservative default damping for MIT velocity mode to reduce start-up torque spikes
     retry_backoff: float = 0.01  # Base backoff time for retries (seconds)
     can_reset_pause: float = 0.1  # Small Pause after CAN bus reset (seconds)
+
+
+@dataclass(frozen=True)
+class MITModeLimits:
+    """Physical limits for CubeMars Force Control Mode fields."""
+
+    p_min: float
+    p_max: float
+    v_min: float
+    v_max: float
+    t_min: float
+    t_max: float
+    kp_min: float
+    kp_max: float
+    kd_min: float
+    kd_max: float
+
+
+# AK60-6 limits from CubeMars manual force-control parameter table. (Page 39)
+AK60_6_V3_0_MIT_LIMITS = MITModeLimits(
+    p_min=-12.56,
+    p_max=12.56,
+    v_min=-60.0,
+    v_max=60.0,
+    t_min=-12.0,
+    t_max=12.0,
+    kp_min=0.0,
+    kp_max=500.0,
+    kd_min=0.0,
+    kd_max=5.0,
+)
+
+# AK80-6 KV100 V2.0 limits (from CubeMars manual parameter table. (Page 42))
+AK80_6_MIT_LIMITS = MITModeLimits(
+    p_min=-12.56,
+    p_max=12.56,
+    v_min=-76.0,
+    v_max=76.0,
+    t_min=-12.0,
+    t_max=12.0,
+    kp_min=0.0,
+    kp_max=500.0,
+    kd_min=0.0,
+    kd_max=5.0,
+)
+
+# AK60-6 V1.1 limits (from CubeMars manual parameter table. (Page 63))
+AK60_6_V1_1_MIT_LIMITS = MITModeLimits(
+    p_min=-12.5,
+    p_max=12.5,
+    v_min=-45.0,
+    v_max=45.0,
+    t_min=-15.0,
+    t_max=15.0,
+    kp_min=0.0,
+    kp_max=500.0,
+    kd_min=0.0,
+    kd_max=5.0,
+)
 
 
 @dataclass(frozen=True)
