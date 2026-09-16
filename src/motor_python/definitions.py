@@ -135,6 +135,9 @@ class MotorModel(StrEnum):
     AK60_6V1 = "AK60-6_V1.1"
 
 
+EXTENDED_FORMAT_MOTOR_MODELS = {MotorModel.AK60_6V3}
+
+
 @dataclass(frozen=True)
 class FrameBytes:
     """Motor protocol frame bytes."""
