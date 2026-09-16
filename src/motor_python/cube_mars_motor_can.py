@@ -29,12 +29,8 @@ from motor_python.definitions import (
     MotorSpec,
     PIDConfig,
 )
-from motor_python.mit_mode_packer import (
-    AK60_6_V3_0_MIT_LIMITS,
-    float_to_uint,
-    uint_to_float,
-)
 from motor_python.pid_controller import PIDController
+from motor_python.utils import float_to_uint, uint_to_float
 
 # ruff: noqa: ERA001
 
@@ -439,9 +435,11 @@ class CubeMarsBaseCAN(BaseMotor):
         kp: float,
         kd: float,
         t_ff: float,
-        limits: MITModeLimits,
+        limits: MITModeLimits | None = None,
     ) -> bytes:
         """Pack MIT command frame for AK80-6 V2 and AK60-6 v1.1."""
+        if limits is None:
+            limits = self._motor_spec.mit_mode_limits
         p_int = float_to_uint(p_des, limits.p_min, limits.p_max, 16)
         v_int = float_to_uint(v_des, limits.v_min, limits.v_max, 12)
         kp_int = float_to_uint(kp, limits.kp_min, limits.kp_max, 12)
@@ -1690,9 +1688,11 @@ class CubeMarsAK606v3CAN(CubeMarsBaseCAN):
         kp: float,
         kd: float,
         t_ff: float,
-        limits: MITModeLimits = AK60_6_V3_0_MIT_LIMITS,
+        limits: MITModeLimits | None = None,
     ) -> bytes:
         """Pack MIT command frame for AK60-6 V3."""
+        if limits is None:
+            limits = self._motor_spec.mit_mode_limits
         p_int = float_to_uint(p_des, limits.p_min, limits.p_max, 16)
         v_int = float_to_uint(v_des, limits.v_min, limits.v_max, 12)
         kp_int = float_to_uint(kp, limits.kp_min, limits.kp_max, 12)
