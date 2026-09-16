@@ -22,6 +22,7 @@ from motor_python.definitions import (
     AK80_6_MOTOR_SPEC,
     CAN_DEFAULTS,
     CURRENT_MOTOR_SPEC,
+    EXTENDED_FORMAT_MOTOR_MODELS,
     MOTOR_DEFAULTS,
     LowPassFilterConfig,
     MITModeLimits,
@@ -30,7 +31,6 @@ from motor_python.definitions import (
 )
 from motor_python.mit_mode_packer import (
     AK60_6_V3_0_MIT_LIMITS,
-    AK80_6_MIT_LIMITS,
     float_to_uint,
     uint_to_float,
 )
@@ -209,8 +209,8 @@ class CubeMarsBaseCAN(BaseMotor):
         # Canonical feedback IDs (extended) plus optional compatibility IDs.
         self._feedback_ids_ext: set[int] = {0x2900 | motor_can_id, 0x2900}
         self._feedback_ids_std: set[int] = set()
-        if self.motor_model in {"AK80-6", "AK60-6_V1.1"}:
-            # AK80/AK60 V1.1 use standard CAN frames for MIT telemetry.
+        if self.motor_model not in EXTENDED_FORMAT_MOTOR_MODELS:
+            # use standard CAN frames for MIT telemetry.
             self._feedback_ids_std.add(motor_can_id)
         if feedback_can_id is not None:
             self._feedback_ids_ext.add(feedback_can_id)
@@ -329,12 +329,12 @@ class CubeMarsBaseCAN(BaseMotor):
             capture_response=False,
         )
         time.sleep(0.15)
-        logger.info("AK80-6 startup MIT reset complete")
+        logger.info(f"{self.motor_model} startup MIT reset complete")
 
     def _build_extended_id(self, mode: int) -> int:
-        """AK60-6 only."""
-        if self.motor_model in {"AK80-6", "AK60-6_V1.1"}:
-            raise ValueError("AK80-6 does not use extended ID format")
+        """AK60-6 v3 only."""
+        if self.motor_model not in EXTENDED_FORMAT_MOTOR_MODELS:
+            raise ValueError(f"{self.motor_model} does not use extended ID format")
         return (mode << 8) | self.motor_can_id
 
     def _pace_tx(self) -> None:
@@ -439,9 +439,9 @@ class CubeMarsBaseCAN(BaseMotor):
         kp: float,
         kd: float,
         t_ff: float,
-        limits: MITModeLimits = AK80_6_MIT_LIMITS,
+        limits: MITModeLimits,
     ) -> bytes:
-        """Pack MIT command frame for AK80-6 V2."""
+        """Pack MIT command frame for AK80-6 V2 and AK60-6 v1.1."""
         p_int = float_to_uint(p_des, limits.p_min, limits.p_max, 16)
         v_int = float_to_uint(v_des, limits.v_min, limits.v_max, 12)
         kp_int = float_to_uint(kp, limits.kp_min, limits.kp_max, 12)
@@ -633,7 +633,7 @@ class CubeMarsBaseCAN(BaseMotor):
             payload = data
 
         if force_extended is None:
-            is_extended = self.motor_model not in {"AK80-6", "AK60-6_V1.1"}
+            is_extended = self.motor_model in EXTENDED_FORMAT_MOTOR_MODELS
         else:
             is_extended = force_extended
 
@@ -751,7 +751,7 @@ class CubeMarsBaseCAN(BaseMotor):
         self, payload: bytes, *, capture_response: bool = True
     ) -> bool:
         """Send MIT command frame for AK60-6 or AK80-6."""
-        if self.motor_model in {"AK80-6", "AK60-6_V1.1"}:
+        if self.motor_model not in EXTENDED_FORMAT_MOTOR_MODELS:
             # AK80-6 uses STANDARD FRAME
             arbitration_id = self.motor_can_id
             is_extended = False
@@ -772,7 +772,7 @@ class CubeMarsBaseCAN(BaseMotor):
     # ------------------------------------------------------------------
 
     def _parse_feedback_msg(self, msg: can.Message) -> MotorState | None:
-        """Parse AK80-6 MIT feedback frame."""
+        """Parse AK80-6 or AK60-6 v1.1 MIT feedback frame."""
         if msg.is_error_frame:
             return None
         if getattr(msg, "is_remote_frame", False):
@@ -827,10 +827,6 @@ class CubeMarsBaseCAN(BaseMotor):
         # Convert velocity to ERPM for compatibility with MotorState
         speed_erpm = self._rad_s_to_erpm(velocity_rad_s)
 
-        # logger.debug(
-        #     f"Parsed AK80 MIT feedback ints: motor_id={motor_id} p={position_rad} v={velocity_rad_s} i={current_amps} temp={temperature_celsius} error={error_code}"
-        # )
-
         feedback = MotorState(
             position_degrees=np.degrees(position_rad),
             speed_erpm=speed_erpm,
@@ -843,7 +839,9 @@ class CubeMarsBaseCAN(BaseMotor):
 
         if self._active_feedback_id != msg.arbitration_id:
             self._active_feedback_id = msg.arbitration_id
-            # logger.info(f"Active AK80 MIT feedback CAN ID: 0x{msg.arbitration_id:08X}")
+            logger.info(
+                f"Active {self.motor_model} MIT feedback CAN ID: 0x{msg.arbitration_id:08X}"
+            )
 
         return feedback
 
@@ -1169,7 +1167,7 @@ class CubeMarsBaseCAN(BaseMotor):
         )
 
     def _send_velocity_command(self, velocity_erpm: int) -> None:
-        """Send an AK80-6 MIT velocity command."""
+        """Send an MIT velocity command."""
         vel_rad_s = self._erpm_to_rad_s(velocity_erpm)
         logger.info(
             f"Sending velocity command: {velocity_erpm} ERPM ({vel_rad_s:.3f} rad/s)"
