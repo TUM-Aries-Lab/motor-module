@@ -10,7 +10,12 @@ import pytest
 
 from motor_python.base_motor import MotorState
 from motor_python.can_protocol import CANControlMode
-from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN
+from motor_python.cube_mars_motor_can import (
+    CubeMarsAK606v1CAN,
+    CubeMarsAK606v3CAN,
+    CubeMarsAK806v2CAN,
+)
+from motor_python.definitions import AK60_6_V1_1_MOTOR_SPEC, AK80_6_MOTOR_SPEC
 from motor_python.utils import float_to_uint
 
 
@@ -46,6 +51,44 @@ def _make_feedback_msg(
     return msg
 
 
+def _make_mit_feedback_msg(
+    motor,
+    *,
+    position_rad: float,
+    velocity_rad_s: float,
+    current_amps: float,
+    temperature_celsius: int = 40,
+    error_code: int = 0,
+) -> MagicMock:
+    """Build a mock MIT feedback frame using the motor's own MIT limits."""
+    limits = motor._motor_spec.mit_mode_limits
+    p_int = float_to_uint(position_rad, limits.p_min, limits.p_max, 16)
+    v_int = float_to_uint(velocity_rad_s, limits.v_min, limits.v_max, 12)
+    i_int = float_to_uint(current_amps, limits.t_min, limits.t_max, 12)
+
+    data = bytes(
+        [
+            motor.motor_can_id,
+            (p_int >> 8) & 0xFF,
+            p_int & 0xFF,
+            (v_int >> 4) & 0xFF,
+            ((v_int & 0x0F) << 4) | ((i_int >> 8) & 0x0F),
+            i_int & 0xFF,
+            temperature_celsius + 40,
+            error_code,
+        ]
+    )
+
+    msg = MagicMock()
+    msg.arbitration_id = motor.motor_can_id
+    msg.data = data
+    msg.is_error_frame = False
+    msg.is_remote_frame = False
+    msg.is_rx = True
+    msg.is_extended_id = False
+    return msg
+
+
 @pytest.fixture
 def mock_bus():
     """Patch python-can Bus with a controllable mock."""
@@ -70,6 +113,21 @@ def mock_can_state():
 def motor(mock_bus):
     """CAN motor fixture backed by the mocked bus."""
     m = CubeMarsAK606v3CAN()
+    yield m
+    m.close()
+
+
+@pytest.fixture(
+    params=[
+        (CubeMarsAK806v2CAN, AK80_6_MOTOR_SPEC),
+        (CubeMarsAK606v1CAN, AK60_6_V1_1_MOTOR_SPEC),
+    ],
+    ids=["ak80_6_v2", "ak60_6_v1_1"],
+)
+def base_mit_motor(request, mock_bus):
+    """Motors that inherit the shared base-class MIT protocol."""
+    motor_cls, motor_spec = request.param
+    m = motor_cls(motor_spec=motor_spec)
     yield m
     m.close()
 
@@ -198,7 +256,7 @@ class TestMITCommandPath:
             pos_rad=1.0, vel_rad_s=2.0, kp=30.0, kd=1.5, torque_ff_nm=3.0
         )
 
-        expected = b"\x0fT\xcc\x8a0\x849\xff"
+        expected = motor.pack_mit_frame(1.0, 2.0, 30.0, 1.5, 3.0)
         mit_arb_id = (CANControlMode.MIT_MODE << 8) | motor.motor_can_id
 
         mit_msgs = [
@@ -395,3 +453,95 @@ class TestPackMITFrame:
         assert kp_raw == (1 << 12) - 1
         assert kd_raw == (1 << 12) - 1
         assert pos_raw == (1 << 16) - 1
+
+
+class TestMITProtocolByModel:
+    def test_shared_packer_defaults_to_spec_limits(self, base_mit_motor):
+        limits = base_mit_motor._motor_spec.mit_mode_limits
+        p_int = float_to_uint(1.0, limits.p_min, limits.p_max, 16)
+        v_int = float_to_uint(2.0, limits.v_min, limits.v_max, 12)
+        kp_int = float_to_uint(30.0, limits.kp_min, limits.kp_max, 12)
+        kd_int = float_to_uint(1.5, limits.kd_min, limits.kd_max, 12)
+        t_int = float_to_uint(3.0, limits.t_min, limits.t_max, 12)
+
+        expected = bytes(
+            [
+                (p_int >> 8) & 0xFF,
+                p_int & 0xFF,
+                (v_int >> 4) & 0xFF,
+                ((v_int & 0x0F) << 4) | ((kp_int >> 8) & 0x0F),
+                kp_int & 0xFF,
+                (kd_int >> 4) & 0xFF,
+                ((kd_int & 0x0F) << 4) | ((t_int >> 8) & 0x0F),
+                t_int & 0xFF,
+            ]
+        )
+
+        # Omitting ``limits`` must resolve to the motor's own spec limits.
+        assert base_mit_motor.pack_mit_frame(1.0, 2.0, 30.0, 1.5, 3.0) == expected
+        assert (
+            base_mit_motor.pack_mit_frame(1.0, 2.0, 30.0, 1.5, 3.0, limits=limits)
+            == expected
+        )
+
+    def test_shared_parser_round_trips_physical_values(self, base_mit_motor):
+        limits = base_mit_motor._motor_spec.mit_mode_limits
+        msg = _make_mit_feedback_msg(
+            base_mit_motor,
+            position_rad=0.5,
+            velocity_rad_s=-10.0,
+            current_amps=2.0,
+        )
+
+        state = base_mit_motor._parse_feedback_msg(msg)
+
+        assert state is not None
+        assert state.position_degrees == pytest.approx(np.degrees(0.5), abs=0.05)
+        assert state.speed_erpm == pytest.approx(
+            base_mit_motor._rad_s_to_erpm(-10.0), rel=0.01
+        )
+        assert state.current_amps == pytest.approx(
+            2.0, abs=(limits.t_max - limits.t_min) / ((1 << 12) - 1)
+        )
+        assert state.temperature_celsius == 40
+        assert state.error_code == 0
+
+    def test_standard_frames_for_ak80_and_ak60_v1_1(self, base_mit_motor, mock_bus):
+        mock_bus.send.reset_mock()
+
+        base_mit_motor._send_mit_payload(bytes(8), capture_response=False)
+
+        sent = mock_bus.send.call_args_list[-1][0][0]
+        assert sent.is_extended_id is False
+        assert sent.arbitration_id == base_mit_motor.motor_can_id
+
+    def test_extended_frames_for_ak60_v3(self, motor, mock_bus):
+        mock_bus.send.reset_mock()
+
+        motor._send_mit_payload(bytes(8), capture_response=False)
+
+        sent = mock_bus.send.call_args_list[-1][0][0]
+        assert sent.is_extended_id is True
+        assert (
+            sent.arbitration_id == (CANControlMode.MIT_MODE << 8) | motor.motor_can_id
+        )
+
+    def test_connect_resets_mit_state_for_ak80_and_ak60_v1_1(
+        self, base_mit_motor, mock_bus
+    ):
+        reset_frames = [
+            call[0][0]
+            for call in mock_bus.send.call_args_list
+            if bytes(call[0][0].data) == base_mit_motor._CAN_HELPER_DISABLE
+        ]
+
+        assert reset_frames, "Expected an MIT reset frame while connecting"
+
+    def test_connect_does_not_reset_mit_state_for_ak60_v3(self, motor, mock_bus):
+        reset_frames = [
+            call[0][0]
+            for call in mock_bus.send.call_args_list
+            if bytes(call[0][0].data) == motor._CAN_HELPER_DISABLE
+        ]
+
+        assert not reset_frames

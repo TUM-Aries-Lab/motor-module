@@ -3,11 +3,15 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import pytest
+
 from motor_python.definitions import CURRENT_MOTOR_SPEC, LogLevel
 from motor_python.utils import (
     create_timestamped_filepath,
     erpm_to_degrees_per_second,
+    float_to_uint,
     setup_logger,
+    uint_to_float,
     write_summary_csv,
 )
 
@@ -67,6 +71,19 @@ def test_erpm_to_degrees_per_second_negative() -> None:
 def test_erpm_to_degrees_per_second_zero() -> None:
     """Zero ERPM should convert to zero."""
     assert erpm_to_degrees_per_second(0) == 0.0
+
+
+def test_float_to_uint_clamps_to_range() -> None:
+    """Values outside the range saturate at the integer bounds."""
+    assert float_to_uint(-999.0, -1.0, 1.0, 12) == 0
+    assert float_to_uint(999.0, -1.0, 1.0, 12) == (1 << 12) - 1
+
+
+def test_uint_to_float_round_trip_midpoint() -> None:
+    """The midpoint survives a float -> uint -> float round trip."""
+    raw = float_to_uint(0.0, -12.56, 12.56, 16)
+    value = uint_to_float(raw, -12.56, 12.56, 16)
+    assert value == pytest.approx(0.0, abs=0.001)
 
 
 def test_write_summary_csv() -> None:
