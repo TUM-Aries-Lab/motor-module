@@ -166,7 +166,9 @@ def basic_can_example() -> None:
     """Demonstrate basic CAN motor control (standalone — manages own motor)."""
     logger.info("Starting CAN motor control example")
 
-    with CubeMarsBaseCAN(motor_can_id=0x03, interface="can0", bitrate=1000000) as motor:
+    with CubeMarsAK606v3CAN(
+        motor_can_id=0x03, interface="can0", bitrate=1000000
+    ) as motor:
         motor.enable_motor()
 
         if not motor.check_communication():
