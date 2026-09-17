@@ -173,6 +173,8 @@ class MotorSpec:
     max_output_speed_rpm: int
     max_velocity_electrical_rpm: int
     min_velocity_electrical_rpm: int
+    # Position loop only; these mit_position_* values have never been tested
+    # on the test rig. TO BE CONFIRMED and adjusted if needed.
     mit_position_kp: float = 2.0
     mit_position_kd: float = 1.0
     mit_velocity_kd: float = 1.2
@@ -344,6 +346,9 @@ AK60_6_V3_0_MOTOR_SPEC = MotorSpec(
     min_velocity_electrical_rpm=-12000,
     mit_position_kp=20.0,
     mit_position_kd=1.0,
+    # Simulink reference testmotor_for_AK60_6_V3.slx commands a velocity-loop
+    # Kd of 2. The 1.2 below is only the MotorSpec class default and has no
+    # recorded origin. TO BE CHECKED on hardware.
     mit_velocity_kd=1.2,
     mit_mode_limits=AK60_6_V3_0_MIT_LIMITS,
 )
@@ -363,6 +368,8 @@ AK80_6_MOTOR_SPEC = MotorSpec(
     min_velocity_electrical_rpm=-16800,  # -800 RPM * 21 pole pairs
     mit_position_kp=20.0,  # ideal
     mit_position_kd=1.0,
+    # No Simulink reference model exists for the AK80-6, so the 1.2 below is
+    # only the MotorSpec class default. TO BE CHECKED on hardware.
     mit_velocity_kd=1.2,
     mit_mode_limits=AK80_6_MIT_LIMITS,
 )
@@ -382,6 +389,8 @@ AK60_6_V1_1_MOTOR_SPEC = MotorSpec(
     min_velocity_electrical_rpm=-7840,  # -560 RPM * 14 pole pairs
     mit_position_kp=10.0,
     mit_position_kd=1.0,
+    # Matches the Simulink reference Control_ML_Stairs_IMUbased_motors.slx,
+    # which commands a velocity-loop Kd of 1.
     mit_velocity_kd=1.0,
     mit_mode_limits=AK60_6_V1_1_MIT_LIMITS,
 )
