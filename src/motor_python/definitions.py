@@ -368,9 +368,22 @@ AK80_6_MOTOR_SPEC = MotorSpec(
     min_velocity_electrical_rpm=-16800,  # -800 RPM * 21 pole pairs
     mit_position_kp=20.0,  # ideal
     mit_position_kd=1.0,
-    # No Simulink reference model exists for the AK80-6, so the 1.2 below is
-    # only the MotorSpec class default. TO BE CHECKED on hardware.
-    mit_velocity_kd=1.2,
+    # 1.0 matches the only documented value in the project: the V1.1 Simulink
+    # model commands Kd = 1 and motor_control.py uses MOTOR_KD_CMD = 1.0. The
+    # MotorSpec class default of 1.2 was never chosen for this motor, and no
+    # Simulink model references the AK80-6 at all.
+    #
+    # Bench numbers exist but do NOT characterise the motor. On 2026-09-17 at
+    # 19 V, free shaft, tendon disconnected, one motor at kd 1.2 reached 82%
+    # of commanded velocity across a 1-10 rad/s ramp, fitting Coulomb 0.57 +
+    # viscous 0.262 per rad/s (R2 0.998). The same motor at the same command
+    # and kd reached 1.9x that speed while the second motor was also running,
+    # so the drag is a property of the rig configuration, not of the motor.
+    # Hold time biases it too: 2 s per step understates tracking against 10 s.
+    #
+    # Choose kd on the assembled system under load, not from numbers like
+    # these. UNVERIFIED UNDER LOAD.
+    mit_velocity_kd=1.0,
     mit_mode_limits=AK80_6_MIT_LIMITS,
 )
 
