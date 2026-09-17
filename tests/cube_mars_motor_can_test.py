@@ -2,20 +2,29 @@
 # ruff: noqa: D101, D102
 
 import struct
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import can
 import numpy as np
 import pytest
 
+from motor_python import definitions
 from motor_python.base_motor import MotorState
 from motor_python.can_protocol import CANControlMode
 from motor_python.cube_mars_motor_can import (
     CubeMarsAK606v1CAN,
     CubeMarsAK606v3CAN,
     CubeMarsAK806v2CAN,
+    CubeMarsBaseCAN,
 )
-from motor_python.definitions import AK60_6_V1_1_MOTOR_SPEC, AK80_6_MOTOR_SPEC
+from motor_python.definitions import (
+    AK60_6_V1_1_MOTOR_SPEC,
+    AK60_6_V3_0_MOTOR_SPEC,
+    AK80_6_MOTOR_SPEC,
+    MotorModel,
+    set_current_motor_model,
+)
 from motor_python.utils import float_to_uint
 
 
@@ -89,6 +98,16 @@ def _make_mit_feedback_msg(
     return msg
 
 
+@contextmanager
+def _connected(motor_cls, **kwargs):
+    """Build a motor on the mocked bus and always close it again."""
+    motor = motor_cls(**kwargs)
+    try:
+        yield motor
+    finally:
+        motor.close()
+
+
 @pytest.fixture
 def mock_bus():
     """Patch python-can Bus with a controllable mock."""
@@ -130,6 +149,14 @@ def base_mit_motor(request, mock_bus):
     m = motor_cls(motor_spec=motor_spec)
     yield m
     m.close()
+
+
+@pytest.fixture
+def restore_current_motor_model():
+    """Undo any global motor-model selection a test makes."""
+    saved = definitions.CURRENT_MOTOR_MODEL
+    yield
+    set_current_motor_model(saved)
 
 
 class TestInit:
@@ -545,3 +572,47 @@ class TestMITProtocolByModel:
         ]
 
         assert not reset_frames
+
+
+class TestMotorSpecResolution:
+    @pytest.mark.parametrize(
+        ("motor_cls", "expected_spec"),
+        [
+            (CubeMarsAK606v3CAN, AK60_6_V3_0_MOTOR_SPEC),
+            (CubeMarsAK806v2CAN, AK80_6_MOTOR_SPEC),
+            (CubeMarsAK606v1CAN, AK60_6_V1_1_MOTOR_SPEC),
+        ],
+        ids=["ak60_6_v3", "ak80_6_v2", "ak60_6_v1_1"],
+    )
+    def test_bare_construction_uses_the_class_own_spec(
+        self, mock_bus, motor_cls, expected_spec
+    ):
+        with _connected(motor_cls) as motor:
+            assert motor._motor_spec is expected_spec
+            assert motor.motor_model == expected_spec.model_name
+
+    def test_explicit_spec_still_wins(self, mock_bus):
+        with _connected(CubeMarsAK606v1CAN, motor_spec=AK80_6_MOTOR_SPEC) as motor:
+            assert motor._motor_spec is AK80_6_MOTOR_SPEC
+
+    def test_subclass_ignores_the_global_selection(
+        self, mock_bus, restore_current_motor_model
+    ):
+        set_current_motor_model(MotorModel.AK80_6)
+
+        with _connected(CubeMarsAK606v1CAN) as motor:
+            assert motor._motor_spec is AK60_6_V1_1_MOTOR_SPEC
+
+    def test_base_class_follows_the_global_selection(
+        self, mock_bus, restore_current_motor_model
+    ):
+        set_current_motor_model(MotorModel.AK80_6)
+
+        # Resolved at call time, so the selection made above is picked up.
+        with _connected(CubeMarsBaseCAN) as motor:
+            assert motor._motor_spec is AK80_6_MOTOR_SPEC
+
+    def test_explicit_none_is_accepted(self, mock_bus):
+        # Used to raise AttributeError before the spec was resolved up front.
+        with _connected(CubeMarsBaseCAN, motor_spec=None) as motor:
+            assert motor._motor_spec is definitions.CURRENT_MOTOR_SPEC

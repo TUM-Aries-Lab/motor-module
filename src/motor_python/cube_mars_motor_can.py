@@ -13,6 +13,7 @@ import can
 import numpy as np
 from loguru import logger
 
+from motor_python import definitions
 from motor_python.base_motor import BaseMotor, MotorState
 from motor_python.can_protocol import CANControlMode
 from motor_python.can_utils import get_can_state, reset_can_interface
@@ -21,7 +22,6 @@ from motor_python.definitions import (
     AK60_6_V3_0_MOTOR_SPEC,
     AK80_6_MOTOR_SPEC,
     CAN_DEFAULTS,
-    CURRENT_MOTOR_SPEC,
     EXTENDED_FORMAT_MOTOR_MODELS,
     MOTOR_DEFAULTS,
     LowPassFilterConfig,
@@ -99,7 +99,7 @@ class CubeMarsBaseCAN(BaseMotor):
         bitrate: int = CAN_DEFAULTS.bitrate,
         feedback_can_id: int | None = None,
         mit_velocity_kd: float | None = None,
-        motor_spec: MotorSpec = CURRENT_MOTOR_SPEC,
+        motor_spec: MotorSpec | None = None,
         helper_policy: Literal["strict", "fcfd", "legacy"] = "fcfd",
         auto_recover_bus: bool = True,
         allow_legacy_feedback_ids: bool = False,
@@ -127,7 +127,10 @@ class CubeMarsBaseCAN(BaseMotor):
         """
         super().__init__()
         self.motor_can_id = motor_can_id
-        self.motor_model = motor_spec.model_name
+        self._motor_spec = (
+            definitions.CURRENT_MOTOR_SPEC if motor_spec is None else motor_spec
+        )
+        self.motor_model = self._motor_spec.model_name
         self.interface = interface
         self.bitrate = bitrate
         self.bus: can.BusABC | None = None
@@ -141,7 +144,6 @@ class CubeMarsBaseCAN(BaseMotor):
         self._helper_policy = policy
         self._auto_recover_bus = auto_recover_bus
         self._aggressive_bus_reset = aggressive_bus_reset
-        self._motor_spec = CURRENT_MOTOR_SPEC if motor_spec is None else motor_spec
         self._mit_limits = self._motor_spec.mit_mode_limits
         velocity_kd = (
             self._motor_spec.mit_velocity_kd
@@ -1630,7 +1632,7 @@ class CubeMarsAK606v3CAN(CubeMarsBaseCAN):
         bitrate: int = CAN_DEFAULTS.bitrate,
         feedback_can_id: int | None = None,
         mit_velocity_kd: float | None = None,
-        motor_spec: MotorSpec = CURRENT_MOTOR_SPEC,
+        motor_spec: MotorSpec | None = None,
         helper_policy: Literal["strict", "fcfd", "legacy"] = "fcfd",
         auto_recover_bus: bool = True,
         allow_legacy_feedback_ids: bool = False,
@@ -1756,7 +1758,7 @@ class CubeMarsAK806v2CAN(CubeMarsBaseCAN):
         bitrate: int = CAN_DEFAULTS.bitrate,
         feedback_can_id: int | None = None,
         mit_velocity_kd: float | None = None,
-        motor_spec: MotorSpec = CURRENT_MOTOR_SPEC,
+        motor_spec: MotorSpec | None = None,
         helper_policy: Literal["strict", "fcfd", "legacy"] = "fcfd",
         auto_recover_bus: bool = True,
         allow_legacy_feedback_ids: bool = False,
@@ -1792,7 +1794,7 @@ class CubeMarsAK606v1CAN(CubeMarsBaseCAN):
         bitrate: int = CAN_DEFAULTS.bitrate,
         feedback_can_id: int | None = None,
         mit_velocity_kd: float | None = None,
-        motor_spec: MotorSpec = CURRENT_MOTOR_SPEC,
+        motor_spec: MotorSpec | None = None,
         helper_policy: Literal["strict", "fcfd", "legacy"] = "fcfd",
         auto_recover_bus: bool = True,
         allow_legacy_feedback_ids: bool = False,
