@@ -5,7 +5,7 @@ Legacy UART interface: CubeMarsAK606v3.
 Base class: BaseMotor (for shared interface & safety logic).
 """
 
-__version__ = "0.0.7"
+__version__ = "0.0.8"
 
 from typing import Literal
 
@@ -91,12 +91,20 @@ def create_can_motor(
 
 
 __all__ = [
+    "AK60_6_V1_1_MOTOR_SPEC",
+    "AK60_6_V3_0_MOTOR_SPEC",
+    "AK80_6_MOTOR_SPEC",
+    "CAN_DEFAULTS",
     "BaseMotor",
+    "CubeMarsAK606v1CAN",
     "CubeMarsAK606v3",
     "CubeMarsAK606v3CAN",
     "CubeMarsAK806v2",
     "CubeMarsAK806v2CAN",
+    "CubeMarsBaseCAN",
     "Motor",
     "MotorManager",
+    "MotorModel",
+    "MotorSpec",
     "create_can_motor",
 ]

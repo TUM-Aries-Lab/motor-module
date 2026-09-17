@@ -2,7 +2,7 @@
 
 Motor communication package for the ARIES Lab (IBRS, TUM). Handles UART serial communication with CubeMars AK60-6 motors for the hip flexion exosuit, including frame building, command sending, response parsing, and safety clamping.
 
-**PyPI:** motor-python | **GitHub:** TUM-Aries-Lab/motor-module | **Current version:** 0.0.6 | **Python:** 3.11+
+**PyPI:** motor-python | **GitHub:** TUM-Aries-Lab/motor-module | **Current version:** 0.0.8 | **Python:** 3.11+
 
 **Target motor:** CubeMars AK60-6 V3 KV80 | **Communication:** UART serial (not CAN)
 
