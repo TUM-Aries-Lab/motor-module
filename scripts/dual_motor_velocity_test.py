@@ -8,19 +8,24 @@ velocity and how well they stay synchronized with each other over time.
 It is useful for comparing left/right motor response, speed tracking error,
 and current draw during coordinated motion.
 
+``--freq-hz`` is the frequency of the commanded sine wave; ``--control-hz``
+is how fast the loop sends commands (default 200 Hz). Passing a sine
+frequency to ``--control-hz`` silently turns the test into a handful of
+commands spread over the whole run.
+
 Typical use:
     sudo ./setup_can.sh
     .venv/bin/python scripts/dual_motor_velocity_test.py \
         --left-id 0x03 --right-id 0x04 \
         --left-motor-model AK60-6_V3.0 --right-motor-model AK60-6_V3.0 \
-        --amplitude-erpm 4000 --control-hz 0.3 --duration 30
+        --amplitude-erpm 4000 --freq-hz 0.3 --duration 30
 
 
     sudo ./setup_can.sh
     .venv/bin/python scripts/dual_motor_velocity_test.py \
         --left-id 0x03 --right-id 0x04 \
         --left-motor-model AK80-6 --right-motor-model AK80-6 \
-        --amplitude-erpm 4000 --control-hz 0.3 --duration 30
+        --amplitude-erpm 4000 --freq-hz 0.3 --duration 30
 """
 
 # ruff: noqa: T201
