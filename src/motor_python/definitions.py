@@ -342,8 +342,11 @@ AK60_6_V3_0_MOTOR_SPEC = MotorSpec(
     rated_current_amps=3.8,
     peak_current_amps=11.2,
     max_output_speed_rpm=640,
-    max_velocity_electrical_rpm=12000,
-    min_velocity_electrical_rpm=-12000,
+    # 640 RPM out * 14 pole pairs * 6 gear. The previous 12000 matched neither
+    # this nor the un-geared 8960, and its origin is unknown, so this is a
+    # consistency correction rather than a measured value.
+    max_velocity_electrical_rpm=53760,
+    min_velocity_electrical_rpm=-53760,
     mit_position_kp=20.0,
     mit_position_kd=1.0,
     # Simulink reference testmotor_for_AK60_6_V3.slx commands a velocity-loop
@@ -364,8 +367,8 @@ AK80_6_MOTOR_SPEC = MotorSpec(
     rated_current_amps=9.7,
     peak_current_amps=20.0,
     max_output_speed_rpm=800,
-    max_velocity_electrical_rpm=16800,  # 800 RPM * 21 pole pairs
-    min_velocity_electrical_rpm=-16800,  # -800 RPM * 21 pole pairs
+    max_velocity_electrical_rpm=100800,  # 800 RPM out * 21 pole pairs * 6 gear
+    min_velocity_electrical_rpm=-100800,  # -800 RPM out * 21 pole pairs * 6 gear
     mit_position_kp=20.0,  # ideal
     mit_position_kd=1.0,
     # 1.0 matches the only documented value in the project: the V1.1 Simulink
@@ -398,8 +401,8 @@ AK60_6_V1_1_MOTOR_SPEC = MotorSpec(
     rated_current_amps=6.5,
     peak_current_amps=22.7,
     max_output_speed_rpm=560,
-    max_velocity_electrical_rpm=7840,  # 560 RPM * 14 pole pairs
-    min_velocity_electrical_rpm=-7840,  # -560 RPM * 14 pole pairs
+    max_velocity_electrical_rpm=47040,  # 560 RPM out * 14 pole pairs * 6 gear
+    min_velocity_electrical_rpm=-47040,  # -560 RPM out * 14 pole pairs * 6 gear
     mit_position_kp=10.0,
     mit_position_kd=1.0,
     # Matches the Simulink reference Control_ML_Stairs_IMUbased_motors.slx,
