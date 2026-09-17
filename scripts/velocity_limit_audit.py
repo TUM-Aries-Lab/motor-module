@@ -56,8 +56,10 @@ from motor_python.utils import CsvStreamWriter, create_timestamped_filepath
 SEPARATOR = "=" * 78
 
 #: A step counts as "still tracking" if measured ERPM grew by at least this
-#: fraction of the growth the commanded step should have produced.
-TRACKING_FRACTION = 0.5
+#: fraction of the growth the earlier steps produced. This gates which steps
+#: the slope is fitted over, so it has to exclude a partially clamped step:
+#: 0.8 does, 0.5 lets one through and biases the fit low.
+TRACKING_FRACTION = 0.8
 
 CSV_FIELDS = (
     "commanded_rad_s",
@@ -234,6 +236,68 @@ def steps(cfg: SweepConfig) -> list[float]:
     return out
 
 
+def fit_slope(usable: list[StepResult]) -> tuple[float, float]:
+    """Least-squares fit of measured ERPM against commanded rad/s.
+
+    The slope is what matters here. It is immune to the constant velocity
+    deficit that pure damping control produces, which badly biases a simple
+    mean of the per-step ratios at low commanded speeds.
+
+    :return: (slope in ERPM per rad/s, intercept in ERPM)
+    """
+    pairs = [
+        (r.commanded_rad_s, r.mean_speed_erpm)
+        for r in usable
+        if r.mean_speed_erpm is not None
+    ]
+    mean_x = statistics.fmean(x for x, _ in pairs)
+    mean_y = statistics.fmean(y for _, y in pairs)
+    sxx = sum((x - mean_x) ** 2 for x, _ in pairs)
+    if sxx == 0.0:
+        return 0.0, 0.0
+    sxy = sum((x - mean_x) * (y - mean_y) for x, y in pairs)
+    slope = sxy / sxx
+    return slope, mean_y - slope * mean_x
+
+
+def tracking_region(
+    usable: list[StepResult],
+) -> tuple[list[StepResult], tuple[StepResult, StepResult] | None]:
+    """Split the sweep into the leading run that tracked, and where it broke.
+
+    The slope must be fitted over tracking steps only: once the command is
+    clamped, the measured speed stops rising and drags a whole-sweep fit badly
+    low, which then mis-converts the plateau back into rad/s.
+
+    Assumes the first step is below any ceiling. If the sweep starts above it,
+    nothing tracks and the reported slope will be visibly wrong.
+
+    :return: (steps that tracked, the pair straddling the breakdown or None)
+    """
+    increments: list[float] = []
+    for previous, current in pairwise(usable):
+        span = current.commanded_rad_s - previous.commanded_rad_s
+        if (
+            span > 0
+            and previous.mean_speed_erpm is not None
+            and current.mean_speed_erpm is not None
+        ):
+            increments.append(
+                (current.mean_speed_erpm - previous.mean_speed_erpm) / span
+            )
+        else:
+            increments.append(0.0)
+
+    if len(increments) < 2:
+        return usable, None
+
+    reference = statistics.median(increments[:3])
+    for index, increment in enumerate(increments):
+        if index > 0 and increment < TRACKING_FRACTION * reference:
+            return usable[: index + 1], (usable[index], usable[index + 1])
+    return usable, None
+
+
 def report(spec: MotorSpec, results: list[StepResult]) -> None:
     """Print the ratio table and the verdict on both open questions."""
     if_output = 60.0 * spec.pole_pairs * spec.gear_ratio / (2.0 * math.pi)
@@ -258,17 +322,21 @@ def report(spec: MotorSpec, results: list[StepResult]) -> None:
     print(f"Expected ERPM per rad/s if MIT velocity is OUTPUT-shaft: {if_output:8.1f}")
     print(f"Expected ERPM per rad/s if MIT velocity is MOTOR-shaft : {if_motor:8.1f}")
 
-    usable = [r for r in results if r.erpm_per_rad_s is not None and r.samples > 0]
-    if not usable:
-        print("No usable samples -- is this the AK60-6 V3? Only it reports ERPM.")
+    usable = [r for r in results if r.mean_speed_erpm is not None and r.samples > 0]
+    if len(usable) < 2:
+        print("Need at least two usable steps to fit a slope.")
+        print("Only the AK60-6 V3 reports electrical RPM independently of the")
+        print("command -- on the AK80-6 and AK60-6 V1.1 this test cannot work.")
         return
 
-    # Use the lowest commanded steps, which are least likely to be clamped.
-    early = [r.erpm_per_rad_s for r in usable[: max(1, len(usable) // 2)]]
-    measured = statistics.fmean([value for value in early if value is not None])
-    print(f"Measured (mean over the lower half of the sweep)       : {measured:8.1f}")
+    tracked, breakdown = tracking_region(usable)
+    slope, intercept = fit_slope(tracked)
+    print(
+        f"Measured slope (least squares over {len(tracked)} tracking steps)   "
+        f"   : {slope:8.1f}"
+    )
 
-    if abs(measured - if_output) < abs(measured - if_motor):
+    if abs(slope - if_output) < abs(slope - if_motor):
         print("=> OUTPUT-shaft. The conversion is right and the ERPM limits are")
         print(
             "   missing the gear ratio; they should be multiplied by "
@@ -278,44 +346,39 @@ def report(spec: MotorSpec, results: list[StepResult]) -> None:
         print("=> MOTOR-shaft. The ERPM limits are right and _rad_s_to_erpm()")
         print("   should NOT multiply by gear_ratio.")
 
-    # The plateau value is the precise, noise-robust statement of the ceiling;
-    # the bracketing loop below only says which step crossed it.
-    peak = max(
-        (r.mean_speed_erpm for r in usable if r.mean_speed_erpm is not None),
-        default=None,
-    )
-    if peak is not None and measured > 0:
-        clamp = spec.max_velocity_electrical_rpm
+    # kp is commanded as 0, so the loop has no integral action and a constant
+    # drag torque appears as a constant velocity deficit, i.e. a negative
+    # intercept. That is an offset, not a scale error, which is exactly why the
+    # slope rather than a mean of per-step ratios is the right estimator.
+    if slope > 0:
         print(
-            f"Peak measured speed  : {peak:.0f} ERPM = {peak / measured:.2f} rad/s "
-            f"(spec clamp {clamp} ERPM)"
+            f"Steady-state droop   : {-intercept / slope:+.3f} rad/s "
+            f"(constant offset; implies ~{abs(intercept / slope):.2f} N.m drag "
+            "at the kd used)"
         )
-        if peak > clamp * 1.05:
-            print("   Above the spec clamp, so --raise-limit was in effect.")
-        elif peak >= clamp * 0.95:
-            print("   The spec ERPM clamp is what bound the sweep.")
-        else:
-            print(
-                "   Below the spec clamp -- something else limited it "
-                "(supply, load, or the motor itself)."
-            )
 
-    # Ceiling: the first step whose measured speed failed to follow the command.
-    for previous, current in pairwise(usable):
-        if previous.mean_speed_erpm is None or current.mean_speed_erpm is None:
-            continue
-        commanded_growth = current.commanded_rad_s - previous.commanded_rad_s
-        expected_growth = commanded_growth * measured
-        actual_growth = current.mean_speed_erpm - previous.mean_speed_erpm
-        if actual_growth < TRACKING_FRACTION * expected_growth:
-            print(
-                f"Velocity stopped tracking between {previous.commanded_rad_s:.2f} "
-                f"and {current.commanded_rad_s:.2f} rad/s "
-                f"(~{previous.mean_speed_erpm:.0f} ERPM)."
-            )
-            break
+    if breakdown is None:
+        print("Velocity tracked the command across the whole sweep -- no limit hit.")
+        print("   Increase --max-rad (with --raise-limit) to find the ceiling.")
+        return
+
+    previous, current = breakdown
+    peak = max(r.mean_speed_erpm for r in usable if r.mean_speed_erpm is not None)
+    clamp = spec.max_velocity_electrical_rpm
+    print(
+        f"Velocity stopped tracking between {previous.commanded_rad_s:.2f} and "
+        f"{current.commanded_rad_s:.2f} rad/s."
+    )
+    print(
+        f"Plateau              : {peak:.0f} ERPM = {peak / slope:.2f} rad/s "
+        f"(spec clamp {clamp} ERPM)"
+    )
+    if peak > clamp * 1.05:
+        print("   Above the spec clamp: a real motor, supply or load limit.")
+    elif peak >= clamp * 0.95:
+        print("   Matches the spec clamp: software, not hardware.")
     else:
-        print("Velocity tracked the command across the whole sweep -- no ceiling hit.")
+        print("   Below the spec clamp: supply, load, or the motor itself.")
 
 
 def main() -> int:
