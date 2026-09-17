@@ -50,7 +50,12 @@ from itertools import pairwise
 from pathlib import Path
 
 from motor_python import create_can_motor
-from motor_python.definitions import CAN_DEFAULTS, MOTOR_SPECS, MotorSpec
+from motor_python.definitions import (
+    CAN_DEFAULTS,
+    EXTENDED_FORMAT_MOTOR_MODELS,
+    MOTOR_SPECS,
+    MotorSpec,
+)
 from motor_python.utils import CsvStreamWriter, create_timestamped_filepath
 
 SEPARATOR = "=" * 78
@@ -298,11 +303,8 @@ def tracking_region(
     return usable, None
 
 
-def report(spec: MotorSpec, results: list[StepResult]) -> None:
-    """Print the ratio table and the verdict on both open questions."""
-    if_output = 60.0 * spec.pole_pairs * spec.gear_ratio / (2.0 * math.pi)
-    if_motor = 60.0 * spec.pole_pairs / (2.0 * math.pi)
-
+def print_step_table(results: list[StepResult]) -> None:
+    """Print one row per commanded velocity, between separators."""
     print()
     print(SEPARATOR)
     print(
@@ -311,14 +313,27 @@ def report(spec: MotorSpec, results: list[StepResult]) -> None:
     )
     for r in results:
         ratio = r.erpm_per_rad_s
+        speed = r.mean_speed_erpm if r.mean_speed_erpm is not None else float("nan")
         print(
-            f"{r.commanded_rad_s:10.2f} "
-            f"{(r.mean_speed_erpm if r.mean_speed_erpm is not None else float('nan')):12.1f} "
+            f"{r.commanded_rad_s:10.2f} {speed:12.1f} "
             f"{(ratio if ratio is not None else float('nan')):12.1f} "
             f"{r.samples:4d} {r.missed:5d} {r.error_code:4d}"
         )
-
     print(SEPARATOR)
+
+
+def report(
+    spec: MotorSpec, results: list[StepResult], fault_at: float | None = None
+) -> None:
+    """Print the ratio table and the verdict on both open questions.
+
+    :param fault_at: commanded velocity at which the motor stopped responding,
+        if the sweep ended in a protection trip rather than completing.
+    """
+    if_output = 60.0 * spec.pole_pairs * spec.gear_ratio / (2.0 * math.pi)
+    if_motor = 60.0 * spec.pole_pairs / (2.0 * math.pi)
+
+    print_step_table(results)
     print(f"Expected ERPM per rad/s if MIT velocity is OUTPUT-shaft: {if_output:8.1f}")
     print(f"Expected ERPM per rad/s if MIT velocity is MOTOR-shaft : {if_motor:8.1f}")
 
@@ -336,7 +351,18 @@ def report(spec: MotorSpec, results: list[StepResult]) -> None:
         f"   : {slope:8.1f}"
     )
 
-    if abs(slope - if_output) < abs(slope - if_motor):
+    if spec.model_name not in EXTENDED_FORMAT_MOTOR_MODELS:
+        # This motor replies with an MIT frame whose velocity is decoded using
+        # the very conversion under test, so speed_erpm is derived from the
+        # command rather than measured independently. The slope above would
+        # simply restate the conversion -- a tautology, not evidence.
+        print("=> NO SCALE VERDICT for this motor. Its feedback velocity is")
+        print("   derived from the conversion under test, so the slope above")
+        print("   only restates it. Run the scale check on the AK60-6 V3, whose")
+        print("   status frame reports electrical RPM independently; the")
+        print("   conversion is shared, so the answer carries over.")
+        print("   The ceiling analysis below is still valid.")
+    elif abs(slope - if_output) < abs(slope - if_motor):
         print("=> OUTPUT-shaft. The conversion is right and the ERPM limits are")
         print(
             "   missing the gear ratio; they should be multiplied by "
@@ -356,6 +382,18 @@ def report(spec: MotorSpec, results: list[StepResult]) -> None:
             f"(constant offset; implies ~{abs(intercept / slope):.2f} N.m drag "
             "at the kd used)"
         )
+
+    if fault_at is not None:
+        last = max(r.mean_speed_erpm for r in usable if r.mean_speed_erpm is not None)
+        print(
+            f"The motor stopped responding when commanded {fault_at:.2f} rad/s. "
+            f"The last good step reached {last:.0f} ERPM = {last / slope:.2f} rad/s."
+        )
+        print("   If the CAN bus stayed healthy while the motor went quiet, this")
+        print("   is a protection trip rather than a software clamp. Treat it as")
+        print("   the real ceiling until the cause is understood, and do not")
+        print("   raise the spec limits past it.")
+        return
 
     if breakdown is None:
         print("Velocity tracked the command across the whole sweep -- no limit hit.")
@@ -420,14 +458,27 @@ def main() -> int:
         motor_spec=spec,
     )
     results: list[StepResult] = []
+    fault_at: float | None = None
     try:
         if not motor.check_communication():
             print("Motor not responding -- check power, CAN wiring and termination.")
             return 1
-        motor.enable_mit_mode()
+        try:
+            motor.enable_mit_mode()
+        except RuntimeError as exc:
+            print(f"Could not enter MIT mode: {exc}")
+            print("If the motor tripped on an earlier run, power-cycle it.")
+            return 1
 
         for velocity in steps(cfg):
-            result = hold_velocity(motor, velocity, cfg)
+            try:
+                result = hold_velocity(motor, velocity, cfg)
+            except (RuntimeError, OSError) as exc:
+                # A protection trip is a result, not a crash: the motor going
+                # silent IS the ceiling. Keep what was collected and report it.
+                print(f"  {velocity:6.2f} rad/s -> motor stopped responding: {exc}")
+                fault_at = velocity
+                break
             results.append(result)
             ratio = result.erpm_per_rad_s
             print(
@@ -458,7 +509,7 @@ def main() -> int:
             motor.close()
             writer.close()
 
-    report(spec, results)
+    report(spec, results, fault_at)
     print(f"CSV saved to: {csv_path}")
     return 0
 
