@@ -437,7 +437,18 @@ class CubeMarsBaseCAN(BaseMotor):
         t_ff: float,
         limits: MITModeLimits | None = None,
     ) -> bytes:
-        """Pack MIT command frame for AK80-6 V2 and AK60-6 v1.1."""
+        """Pack MIT command frame for AK80-6 V2 and AK60-6 v1.1.
+
+        Byte layout (matches the Simulink Buff 0..7 subsystem):
+            byte 0 : p[15:8]
+            byte 1 : p[7:0]
+            byte 2 : v[11:4]
+            byte 3 : v[3:0] | kp[11:8]
+            byte 4 : kp[7:0]
+            byte 5 : kd[11:4]
+            byte 6 : kd[3:0] | t[11:8]
+            byte 7 : t[7:0]
+        """
         if limits is None:
             limits = self._motor_spec.mit_mode_limits
         p_int = float_to_uint(p_des, limits.p_min, limits.p_max, 16)
@@ -750,11 +761,11 @@ class CubeMarsBaseCAN(BaseMotor):
     ) -> bool:
         """Send MIT command frame for AK60-6 or AK80-6."""
         if self.motor_model not in EXTENDED_FORMAT_MOTOR_MODELS:
-            # AK80-6 uses STANDARD FRAME
+            # AK80-6 V2 and AK60-6 V1.1 use STANDARD FRAMES
             arbitration_id = self.motor_can_id
             is_extended = False
         else:
-            # AK60-6 uses EXTENDED FRAME
+            # AK60-6 V3 uses EXTENDED FRAMES
             arbitration_id = self._build_extended_id(CANControlMode.MIT_MODE)
             is_extended = True
 
@@ -770,7 +781,18 @@ class CubeMarsBaseCAN(BaseMotor):
     # ------------------------------------------------------------------
 
     def _parse_feedback_msg(self, msg: can.Message) -> MotorState | None:
-        """Parse AK80-6 or AK60-6 v1.1 MIT feedback frame."""
+        """Parse AK80-6 or AK60-6 v1.1 MIT feedback frame.
+
+        Byte layout:
+            byte 0 : motor ID
+            byte 1 : position[15:8]
+            byte 2 : position[7:0]
+            byte 3 : velocity[11:4]
+            byte 4 : velocity[3:0] | current[11:8]
+            byte 5 : current[7:0]
+            byte 6 : temperature, offset by 40 degrees Celsius
+            byte 7 : error code
+        """
         if msg.is_error_frame:
             return None
         if getattr(msg, "is_remote_frame", False):
@@ -792,7 +814,7 @@ class CubeMarsBaseCAN(BaseMotor):
         d = msg.data
         # print(f"Received feedback data: {d.hex()}")
 
-        # AK80 MIT reply format from CubeMars manual
+        # MIT reply format from the CubeMars manual (AK80-6 V2, AK60-6 V1.1).
         # motor_id = d[0]
         p_int = (d[1] << 8) | d[2]
         v_int = (d[3] << 4) | (d[4] >> 4)
@@ -1634,7 +1656,7 @@ class CubeMarsAK606v3CAN(CubeMarsBaseCAN):
         )
 
     def _connect(self) -> None:
-        """Connect without the AK80-specific MIT reset frame."""
+        """Connect without the MIT reset frame the other models need."""
         self._connect_socketcan()
 
     def _parse_feedback_msg(self, msg: can.Message) -> MotorState | None:
@@ -1690,7 +1712,18 @@ class CubeMarsAK606v3CAN(CubeMarsBaseCAN):
         t_ff: float,
         limits: MITModeLimits | None = None,
     ) -> bytes:
-        """Pack MIT command frame for AK60-6 V3."""
+        """Pack MIT command frame for AK60-6 V3.
+
+        Byte layout (AK manual, mode ID = 8):
+            DATA[0] = KP high 8 bits
+            DATA[1] = KP low 4 bits | KD high 4 bits
+            DATA[2] = KD low 8 bits
+            DATA[3] = Position high 8 bits
+            DATA[4] = Position low 8 bits
+            DATA[5] = Speed high 8 bits
+            DATA[6] = Speed low 4 bits | Torque high 4 bits
+            DATA[7] = Torque low 8 bits
+        """
         if limits is None:
             limits = self._motor_spec.mit_mode_limits
         p_int = float_to_uint(p_des, limits.p_min, limits.p_max, 16)
