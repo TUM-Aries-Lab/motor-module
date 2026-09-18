@@ -1,5 +1,6 @@
 """Test the utils module."""
 
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -31,6 +32,11 @@ def test_logger_init() -> None:
         # locally and never in the Linux CI.
         logger.remove()
     assert not Path(log_filepath).exists()
+
+    # loguru's logger is a process-wide singleton, so the removal above would
+    # otherwise leave every later test in the session with no sink at all --
+    # including the stderr one setup_logger installs. Put stderr back.
+    logger.add(sys.stderr)
 
 
 def test_log_level() -> None:
