@@ -1494,7 +1494,7 @@ class CubeMarsBaseCAN(BaseMotor):
         pos_rad: float,
         vel_rad_s: float = 0.0,
         kp: float = 0.0,
-        kd: float = 1.0,
+        kd: float = 0.0,
         torque_ff_nm: float = 0.0,
     ) -> None:
         """Send Force Control Mode command and keep it alive via refresh thread.
@@ -1504,24 +1504,25 @@ class CubeMarsBaseCAN(BaseMotor):
         - Payload order: ``KP, KD, Position, Speed, Torque`` bit-packed in 8 bytes.
         - Limits are taken from the currently selected motor profile.
 
-        ``kd`` defaults to 1.0 rather than 0.0 because the motor applies
-
-            tau = t_ff + kp * (pos_err) + kd * (vel_err)
-
-        so a ``kd`` of zero alongside the other zero defaults makes every term
-        vanish: the motor accepts the frame, reports healthy feedback, and
-        produces no torque at all. A caller who omits ``kd`` on a velocity
-        command would get a silently limp actuator with nothing to debug. 1.0
-        is the value documented for this project (the V1.1 Simulink model and
-        motor_control.py both command Kd = 1), so the default now matches what
-        a velocity command is expected to carry.
-
-        Callers wanting a pure feed-forward torque must therefore pass
-        ``kd=0.0`` explicitly -- ``set_current`` already does. Nothing inside
-        this package relies on the old default; every internal caller passes
-        ``kd`` itself, and the neutral/stop frame is built by
-        ``_mit_neutral_payload`` rather than through this method.
+        Gains are not defaulted to anything torque-producing on purpose: a
+        caller asking for a pure feed-forward torque needs ``kd`` to stay at
+        zero, and changing that would alter the torque every correct caller
+        already gets. A velocity commanded with ``kd`` at zero cannot act
+        though -- see the warning below -- so that case is reported rather
+        than silently absorbed.
         """
+        if vel_rad_s != 0.0 and kd == 0.0:
+            # tau = t_ff + kp * pos_err + kd * vel_err, so with kd at zero the
+            # velocity term contributes nothing and the command cannot make
+            # the motor turn. Nothing else reports this: the frame is valid,
+            # the motor answers normally, and the shaft simply does not move.
+            logger.warning(
+                f"MIT command carries {vel_rad_s:.3f} rad/s with kd=0, so the "
+                f"velocity term produces no torque and the motor will not "
+                f"follow it. Pass kd explicitly (this motor's profile value is "
+                f"{self._mit_velocity_kd}) or call set_velocity()."
+            )
+
         if not self.connected:
             logger.warning("Cannot send MIT command - CAN bus not connected")
             return
