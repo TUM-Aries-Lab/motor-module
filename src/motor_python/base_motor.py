@@ -199,10 +199,14 @@ class BaseMotor(abc.ABC):
         pos_rad: float,
         vel_rad_s: float = 0.0,
         kp: float = 0.0,
-        kd: float = 0.0,
+        kd: float = 1.0,
         torque_ff_nm: float = 0.0,
     ) -> None:
-        """Send an impedance control command using the MIT actuator protocol."""
+        """Send an impedance control command using the MIT actuator protocol.
+
+        ``kd`` defaults to 1.0 so that an omitted gain cannot silently produce
+        a zero-torque command -- see the CAN implementation for the reasoning.
+        """
         raise NotImplementedError("MIT mode is only supported on CAN transport")
 
     # ------------------------------------------------------------------
