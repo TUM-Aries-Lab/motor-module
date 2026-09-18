@@ -2,7 +2,7 @@
 
 Motor communication package for the ARIES Lab (IBRS, TUM). Drives CubeMars AK-series motors for the hip flexion exosuit over CAN using Force Control Mode (MIT), including frame packing, feedback parsing, bus recovery and safety clamping.
 
-**PyPI:** motor-python | **GitHub:** TUM-Aries-Lab/motor-module | **Current version:** 0.0.8 | **Python:** 3.11+
+**PyPI:** motor-python | **GitHub:** TUM-Aries-Lab/motor-module | **Current version:** 0.0.9 | **Python:** 3.11+
 
 **Primary interface:** SocketCAN, MIT force-control mode. A legacy UART serial implementation is still shipped but is not the active path.
 
