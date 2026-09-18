@@ -1,6 +1,6 @@
 [project]
 name = "motor_python"
-version = "0.1.0"
+version = "0.0.8"
 description = "CubeMars motor module for Aries exosuits."
 readme = "README.md"
 authors = [{ name = "Tsmorz", email = "tony.smoragiewicz@tum.de"},{ name = "Hannes Nguyen", email = "hannes.nguyen@tum.de" }]

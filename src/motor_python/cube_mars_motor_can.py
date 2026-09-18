@@ -562,13 +562,12 @@ class CubeMarsBaseCAN(BaseMotor):
         return False
 
     def set_velocity(self, velocity_erpm: int) -> None:
-        """Override velocity clamping to use the current motor profile limits.
-
-        Zero is a held-stop command and stays inside the control path; see
-        :meth:`BaseMotor.set_velocity`. Use :meth:`stop` to release the motor
-        and disable MIT mode.
-        """
+        """Override velocity clamping to use the current motor profile limits."""
         velocity_erpm_int = int(velocity_erpm)
+
+        if velocity_erpm_int == 0:
+            self.stop()
+            return
 
         velocity_erpm_clamped = int(
             np.clip(
