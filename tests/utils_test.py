@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
+from loguru import logger
 
 from motor_python.definitions import CURRENT_MOTOR_SPEC, LogLevel
 from motor_python.utils import (
@@ -22,6 +23,13 @@ def test_logger_init() -> None:
         log_dir_path = Path(log_dir)
         log_filepath = setup_logger(filename="log_file", log_dir=log_dir_path)
         assert Path(log_filepath).exists()
+        # Release the sink before the directory is torn down. setup_logger
+        # adds the file with enqueue=True, so loguru holds the handle open in
+        # a writer thread. On Windows a directory containing an open file
+        # cannot be deleted, so TemporaryDirectory raises WinError 32 on exit;
+        # POSIX unlink() tolerates an open file, which is why this only bites
+        # locally and never in the Linux CI.
+        logger.remove()
     assert not Path(log_filepath).exists()
 
 
