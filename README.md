@@ -135,10 +135,10 @@ from motor_python.cube_mars_motor import CubeMarsAK606v3
 | Method | Purpose |
 | --- | --- |
 | `set_position(position_degrees)` | MIT-backed position command |
-| `set_velocity(velocity_erpm, allow_low_speed=False)` | MIT-backed velocity command |
+| `set_velocity(velocity_erpm)` | MIT-backed velocity command. Zero releases the motor via `stop()` |
 | `set_current(current_amps)` | Interpreted as MIT torque feedforward |
 | `set_mit_mode(pos_rad, vel_rad_s, kp, kd, torque_ff_nm)` | Direct MIT command |
-| `stop()` | Neutral MIT command and disable |
+| `stop()` | Neutral MIT command, disable MIT mode, release the motor |
 
 ## Useful Bench Scripts
 
