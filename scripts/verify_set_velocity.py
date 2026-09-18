@@ -31,7 +31,7 @@ from motor_python.base_motor import MotorState, print_timing_stats
 from motor_python import create_can_motor
 from motor_python.can_utils import get_can_state, reset_can_interface
 from motor_python.cube_mars_motor_can import CubeMarsAK606v3CAN, CubeMarsAK806v2CAN, CubeMarsBaseCAN
-from motor_python.definitions import CAN_DEFAULTS, MotorModel
+from motor_python.definitions import CAN_DEFAULTS, MOTOR_SPECS, MotorModel
 from motor_python.utils import CsvStreamWriter
 
 SEPARATOR = "=" * 78
@@ -141,8 +141,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--velocity-kd",
         type=float,
-        default=CAN_DEFAULTS.mit_velocity_kd,
-        help=f"MIT velocity damping KD used by set_velocity() (default: {CAN_DEFAULTS.mit_velocity_kd})",
+        default=None,
+        help=(
+            "MIT velocity damping KD. Defaults to the profile value for "
+            "--motor-model (AK80-6 1.0, AK60-6 V3.0 1.2), which is what "
+            "set_velocity() uses in production; pass a value to override."
+        ),
     )
     parser.add_argument(
         "--phase-seconds",
@@ -227,7 +231,7 @@ def validate_args(args: argparse.Namespace) -> None:  # noqa: C901
         raise ValueError("--min-informative-samples must be >= 1")
     if args.max_missed_feedback < 1:
         raise ValueError("--max-missed-feedback must be >= 1")
-    if args.velocity_kd < 0:
+    if args.velocity_kd is not None and args.velocity_kd < 0:
         raise ValueError("--velocity-kd must be >= 0")
     if args.velocity_rad is None:
         velocity_cmd = int(args.velocity_erpm)
@@ -470,6 +474,18 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
     # because rad/s <-> ERPM conversion requires motor-specific params.
     velocity_cmd = int(args.velocity_erpm)
 
+    # Resolve the damping before anything is printed or commanded, so the
+    # header reports the gain that is actually used. Left unset this is the
+    # selected model's own profile value -- the one set_velocity() runs with
+    # in production -- rather than a bench-only constant, because verifying
+    # set_velocity() at a gain the library never picks would let a clean
+    # report coexist with different behaviour in the suit.
+    velocity_kd = (
+        args.velocity_kd
+        if args.velocity_kd is not None
+        else MOTOR_SPECS[str(args.motor_model)].mit_velocity_kd
+    )
+
     csv_path = _resolve_csv_path(args.csv_path, prefix="verify_set_velocity")
 
     print(SEPARATOR)
@@ -486,7 +502,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
     else:
         print(f"Velocity start : {int(args.velocity_erpm):+d} ERPM")
         print(f"Velocity range : [{VERIFY_VELOCITY_MIN_ERPM}, {VERIFY_VELOCITY_MAX_ERPM}] ERPM")
-    print(f"Velocity KD    : {args.velocity_kd:.3f}")
+    print(f"Velocity KD    : {velocity_kd:.3f}")
     print(f"Forward only   : {args.forward_only}")
     if args.velocity_rad is not None:
         seq_desc = "[+rad, neutral, -rad, neutral]" if not args.forward_only else "[+rad, neutral]"
@@ -519,7 +535,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
                 motor_can_id=args.motor_id,
                 interface=args.interface,
                 bitrate=args.bitrate,
-                mit_velocity_kd=args.velocity_kd,
+                mit_velocity_kd=velocity_kd,
                 helper_policy=args.helper_policy,
                 feedback_can_id=args.feedback_can_id,
         )
@@ -579,7 +595,7 @@ def main() -> int:  # noqa: C901, PLR0912, PLR0915
                 min_sign_match_ratio=args.min_sign_match_ratio,
                 min_informative_samples=args.min_informative_samples,
                 max_missed_feedback=args.max_missed_feedback,
-                kd=args.velocity_kd,
+                kd=velocity_kd,
                 run_start=run_start,
                 sample_logger=write_sample_row,
             )
