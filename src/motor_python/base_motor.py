@@ -247,16 +247,32 @@ class BaseMotor(abc.ABC):
     # ------------------------------------------------------------------
 
     def set_velocity(self, velocity_erpm: int) -> None:
-        """Set motor velocity in electrical RPM.
+        """Command a motor velocity in electrical RPM.
 
-        :param velocity_erpm: Target velocity in ERPM.  Negative = reverse.
+        Zero is a velocity like any other: it asks the motor to hold zero
+        speed and leaves the transport enabled. It is **not** a shutdown --
+        call :meth:`stop` for that.
+
+        This used to route zero to :meth:`stop`, which made an ordinary
+        command in a control loop do something very different from what it
+        said. On the CAN transport ``stop()`` tears MIT mode down behind more
+        than 60 ms of blocking settle time, so a controller whose output
+        crossed zero -- which any assistive controller does every stride --
+        would repeatedly disable and re-enable the motor and stall its own
+        loop by six ticks at 100 Hz each time. A caller that genuinely wants
+        the motor released now has to say so.
+
+        Note the difference this makes at zero. Commanding zero holds: the
+        controller actively regulates to no motion, and on the UART transport
+        that means decelerating through the low-speed zone that :meth:`stop`
+        exists to avoid. ``stop()`` releases instead -- it drops current and
+        lets the rotor coast. Pick the one you mean.
+
+        :param velocity_erpm: Target velocity in ERPM. Negative = reverse.
+            Zero commands a held stop.
+        :return: None
         """
         velocity_erpm_int = int(velocity_erpm)
-
-        # Velocity 0 means stop
-        if velocity_erpm_int == 0:
-            self.stop()
-            return
 
         # Clamp to protocol limits — subclass may further narrow the range.
         velocity_erpm = int(
@@ -271,9 +287,12 @@ class BaseMotor(abc.ABC):
                 f"Velocity {velocity_erpm_int} ERPM clamped to {velocity_erpm} ERPM"
             )
 
-        # Soft-start: pre-spin with current to avoid noisy low-speed zone
-        direction = 1 if velocity_erpm > 0 else -1
-        self._pre_velocity_hook(velocity_erpm, direction)
+        # Soft-start: pre-spin with current to avoid noisy low-speed zone.
+        # Only for motion -- a zero command has no direction to pre-spin
+        # toward, and `1 if v > 0 else -1` would read zero as reverse.
+        if velocity_erpm != 0:
+            direction = 1 if velocity_erpm > 0 else -1
+            self._pre_velocity_hook(velocity_erpm, direction)
 
         # Hand off to the transport layer
         self._send_velocity_command(velocity_erpm)
