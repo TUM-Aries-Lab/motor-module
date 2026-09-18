@@ -616,3 +616,80 @@ class TestMotorSpecResolution:
         # Used to raise AttributeError before the spec was resolved up front.
         with _connected(CubeMarsBaseCAN, motor_spec=None) as motor:
             assert motor._motor_spec is definitions.CURRENT_MOTOR_SPEC
+
+
+class TestGainDefaultsCannotProduceASilentZeroTorqueCommand:
+    """The MIT torque law is tau = t_ff + kp*pos_err + kd*vel_err.
+
+    Every gain defaulting to zero therefore means a frame the motor accepts
+    and answers normally while producing no torque at all. These tests pin the
+    defaults that keep an omitted gain from doing that.
+    """
+
+    def test_set_mit_mode_defaults_kd_to_a_nonzero_gain(self, motor):
+        """A velocity command with no explicit kd must still damp."""
+        with (
+            patch.object(motor, "pack_mit_frame") as pack,
+            patch.object(motor, "_send_mit_payload", return_value=True),
+            patch.object(motor, "_start_refresh"),
+            patch.object(motor, "enable_mit_mode"),
+        ):
+            motor.set_mit_mode(pos_rad=0.0, vel_rad_s=2.0)
+
+        kwargs = pack.call_args.kwargs
+        assert kwargs["kd"] == 1.0
+        assert kwargs["kd"] != 0.0
+
+    def test_omitting_kd_still_yields_a_torque_producing_command(self, motor):
+        """With the defaults, at least one term of the torque law survives."""
+        with (
+            patch.object(motor, "pack_mit_frame") as pack,
+            patch.object(motor, "_send_mit_payload", return_value=True),
+            patch.object(motor, "_start_refresh"),
+            patch.object(motor, "enable_mit_mode"),
+        ):
+            motor.set_mit_mode(pos_rad=0.0, vel_rad_s=2.0)
+
+        kwargs = pack.call_args.kwargs
+        velocity_error = kwargs["v_des"]
+        torque = (
+            kwargs["t_ff"]
+            + kwargs["kp"] * kwargs["p_des"]
+            + kwargs["kd"] * velocity_error
+        )
+        assert torque != 0.0
+
+    def test_pure_torque_callers_must_still_opt_out_explicitly(self, motor):
+        """set_current wants no damping and says so, rather than relying on a default."""
+        with patch.object(motor, "set_mit_mode") as mit:
+            motor.set_current(3.5)
+
+        assert mit.call_args.kwargs["kd"] == 0.0
+
+    def test_every_shipped_spec_carries_a_nonzero_velocity_gain(self):
+        """A spec with kd 0 would make set_velocity a no-op on that motor."""
+        for spec in (AK80_6_MOTOR_SPEC, AK60_6_V3_0_MOTOR_SPEC, AK60_6_V1_1_MOTOR_SPEC):
+            assert spec.mit_velocity_kd > 0.0, spec.model_name
+
+    def test_a_spec_that_omits_the_velocity_gain_lands_on_the_documented_value(self):
+        """The dataclass default is the project's documented Kd, not a motor's quirk.
+
+        motor_control.py commands MOTOR_KD_CMD = 1.0 and the V1.1 Simulink
+        model commands Kd = 1, so a forgotten field should inherit that rather
+        than AK60-6 V3.0's 1.2.
+        """
+        spec = definitions.MotorSpec(
+            model_name=MotorModel.AK80_6,
+            rated_voltage="48V",
+            pole_pairs=21,
+            gear_ratio=6,
+            rated_torque_nm=6.0,
+            peak_torque_nm=12.0,
+            rated_current_amps=9.7,
+            peak_current_amps=20.0,
+            max_output_speed_rpm=800,
+            max_velocity_electrical_rpm=100800,
+            min_velocity_electrical_rpm=-100800,
+        )
+
+        assert spec.mit_velocity_kd == 1.0
