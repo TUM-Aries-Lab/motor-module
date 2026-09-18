@@ -177,12 +177,7 @@ class MotorSpec:
     # on the test rig. TO BE CONFIRMED and adjusted if needed.
     mit_position_kp: float = 2.0
     mit_position_kd: float = 1.0
-    # 1.0 is the only value documented for this project: the V1.1 Simulink
-    # model commands Kd = 1 and motor_control.py uses MOTOR_KD_CMD = 1.0.
-    # Every shipped spec sets this field explicitly, so the default only
-    # governs a spec that forgets to -- and a forgotten Kd should land on the
-    # documented value rather than on AK60-6 V3.0's 1.2 by accident.
-    mit_velocity_kd: float = 1.0
+    mit_velocity_kd: float = 1.2
     mit_mode_limits: MITModeLimits = AK60_6_V3_0_MIT_LIMITS
 
 
