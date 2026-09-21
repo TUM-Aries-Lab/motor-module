@@ -62,10 +62,45 @@ def burst(motor, label, velocity_of):
     print(f"  distinct torques  : {len(torques)}  {sorted(torques)[:6]}")
 
 
+def issued_once(motor, label):
+    """Send the command once and let the keep-alive thread hold it.
+
+    The control case. Everything else matches the bursts, so if this turns the
+    shaft and they do not, the re-issue is the whole difference -- rather than
+    something about how this script constructs the motor or picks its gains.
+    """
+    p0, tq0 = read(motor)
+    motor.set_mit_mode(pos_rad=0.0, vel_rad_s=VEL, kp=0.0, kd=1.0, torque_ff_nm=0.0)
+    torques = set()
+    started = time.monotonic()
+    while time.monotonic() - started < SECONDS:
+        _, tq = read(motor)
+        if tq is not None:
+            torques.add(round(tq, 4))
+        time.sleep(1.0 / HZ)
+    p1, tq1 = read(motor)
+    moved = None if (p0 is None or p1 is None) else p1 - p0
+    print(f"
+{label}")
+    print("  calls sent        : 1")
+    print(
+        f"  position moved    : {moved:+.1f} deg"
+        if moved is not None
+        else "  position: unknown"
+    )
+    print(f"  torque start/end  : {tq0} -> {tq1}")
+    print(f"  distinct torques  : {len(torques)}  {sorted(torques)[:6]}")
+
+
 def main() -> None:
-    """Run both bursts against motor 0x04."""
+    """Run the control case and both bursts against motor 0x04."""
     motor = create_can_motor("AK80-6", motor_can_id=4)
     try:
+        motor.enable_mit_mode()
+        issued_once(motor, "C: issued ONCE, keep-alive holds it  <-- control")
+        motor.stop()
+        time.sleep(1.0)
+
         motor.enable_mit_mode()
         burst(motor, "A: re-issued every tick, CONSTANT value", lambda _: VEL)
         motor.stop()
