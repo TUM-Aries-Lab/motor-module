@@ -1282,10 +1282,17 @@ class CubeMarsBaseCAN(BaseMotor):
         return None
 
     def send_neutral_command(self) -> None:
-        """Return latest parsed motor telemetry.
+        """Send the enter-motor-mode frame.
 
-        Per CubeMars manual AK80-6 (Page 41): re-sending the enter MIT command
-        returns current state in a stateless manner.
+        The name and the docstring this replaced were both wrong -- it was
+        described as returning telemetry, copied from get_status(). What it
+        sends is FF..FC, the MIT enter-motor-mode helper, which is why calling
+        it was the difference between a motor that produced torque and one
+        that accepted every command and produced none.
+
+        Nothing here is neutral. Prefer enable_mit_mode(), which sends the
+        same frame and reports whether the motor answered; this remains for
+        callers that want the frame alone.
         """
         if not self.connected:
             return
@@ -1412,13 +1419,13 @@ class CubeMarsBaseCAN(BaseMotor):
 
         self._mit_enabled = False
         neutral = self._mit_neutral_payload()
-        feedback_before = self._last_feedback_monotonic
-        sent = self._send_mit_payload(neutral, capture_response=True)
-        if sent and self._last_feedback_monotonic > feedback_before:
-            self._mit_enabled = True
-            logger.info("MIT mode ready via direct MIT command handshake")
-            return
 
+        # The helper frame is what actually enters motor mode. It is sent
+        # first, not as a fallback, because fresh feedback cannot tell an
+        # enabled motor from a disabled one: the motor answers an MIT-format
+        # frame either way. Concluding from that alone reported success
+        # against a motor that then produced no torque -- commands accepted,
+        # position and speed reported, torque frozen at one value.
         helper_frames: list[tuple[str, bytes]] = []
         if self._helper_policy in {"fcfd", "legacy"}:
             helper_frames.append(("FF..FC", self._CAN_HELPER_ENABLE))
@@ -1427,10 +1434,14 @@ class CubeMarsBaseCAN(BaseMotor):
 
         for label, frame in helper_frames:
             logger.debug(f"Attempting MIT handshake with helper frame {label}")
+            # No response captured: the helper is a fire-and-forget command
+            # and proves nothing by replying. The MIT payload below is what
+            # the enable is verified against, so demanding a reply here would
+            # only add a second thing to go wrong.
             helper_sent = self._send_raw(
                 arbitration_id=self.motor_can_id,
                 data=frame,
-                capture_response=True,
+                capture_response=False,
             )
             if not helper_sent:
                 continue
@@ -1441,6 +1452,22 @@ class CubeMarsBaseCAN(BaseMotor):
                 self._mit_enabled = True
                 logger.info(f"MIT mode ready after helper frame {label}")
                 return
+
+        # No helper frame is available under the strict policy, and under the
+        # others none got through. Falling back to the direct handshake keeps
+        # those callers working, but it proves only that the motor is
+        # answering -- so say so rather than logging readiness.
+        feedback_before = self._last_feedback_monotonic
+        sent = self._send_mit_payload(neutral, capture_response=True)
+        if sent and self._last_feedback_monotonic > feedback_before:
+            self._mit_enabled = True
+            logger.warning(
+                "MIT mode assumed ready from a direct command handshake: the "
+                "motor is answering, but nothing confirms it entered motor "
+                "mode, and a disabled motor answers identically. Expect "
+                "commands to be accepted and produce no torque if it did not."
+            )
+            return
 
         can_state = self._read_can_state(force=True)
         raise RuntimeError(

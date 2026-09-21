@@ -177,13 +177,30 @@ class TestInit:
 
 
 class TestMITEnableDisable:
-    def test_enable_mit_mode_handshakes_via_mit_id(self, motor, mock_bus):
+    def test_enable_mit_mode_sends_the_enable_frame_then_verifies(
+        self, motor, mock_bus
+    ):
+        """Both frames, and the enable one first.
+
+        This asserted that the FIRST frame carried the MIT id, which described
+        the behaviour rather than the requirement: replying to an MIT-format
+        frame does not mean a motor entered motor mode, because a disabled one
+        replies identically. Enabling is the FF..FC helper; the MIT payload is
+        only how the reply is checked afterwards.
+        """
         mock_bus.recv.return_value = _make_feedback_msg()
         motor.enable_mit_mode()
-        first = mock_bus.send.call_args_list[0][0][0]
-        assert (
-            first.arbitration_id == (CANControlMode.MIT_MODE << 8) | motor.motor_can_id
+
+        sent = [call[0][0] for call in mock_bus.send.call_args_list]
+        mit_id = (CANControlMode.MIT_MODE << 8) | motor.motor_can_id
+        enable_at = next(
+            i
+            for i, m in enumerate(sent)
+            if bytes(m.data) == CubeMarsBaseCAN._CAN_HELPER_ENABLE
         )
+        verify_at = next(i for i, m in enumerate(sent) if m.arbitration_id == mit_id)
+
+        assert enable_at < verify_at
         assert motor._mit_enabled is True
 
     def test_disable_mit_mode_sends_ff_fd(self, motor, mock_bus):
@@ -193,12 +210,13 @@ class TestMITEnableDisable:
         assert list(sent.data) == [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD]
 
     def test_enable_motor_is_alias_for_mit_enable(self, motor, mock_bus):
+        """The alias must do the enabling, not just the verifying."""
         mock_bus.recv.return_value = _make_feedback_msg()
         motor.enable_motor()
-        first = mock_bus.send.call_args_list[0][0][0]
-        assert (
-            first.arbitration_id == (CANControlMode.MIT_MODE << 8) | motor.motor_can_id
-        )
+
+        sent = [bytes(call[0][0].data) for call in mock_bus.send.call_args_list]
+        assert CubeMarsBaseCAN._CAN_HELPER_ENABLE in sent
+        assert motor._mit_enabled is True
 
 
 class TestTransportRecovery:
@@ -690,3 +708,64 @@ class TestAVelocityWithNoDampingIsReported:
             motor.set_velocity(velocity_erpm=6000)
 
         assert "no torque" not in "".join(messages)
+
+
+class TestEnableMitModeActuallyEnables:
+    """Fresh feedback does not prove a motor entered motor mode.
+
+    The motor answers an MIT-format frame whether or not it is enabled, so
+    concluding from a reply alone reported success against a disabled motor.
+    It then accepted every command, reported live position and speed, and
+    produced no torque at all -- the torque field frozen at a single value
+    while the commanded velocity ramped. Only the FF..FC helper frame enters
+    motor mode, and it has to be sent, not kept as a fallback.
+    """
+
+    @contextmanager
+    def _answering_motor(self, motor):
+        """Make every send succeed and look like it drew fresh feedback."""
+
+        def _answer(*_args, **_kwargs):
+            motor._last_feedback_monotonic += 1.0
+            return True
+
+        with (
+            patch.object(motor, "_send_raw", side_effect=_answer) as raw,
+            patch.object(motor, "_send_mit_payload", side_effect=_answer),
+            patch.object(motor, "_recover_bus_if_needed", return_value=True),
+            patch.object(
+                motor,
+                "_read_can_state",
+                return_value={"state": "ERROR-ACTIVE", "tx_err": 0, "rx_err": 0},
+            ),
+        ):
+            yield raw
+
+    def test_the_enable_frame_is_sent(self, motor):
+        """The frame that enters motor mode must actually go out."""
+        with self._answering_motor(motor) as raw:
+            motor.enable_mit_mode()
+
+        sent = [c.kwargs.get("data") for c in raw.call_args_list]
+        assert CubeMarsBaseCAN._CAN_HELPER_ENABLE in sent
+        assert motor._mit_enabled
+
+    def test_a_replying_motor_alone_is_not_taken_as_enabled(self, motor):
+        """An answering motor must not satisfy the enable on its own.
+
+        This is the regression. Previously a reply to the neutral payload
+        returned success before any helper frame was sent.
+        """
+        with self._answering_motor(motor) as raw:
+            motor.enable_mit_mode()
+
+        assert raw.called, "returned without sending the enable frame"
+
+    def test_a_strict_motor_says_its_enable_is_unverified(self, motor, caplog):
+        """With no helper frame available, say so rather than claim readiness."""
+        motor._helper_policy = "strict"
+        with self._answering_motor(motor), _captured_warnings() as messages:
+            motor.enable_mit_mode()
+
+        assert motor._mit_enabled
+        assert "assumed ready" in "".join(messages)
