@@ -1,9 +1,25 @@
-"""CAN Network Utilities for Linux (Jetson)."""
+"""CAN Network Utilities for Linux (Jetson).
 
+Three operations on the interface, in increasing order of violence:
+
+* :func:`get_can_state` reads the controller's error state and counters;
+* :func:`ensure_can_interface` raises the link if it is down, and leaves it
+  strictly alone if it is already up at the right bitrate;
+* :func:`reset_can_interface` reloads the kernel module, which is the only
+  thing that clears latched error counters on the Orin's mttcan controller.
+
+Reach for the lightest one that answers the problem. Reconfiguring a working
+bus is not free: taking the link down and up resets the controller and can
+drop a motor into BUS-OFF.
+"""
+
+import shutil
 import subprocess
 import time
 
 from loguru import logger
+
+from motor_python.definitions import CAN_DEFAULTS
 
 
 def get_can_state(interface: str = "can0") -> dict:
@@ -86,3 +102,174 @@ def reset_can_interface(interface: str = "can0", bitrate: int = 1000000) -> bool
     except subprocess.CalledProcessError as e:
         logger.error(f"Failed to reset CAN interface: {e}")
         return False
+
+
+def _run(command: list[str], timeout: float) -> subprocess.CompletedProcess | None:
+    """Run a command, returning None if it could not be run at all.
+
+    :param command: Argument vector.
+    :param timeout: Seconds to wait before giving up.
+    :return: The finished process, or None if it could not run.
+    """
+    try:
+        # check=False: a non-zero exit is information here, not an exception.
+        # The caller reads returncode and reports it with the interface's name.
+        return subprocess.run(
+            command, capture_output=True, text=True, timeout=timeout, check=False
+        )
+    except (OSError, subprocess.SubprocessError) as err:
+        logger.debug(f"Could not run {' '.join(command)}: '{err}'.")
+        return None
+
+
+def read_can_interface(
+    interface: str = CAN_DEFAULTS.interface,
+) -> tuple[bool, bool, int | None]:
+    """Report what the kernel currently thinks of a CAN interface.
+
+    :param interface: CAN interface name (e.g. 'can0').
+    :return: ``(exists, is_up, bitrate)``; bitrate is None when unreadable.
+    :rtype: tuple[bool, bool, int | None]
+    """
+    result = _run(
+        ["ip", "-details", "link", "show", interface],
+        CAN_DEFAULTS.can_command_timeout_s,
+    )
+    if result is None or result.returncode != 0:
+        return False, False, None
+
+    output = result.stdout
+    # The flags live in angle brackets on the first line. "UP" also appears in
+    # "state UP" further along, but the flag is the authoritative one -- an
+    # interface can carry the UP flag while its state reads UNKNOWN, which is
+    # normal for CAN.
+    first_line = output.splitlines()[0] if output else ""
+    is_up = "UP" in first_line.split("<")[-1].split(">")[0].split(",")
+
+    bitrate = None
+    fields = output.split()
+    if "bitrate" in fields:
+        try:
+            bitrate = int(fields[fields.index("bitrate") + 1])
+        except (IndexError, ValueError):
+            bitrate = None
+    return True, is_up, bitrate
+
+
+def ensure_can_interface(
+    interface: str = CAN_DEFAULTS.interface,
+    bitrate: int = CAN_DEFAULTS.bitrate,
+) -> bool:
+    """Make sure a CAN interface is up at the given bitrate, raising it if not.
+
+    Callers otherwise have to remember ``sudo ./setup_can.sh`` after every power
+    cycle, and forgetting it presents as a motor that will not answer -- which
+    sends you to the wiring for a fault that is one command away.
+
+    **Idempotent**: an interface already up at the right bitrate is left
+    untouched. That is the point of the check rather than a shortcut through
+    it, because bringing a working link down and up resets the controller and
+    can drop a motor into BUS-OFF.
+
+    This does not reload the ``mttcan`` module; see
+    :func:`reset_can_interface` for that, which is the right tool once error
+    counters have latched and the wrong one to use unasked at startup.
+
+    :param interface: CAN interface name (e.g. 'can0').
+    :param bitrate: Desired bitrate in bits/sec.
+    :return: True if the interface is usable afterwards.
+    :rtype: bool
+    """
+    if shutil.which("ip") is None:
+        logger.debug(
+            "No 'ip' command, so this is not a Linux host. Skipping CAN setup."
+        )
+        return False
+
+    exists, is_up, current_bitrate = read_can_interface(interface)
+    if not exists:
+        logger.error(
+            f"No CAN interface '{interface}'. The mttcan kernel module is "
+            f"probably not loaded; run setup_can.sh once, which modprobes it."
+        )
+        return False
+
+    if is_up and current_bitrate == bitrate:
+        logger.info(
+            f"CAN interface '{interface}' is already up at {bitrate} bps. "
+            f"Leaving it alone."
+        )
+        return True
+
+    reason = "down" if not is_up else f"at {current_bitrate} bps rather than {bitrate}"
+    logger.warning(f"CAN interface '{interface}' is {reason}. Bringing it up.")
+    return _bring_up_can_interface(interface, bitrate)
+
+
+def _bring_up_can_interface(interface: str, bitrate: int) -> bool:
+    """Configure and raise the interface.
+
+    ``sudo -n`` throughout: a control process must not stop at a password
+    prompt, so a host without passwordless sudo fails immediately and says so
+    rather than hanging until something times out.
+
+    :param interface: CAN interface name.
+    :param bitrate: Desired bitrate in bits/sec.
+    :return: True if the interface came up at the requested bitrate.
+    :rtype: bool
+    """
+    timeout = CAN_DEFAULTS.can_command_timeout_s
+    commands = [
+        # Down first: "up type can bitrate ..." is rejected on an interface that
+        # is already up, which is the case when only the bitrate is wrong.
+        ["sudo", "-n", "ip", "link", "set", interface, "down"],
+        [
+            "sudo",
+            "-n",
+            "ip",
+            "link",
+            "set",
+            interface,
+            "up",
+            "type",
+            "can",
+            "bitrate",
+            str(bitrate),
+            "berr-reporting",
+            "on",
+            "restart-ms",
+            str(CAN_DEFAULTS.can_restart_ms),
+        ],
+        [
+            "sudo",
+            "-n",
+            "ip",
+            "link",
+            "set",
+            interface,
+            "txqueuelen",
+            str(CAN_DEFAULTS.can_tx_queue_length),
+        ],
+    ]
+
+    for command in commands:
+        result = _run(command, timeout)
+        if result is None or result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip() if result else "not run"
+            logger.error(
+                f"Could not bring up '{interface}': '{detail}'. Run "
+                f"scripts/allow_can_bringup_without_password.sh once to fix this "
+                f"permanently, or setup_can.sh with sudo for just this boot."
+            )
+            return False
+
+    _, is_up, current_bitrate = read_can_interface(interface)
+    if not (is_up and current_bitrate == bitrate):
+        logger.error(
+            f"'{interface}' did not come up as asked: up={is_up}, "
+            f"bitrate={current_bitrate}."
+        )
+        return False
+
+    logger.success(f"CAN interface '{interface}' up at {bitrate} bps.")
+    return True

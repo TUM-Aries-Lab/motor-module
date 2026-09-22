@@ -98,6 +98,18 @@ class CANDefaults:
     retry_backoff: float = 0.01  # Base backoff time for retries (seconds)
     can_reset_pause: float = 0.1  # Small Pause after CAN bus reset (seconds)
 
+    # Link settings used when raising the interface, matching setup_can.sh.
+    # berr-reporting and restart-ms are what let the controller restart itself
+    # out of BUS-OFF -- a single unacknowledged frame is enough to cause it, and
+    # without these the interface goes permanently silent instead of recovering.
+    can_restart_ms: int = 100
+    # The kernel default of 10 is too shallow for a 100 Hz control loop driving
+    # two motors.
+    can_tx_queue_length: int = 1000
+    # Per `ip` invocation. Generous for a command that returns immediately, and
+    # short enough that a host which cannot run it does not stall startup.
+    can_command_timeout_s: float = 5.0
+
 
 @dataclass(frozen=True)
 class MITModeLimits:
